@@ -22,6 +22,13 @@
 
 namespace Web::DOM {
 
+// A container that has left the document since its box was committed has no navigable to size.
+static HTML::LocalNavigable* local_content_navigable(Painting::BoxSlot const& navigable_container_viewport)
+{
+    auto* container = as_if<HTML::NavigableContainer>(navigable_container_viewport.dom_node().ptr());
+    return container ? as_if<HTML::LocalNavigable>(container->content_navigable().ptr()) : nullptr;
+}
+
 void CommitMessages::note_box_presence(NodeIdentity identity, bool has_layout_box, bool has_committed_box)
 {
     // OPTIMIZATION: With nothing queued ahead of it, the message would be applied the moment it is
@@ -157,6 +164,12 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
         : NodeIdentity::of_style_node(CSS::StyleNodeID { message.style_node });
     switch (message.kind) {
     case Layout::RustFFI::FfiCommitMessageKind::NavigableContainerViewportCommitted:
+        // A viewport the container's content navigable already has would change nothing where it is applied. Left
+        // queued, it would have every read in the documents the container embeds bring this document up to date.
+        if (auto box = Painting::BoxSlot::bound_to(m_document, identity)) {
+            if (auto* content_navigable = local_content_navigable(box); content_navigable && content_navigable->viewport_size() == Painting::content_size(box))
+                return;
+        }
         m_messages.append(Message { .identity = identity, .kind = Kind::NavigableContainerViewportCommitted, .pseudo_element = {}, .custom_property_name = {} });
         return;
     case Layout::RustFFI::FfiCommitMessageKind::UnexpectedFragmentedInline:
@@ -281,7 +294,7 @@ void CommitMessages::apply(Message const& message)
         // A navigable another process hosts learns its viewport from the UI process, which the container tells of
         // the viewport's rect when its document is painted.
         if (auto box = Painting::BoxSlot::bound_to(m_document, message.identity)) {
-            if (auto* content_navigable = as_if<HTML::LocalNavigable>(as<HTML::NavigableContainer>(*box.dom_node()).content_navigable().ptr()))
+            if (auto* content_navigable = local_content_navigable(box))
                 content_navigable->set_viewport_size(Painting::content_size(box));
         }
         return;
