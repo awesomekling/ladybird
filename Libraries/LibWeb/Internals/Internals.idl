@@ -220,6 +220,9 @@ interface Internals {
     // What the render clock did with them: ticksPosted, ticksFolded, ticksRun, ticksInstalled, ticksNeedingMain and
     // why it dropped the others.
     object getRenderClockCounters();
+    // The border box of element's principal box in what the render side committed and presented last, read from the
+    // render owner without a layout update and without taking anything in.
+    DOMRect? presentedBorderBox(Element element);
     // How many animation lists of an element published their timing rows to the style engine (listsPublished), and how
     // many were built the same as they were last published and published nothing (listsUnchanged).
     object getAnimationTimingRowCounters();

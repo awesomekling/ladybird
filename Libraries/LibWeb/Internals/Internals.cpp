@@ -1591,6 +1591,15 @@ bool Internals::render_clock_ticks(DOM::Document const& document) const
     return HTML::main_thread_event_loop().frame_scheduler().render_clock_ticks(document);
 }
 
+GC::Ptr<Geometry::DOMRect> Internals::presented_border_box(DOM::Element const& element) const
+{
+    auto answer = Layout::RustFFI::render_owner_committed_border_box(element.document().render_document_id(), element.style_node_id().value());
+    if (!answer.has_box)
+        return nullptr;
+    CSSPixelRect rect = answer.rect;
+    return Geometry::DOMRect::create(rect.x().to_double(), rect.y().to_double(), rect.width().to_double(), rect.height().to_double());
+}
+
 void Internals::set_render_clock_suspended(bool suspended)
 {
     HTML::main_thread_event_loop().frame_scheduler().set_render_clock_suspended(suspended);

@@ -1205,6 +1205,20 @@ pub(crate) fn ask_owner(document: DocumentId, query: Query) -> Answer {
     Answer::of_outcome(query, answer)
 }
 
+/// The border box of the principal box of the element with `style_node` in `document` as its render state committed
+/// it last, which is what the owner laid out and presented: read without a layout update, for tests.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_owner_committed_border_box(document: DocumentId, style_node: u32) -> FfiGeometryReadAnswer {
+    let Some(node) = StyleNodeID::from_raw(style_node).filter(|_| document.is_valid()) else {
+        return FfiGeometryReadAnswer::default();
+    };
+    let kind = FfiGeometryReadKind::BorderBox;
+    match ask_owner(document, Query::Geometry { node, kind }) {
+        Answer::Geometry(answer) => answer,
+        _ => FfiGeometryReadAnswer::default(),
+    }
+}
+
 /// The counts of the layout arena of `document`, which the owner answers, for tests.
 #[unsafe(no_mangle)]
 pub extern "C" fn render_owner_arena_counts(document: DocumentId) -> FfiArenaCounts {
