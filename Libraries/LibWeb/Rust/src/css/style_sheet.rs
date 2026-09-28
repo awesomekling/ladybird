@@ -548,7 +548,6 @@ pub unsafe extern "C" fn rust_style_sheet_publish_conditions(
     });
     crate::css::style::owner_calls::send(
         engine,
-        "rust_style_sheet_publish_conditions",
         crate::css::style::owner_calls::EngineChange::RuleConditionsHold(conditions),
     );
 }
@@ -635,7 +634,6 @@ pub unsafe extern "C" fn rust_style_sheet_publish_layer_order(
         unsafe { prepare(context) };
         crate::css::style::owner_calls::send(
             input_engine,
-            "rust_style_sheet_publish_layer_order",
             crate::css::style::owner_calls::EngineChange::LayerOrder {
                 tree_scope,
                 names: names.clone(),

@@ -1695,7 +1695,6 @@ pub unsafe extern "C" fn style_engine_publish_font_face_snapshot(
     // The change holds references of its own, taken here: both are counted atomically.
     crate::css::style::owner_calls::send(
         engine,
-        "style_engine_publish_font_face_snapshot",
         crate::css::style::owner_calls::EngineChange::PublishFontFaceSnapshot {
             // SAFETY: Guaranteed by the caller.
             snapshot: unsafe { super::font_faces::retained(snapshot) },
@@ -1729,7 +1728,6 @@ pub(crate) fn owner_publish_font_face_snapshot(
 pub unsafe extern "C" fn style_engine_prepare_root_font_resolution(engine: StyleEngineInputHandle, generation: u64) {
     crate::css::style::owner_calls::send(
         engine,
-        "style_engine_prepare_root_font_resolution",
         crate::css::style::owner_calls::EngineChange::PrepareRootFontResolution { generation },
     );
 }
@@ -1838,7 +1836,6 @@ pub unsafe extern "C" fn style_engine_set_tree_scope_animation_keyframes(
     };
     crate::css::style::owner_calls::send(
         engine,
-        "style_engine_set_tree_scope_animation_keyframes",
         crate::css::style::owner_calls::EngineChange::SetTreeScopeAnimationKeyframes {
             tree_scope: TreeScopeID(tree_scope),
             shadow_root_identity,
@@ -1966,7 +1963,6 @@ pub unsafe extern "C" fn style_engine_set_element_animation_effect_descriptions(
     };
     crate::css::style::owner_calls::send(
         engine,
-        "style_engine_set_element_animation_effect_descriptions",
         crate::css::style::owner_calls::EngineChange::SetElementAnimationEffectDescriptions { node, slot, effects },
     );
 }
@@ -2061,7 +2057,6 @@ pub unsafe extern "C" fn style_engine_set_element_transitions(
     };
     crate::css::style::owner_calls::send(
         engine,
-        "style_engine_set_element_transitions",
         crate::css::style::owner_calls::EngineChange::SetElementTransitions {
             node,
             slot,
@@ -2117,27 +2112,24 @@ pub unsafe extern "C" fn style_engine_take_transition_step_decided_in_pass(
     engine: StyleEngineInputHandle,
     node: u32,
 ) -> FfiTransitionStepDecidedInPass {
-    take_transition_step(engine, "style_engine_take_transition_step_decided_in_pass", node, None)
+    take_transition_step(engine, node, None)
 }
 
 /// Takes the transition step the pass decided for an element's row, or for its synthetic pseudo-element of
 /// `pseudo_kind`, from the engine's home, and tells the engine the host took it.
 fn take_transition_step(
     engine: StyleEngineInputHandle,
-    entry: &'static str,
     node: u32,
     pseudo_kind: Option<u8>,
 ) -> FfiTransitionStepDecidedInPass {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return FfiTransitionStepDecidedInPass::absent();
     };
-    engine.home().bring_home(entry);
     // SAFETY: On the main thread.
     let step = unsafe { engine.home().answers() }.take_transition_step(node, pseudo_kind);
     if step.present {
         crate::css::style::owner_calls::send(
             engine,
-            entry,
             crate::css::style::owner_calls::EngineChange::TransitionStepTakenByHost { node, pseudo_kind },
         );
     }
@@ -2156,12 +2148,7 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_transition_step_decide
     node: u32,
     pseudo_kind: u8,
 ) -> FfiTransitionStepDecidedInPass {
-    take_transition_step(
-        engine,
-        "style_engine_take_pseudo_element_transition_step_decided_in_pass",
-        node,
-        Some(pseudo_kind),
-    )
+    take_transition_step(engine, node, Some(pseudo_kind))
 }
 
 /// The transform reference box the last committed layout left for `node`, which the animation
@@ -2297,7 +2284,6 @@ pub struct FfiPendingFacts {
 /// `engine` must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_pending_facts(engine: StyleEngineHandle) -> FfiPendingFacts {
-    engine.bring_home("style_engine_pending_facts");
     let facts = engine.pending_facts();
     FfiPendingFacts {
         transaction: facts.contains(PendingFacts::TRANSACTION),
@@ -2316,8 +2302,7 @@ pub unsafe extern "C" fn style_engine_pending_facts(engine: StyleEngineHandle) -
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_has_deferred_element_style_input(engine: StyleEngineHandle, node: u32) -> bool {
     const ENTRY: &str = "style_engine_has_deferred_element_style_input";
-    engine.bring_home(ENTRY);
-    // SAFETY: The engine is home.
+    // SAFETY: On the main thread.
     if let Some(owes) = StyleNodeID::from_raw(node).map_or(Some(false), |node| {
         unsafe { engine.answers() }.deferred_inputs.owes(node)
     }) {
@@ -2347,7 +2332,6 @@ pub unsafe extern "C" fn style_engine_apply_transaction(
     let grant = StyleNodeGrant::of(transaction);
     // SAFETY: Guaranteed by the caller.
     let input = unsafe { InputForPass::take_from(transaction) };
-    handle.bring_home("style_engine_apply_transaction");
     engine.send(StyleChange::Inputs(input));
     if !grant.is_empty() {
         crate::css::style::owner_calls::ask(
@@ -4149,9 +4133,7 @@ pub unsafe extern "C" fn style_engine_take_row_sampled_in_pass(
     engine: StyleEngineInputHandle,
     node: u32,
 ) -> FfiRowSampledInPass {
-    const ENTRY: &str = "style_engine_take_row_sampled_in_pass";
-    engine.home().bring_home(ENTRY);
-    // SAFETY: The engine is home.
+    // SAFETY: On the main thread.
     let taken = StyleNodeID::from_raw(node)
         .and_then(|node| Some((node, unsafe { engine.home().answers() }.take_row_sampled(node)?)));
     let Some((node, sampled)) = taken else {
@@ -4159,7 +4141,6 @@ pub unsafe extern "C" fn style_engine_take_row_sampled_in_pass(
     };
     crate::css::style::owner_calls::send(
         engine,
-        ENTRY,
         crate::css::style::owner_calls::EngineChange::RowSampledTakenByHost(node),
     );
     sampled
@@ -5394,7 +5375,6 @@ pub unsafe extern "C" fn style_engine_take_settled_animation_definitions(
         false => answers.animation_plans.remove(&(node, pseudo_kind)).inspect(|_| {
             crate::css::style::owner_calls::send(
                 engine,
-                ENTRY,
                 crate::css::style::owner_calls::EngineChange::AnimationPlanTakenByHost { node, pseudo_kind },
             );
         }),
@@ -5486,8 +5466,7 @@ pub unsafe extern "C" fn style_engine_publish_style_record(
     engine: StyleEngineHandle,
     style_record: u64,
 ) -> *const c_void {
-    engine.bring_home("style_engine_publish_style_record");
-    // SAFETY: No stage holds the engine.
+    // SAFETY: On the main thread.
     if let Some(record) = unsafe { engine.answers() }.record(style_record) {
         return super::published_record::into_handle(record);
     }
@@ -6025,11 +6004,9 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_environment_named_in_s
     node: u32,
     pseudo_kind: u8,
 ) -> bool {
-    const ENTRY: &str = "style_engine_take_pseudo_element_environment_named_in_settle";
     let Some(node) = StyleNodeID::from_raw(node) else {
         return false;
     };
-    engine.home().bring_home(ENTRY);
     // SAFETY: On the main thread.
     let Some(taken) = unsafe { engine.home().answers() }
         .environments
@@ -6039,7 +6016,6 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_environment_named_in_s
     };
     crate::css::style::owner_calls::send(
         engine,
-        ENTRY,
         crate::css::style::owner_calls::EngineChange::PseudoElementEnvironmentTakenByHost { node, pseudo_kind },
     );
     taken.is_some()
@@ -6221,13 +6197,10 @@ pub unsafe extern "C" fn style_engine_add_sheet(
     object: u32,
     origin: FfiCascadeOrigin,
 ) -> u32 {
-    const ENTRY: &str = "style_engine_add_sheet";
-    engine.home().bring_home(ENTRY);
-    // SAFETY: The engine is home.
+    // SAFETY: On the main thread.
     let sheet = unsafe { engine.home().answers() }.add_sheet();
     crate::css::style::owner_calls::send(
         engine,
-        ENTRY,
         crate::css::style::owner_calls::EngineChange::AddSheet {
             object: StyleSheetObjectID(object),
             origin: origin.decode(),
@@ -6296,7 +6269,6 @@ pub unsafe extern "C" fn style_engine_attribute_value_text_readers(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_native_rule_id(engine: StyleEngineHandle, identity: u64) -> u32 {
     const ENTRY: &str = "style_engine_native_rule_id";
-    engine.bring_home(ENTRY);
     // SAFETY: On the main thread.
     match unsafe { engine.answers() }.rules.get(&identity) {
         None => 0,
@@ -6324,7 +6296,6 @@ pub unsafe extern "C" fn style_engine_native_rule_declarations_changed(
     context: *mut c_void,
     notify: unsafe extern "C" fn(*mut c_void),
 ) -> bool {
-    const ENTRY: &str = "style_engine_native_rule_declarations_changed";
     let (identity, declarations) = {
         let rule = unsafe { &*rule.cast::<crate::css::rule::NativeRule>() };
         let Some(identity) = rule.declaration_owner_identity() else {
@@ -6332,7 +6303,6 @@ pub unsafe extern "C" fn style_engine_native_rule_declarations_changed(
         };
         (identity, rule.cascade_declarations())
     };
-    engine.home().bring_home(ENTRY);
     // SAFETY: On the main thread.
     let holds = unsafe { engine.home().answers() }.holds_rule(identity);
     let declares_transitions = declarations.as_ref().is_some_and(|declarations| {
@@ -6343,7 +6313,6 @@ pub unsafe extern "C" fn style_engine_native_rule_declarations_changed(
     // The owner publishes the declarations where the engine holds the rule, before anything reads the engine again.
     crate::css::style::owner_calls::send(
         engine,
-        ENTRY,
         crate::css::style::owner_calls::EngineChange::RuleDeclarationsChanged { identity, declarations },
     );
     if !holds {
@@ -6387,7 +6356,6 @@ pub unsafe extern "C" fn style_engine_native_rule_successor(
     sheet: *const c_void,
     identity: u64,
 ) -> u64 {
-    engine.bring_home("style_engine_native_rule_successor");
     // SAFETY: On the main thread.
     let answers = unsafe { engine.answers() };
     // SAFETY: Guaranteed by the caller.
@@ -6429,7 +6397,6 @@ pub unsafe extern "C" fn style_engine_remove_native_rule(
     // scopes derive from the rules, and republish the layer order.
     crate::css::style::owner_calls::send(
         engine,
-        "style_engine_remove_native_rule",
         crate::css::style::owner_calls::EngineChange::RemoveNativeRules(
             removed
                 .iter()
@@ -6534,9 +6501,7 @@ pub unsafe extern "C" fn style_engine_take_container_effects(
     engine: StyleEngineInputHandle,
     node: u32,
 ) -> FfiNativeContainerMatchResult {
-    const ENTRY: &str = "style_engine_take_container_effects";
-    engine.home().bring_home(ENTRY);
-    // SAFETY: The engine is home.
+    // SAFETY: On the main thread.
     let taken = StyleNodeID::from_raw(node)
         .and_then(|node| Some((node, unsafe { engine.home().answers() }.take_container_effects(node)?)));
     let Some((node, verdict)) = taken else {
@@ -6545,7 +6510,6 @@ pub unsafe extern "C" fn style_engine_take_container_effects(
     // The engine records what the effects read of its containers as it takes them too.
     crate::css::style::owner_calls::send(
         engine,
-        ENTRY,
         crate::css::style::owner_calls::EngineChange::ContainerEffectsTakenByHost(node),
     );
     let effects = (!verdict.effects.is_empty()).then(|| {
@@ -6571,7 +6535,6 @@ pub unsafe extern "C" fn style_engine_take_container_effects(
 pub unsafe extern "C" fn style_engine_discard_container_effects(engine: StyleEngineInputHandle, node: u32) {
     crate::css::style::owner_calls::send(
         engine,
-        "style_engine_discard_container_effects",
         crate::css::style::owner_calls::EngineChange::DiscardContainerEffects { node },
     );
     if let Some(node) = StyleNodeID::from_raw(node) {
@@ -6605,16 +6568,13 @@ pub unsafe extern "C" fn style_engine_register_anchor_names(
     style_record: u64,
     has_names: bool,
 ) -> u8 {
-    const ENTRY: &str = "style_engine_register_anchor_names";
     let Some(node) = StyleNodeID::from_raw(node) else {
         return 0;
     };
-    engine.home().bring_home(ENTRY);
     // SAFETY: On the main thread.
     let had_names = unsafe { engine.home().answers() }.has_anchor_names(node);
     crate::css::style::owner_calls::send(
         engine,
-        ENTRY,
         crate::css::style::owner_calls::EngineChange::RegisterAnchorNames {
             node,
             style_record,
@@ -7023,9 +6983,8 @@ pub unsafe extern "C" fn style_engine_content_counter_styles_changed(
     pseudo_kind: u8,
     style_record: u64,
 ) -> u8 {
-    engine.home().bring_home("style_engine_content_counter_styles_changed");
     let verdict = StyleNodeID::from_raw(node).and_then(|node| {
-        // SAFETY: The engine is home.
+        // SAFETY: On the main thread.
         unsafe { engine.home().answers() }.content_counter_style_verdict(node, pseudo_kind, style_record)
     });
     debug_assert!(
@@ -7230,6 +7189,16 @@ pub(crate) unsafe fn owner_prepare_style_pass(
     // It takes along the times the host published for this update as well, which it samples at.
     let timeline_samples = engine.animation_timeline_samples().clone();
     Box::new((snapshot, timeline_samples))
+}
+
+/// The drain of the style pass `engine` was lent to has ended: what the main thread sent the engine beside the pass
+/// goes to whoever reaches the engine next, behind what the drain sent.
+///
+/// # Safety
+/// `engine` must be a live style engine, on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_release_changes_sent_beside_pass(engine: StyleEngineInputHandle) {
+    engine.release_changes_sent_beside_pass();
 }
 
 /// The answers of the style pass [`style_engine_submit_style_transaction`] submitted, once the
@@ -7727,7 +7696,6 @@ pub unsafe extern "C" fn style_engine_set_element_custom_property_data(
     });
     crate::css::style::owner_calls::send(
         engine,
-        "style_engine_set_element_custom_property_data",
         crate::css::style::owner_calls::EngineChange::SetElementCustomPropertyData(node, handed),
     );
 }
@@ -7743,8 +7711,7 @@ pub unsafe extern "C" fn style_engine_element_custom_property_data(
     node: u32,
     identity: *mut u64,
 ) -> *const c_void {
-    engine.bring_home("style_engine_element_custom_property_data");
-    // SAFETY: The engine is home.
+    // SAFETY: On the main thread.
     let environments = &unsafe { engine.answers() }.environments;
     let (data, environment) =
         StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| environments.element(node));
@@ -7789,7 +7756,6 @@ pub unsafe extern "C" fn style_engine_set_pseudo_element_custom_property_data(
     });
     crate::css::style::owner_calls::send(
         engine,
-        "style_engine_set_pseudo_element_custom_property_data",
         crate::css::style::owner_calls::EngineChange::SetPseudoElementCustomPropertyData(node, pseudo, handed),
     );
 }
@@ -7806,8 +7772,7 @@ pub unsafe extern "C" fn style_engine_pseudo_element_custom_property_data(
     pseudo: u8,
     identity: *mut u64,
 ) -> *const c_void {
-    engine.bring_home("style_engine_pseudo_element_custom_property_data");
-    // SAFETY: The engine is home.
+    // SAFETY: On the main thread.
     let environments = &unsafe { engine.answers() }.environments;
     let (data, environment) =
         StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| environments.pseudo_element(node, pseudo));
@@ -7826,8 +7791,7 @@ pub unsafe extern "C" fn style_engine_pseudo_elements_with_custom_property_data(
     engine: StyleEngineHandle,
     node: u32,
 ) -> u64 {
-    engine.bring_home("style_engine_pseudo_elements_with_custom_property_data");
-    // SAFETY: The engine is home.
+    // SAFETY: On the main thread.
     let environments = &unsafe { engine.answers() }.environments;
     StyleNodeID::from_raw(node).map_or(0, |node| environments.pseudo_element_kinds(node))
 }
@@ -7920,7 +7884,6 @@ pub unsafe extern "C" fn style_engine_record_benchmark_marker(
     };
     crate::css::style::owner_calls::send(
         engine,
-        "style_engine_record_benchmark_marker",
         crate::css::style::owner_calls::EngineChange::BenchmarkMarker(name),
     );
 }
@@ -8538,7 +8501,6 @@ mod tests {
 pub unsafe extern "C" fn style_engine_has_size_containers_needing_evaluation_after_layout(
     engine: StyleEngineHandle,
 ) -> bool {
-    engine.bring_home("style_engine_has_size_containers_needing_evaluation_after_layout");
     engine
         .pending_facts()
         .contains(PendingFacts::SIZE_CONTAINERS_AFTER_LAYOUT)
@@ -8574,7 +8536,6 @@ pub unsafe extern "C" fn style_engine_record_size_container_query_dependents(
 ) {
     crate::css::style::owner_calls::send(
         engine,
-        "style_engine_record_size_container_query_dependents",
         crate::css::style::owner_calls::EngineChange::RecordSizeContainerQueryDependents { node },
     );
 }

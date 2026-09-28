@@ -1213,20 +1213,6 @@ pub extern "C" fn rust_stage_thread_arena_changes_wait_for_frame(arena: *mut c_v
         })
 }
 
-/// Whether a DOM tree mutation of the document whose arena is `arena` joins the frame in flight first, as the
-/// engine's entrances would: where a stage of it reaches the document's style engine. A style pass alone in flight,
-/// or a layout pass (see [`rust_stage_thread_layout_pass_in_flight_for`]), lets the mutation go on beside it. Every DOM
-/// tree mutation passes the door, a parser for each node it inserts, so no frame in flight is answered first.
-pub(crate) fn dom_tree_mutation_joins_frame_in_flight(arena: *mut c_void) -> bool {
-    use crate::css::style::engine_home::Holder;
-    if no_stage_is_submitted() || SUBMITTED.with_borrow(Vec::is_empty) {
-        return false;
-    }
-    // SAFETY: The caller passes a live arena, whose host tables hold the document's style engine.
-    let engine = unsafe { crate::layout::HostTables::beside_frame(arena) }.style_engine();
-    !engine.is_home() && !matches!(engine.holder(), Some(Holder::StylePass | Holder::LayoutPass))
-}
-
 /// Counts a forced join against the label of each stage of the frame in flight it takes in.
 fn count_forced_join() {
     // A flight is counted as the stage whose hold it has.

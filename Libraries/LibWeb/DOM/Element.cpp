@@ -1318,12 +1318,6 @@ void Element::did_publish_presentational_hint_properties(ReadonlySpan<CSS::Style
 
 void Element::run_attribute_change_steps(Utf16FlyString const& local_name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
 {
-    // An attribute change writes the facts the style mirror keeps of the element as it goes. The
-    // mirror keeps none of an element with no style node, such as one outside the document, and
-    // the change reaches nothing a frame in flight reads.
-    if (style_node_id() != 0 && !Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(document().style_computer().style_engine().rust_handle()))
-        document().join_frame_for_dom_tree_mutation();
-
     attribute_changed(local_name, old_value, value, namespace_);
 
     // Published here rather than inside attribute_changed, because that function returns early for
@@ -2740,7 +2734,6 @@ void Element::set_shadow_root(GC::Ptr<ShadowRoot> shadow_root)
 {
     if (m_shadow_root == shadow_root)
         return;
-    document().join_frame_for_dom_tree_mutation();
     if (m_shadow_root) {
         if (auto count = m_shadow_root->associated_animation_count_in_subtree())
             change_associated_animation_count_in_subtree(-static_cast<i32>(count));

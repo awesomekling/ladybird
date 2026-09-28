@@ -63,19 +63,28 @@ impl StyleEngineInputHandle {
         self.0
     }
 
-    /// Leaves `change` in the engine's home, for whoever reaches the engine next to apply first. On the main thread.
+    /// Leaves `change` in the engine's home, for whoever reaches the engine next to apply first. On the main thread,
+    /// which goes on at once: a change sent beside a style pass waits behind the pass's drain.
     pub(crate) fn send(self, change: StyleChange) {
         // SAFETY: On the main thread, which borrows its answers only here.
         let answers = unsafe { self.0.answers() };
         let leaves = change.leaves(answers.pending);
         answers.follow_sent(&change, leaves);
-        self.0.home().exchange().unapplied.push((change, leaves));
+        self.0.home().leave_sent((change, leaves));
     }
 
     /// Leaves `change`, which leaves nothing the main thread's answers follow, in the engine's home without borrowing
     /// the answers.
     pub(super) fn send_unfollowed(self, change: StyleChange) {
-        self.0.home().exchange().unapplied.push((change, PendingFacts::NONE));
+        self.0.home().leave_sent((change, PendingFacts::NONE));
+    }
+
+    /// The drain of the style pass the engine was lent to has ended: what the main thread sent beside the pass goes
+    /// to whoever reaches the engine next, after what the drain sent. On the main thread.
+    pub(crate) fn release_changes_sent_beside_pass(self) {
+        let mut exchange = self.0.home().exchange();
+        let beside_pass = std::mem::take(&mut exchange.beside_pass);
+        exchange.unapplied.extend(beside_pass);
     }
 }
 
@@ -162,6 +171,9 @@ struct StyleEngineHome {
     /// Whether the thread that owns the engine with its render state (a unit test's, or the replay tool's) reached it
     /// through [`OwnedStyleEngine::engine`] since the home last followed it.
     reached_by_owning_thread: Cell<bool>,
+    /// Whether the engine is lent to a style pass whose frame the main thread has not taken back: what it sends goes
+    /// behind the pass's drain. The main thread's alone.
+    beside_pass: Cell<bool>,
 }
 
 /// What the main thread and whoever reaches its engine hand each other.
@@ -170,6 +182,9 @@ struct Exchange {
     /// What the main thread wrote to the engine since it was last reached, in order, each with what it may leave: the
     /// main thread pushes, and whoever reaches the engine next takes them.
     unapplied: Vec<(StyleChange, PendingFacts)>,
+    /// What the main thread wrote beside a style pass, which no reach takes until the pass's drain has ended: the pass's
+    /// output waits in the engine for the drain, and what the main thread wrote beside it goes behind the drain's own.
+    beside_pass: Vec<(StyleChange, PendingFacts)>,
     /// What the engine held as whoever reached it last was done, which the main thread has not adopted yet. Whoever
     /// reaches the engine takes it back as it begins, and leaves it again with its own as it is done, so the main
     /// thread never adopts news older than a change it no longer finds unapplied.
@@ -185,6 +200,17 @@ const _: () = {
 impl StyleEngineHome {
     fn exchange(&self) -> MutexGuard<'_, Exchange> {
         self.exchange.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Leaves what the main thread sent in the exchange: behind the drain of a style pass the engine is lent to, or for
+    /// the next reach. On the main thread.
+    fn leave_sent(&self, sent: (StyleChange, PendingFacts)) {
+        let mut exchange = self.exchange();
+        if self.beside_pass.get() {
+            exchange.beside_pass.push(sent);
+        } else {
+            exchange.unapplied.push(sent);
+        }
     }
 
     /// Takes back the news the main thread has not adopted yet, for a reach of the engine that begins.
@@ -422,6 +448,8 @@ impl StyleEngineHome {
         // SAFETY: On the main thread.
         unsafe { self.slot() }.owed = Owed::Nothing;
         self.holder.set(None);
+        // What the drain sends goes before what was sent beside the pass, which waits for the drain's end.
+        self.beside_pass.set(false);
     }
 }
 
@@ -457,6 +485,7 @@ impl StyleEngineHandle {
             exchange: Mutex::default(),
             answers: UnsafeCell::default(),
             reached_by_owning_thread: Cell::new(false),
+            beside_pass: Cell::new(false),
         });
         let handle = Self(Rc::into_raw(home).cast_mut().cast());
         crate::render_owner::send_arena_change(
@@ -572,7 +601,7 @@ impl StyleEngineHandle {
         if let Some(news) = exchange.news.take() {
             // What the main thread sent since the news was left, it follows again over it.
             answers.adopt(news);
-            for (change, leaves) in &exchange.unapplied {
+            for (change, leaves) in exchange.unapplied.iter().chain(&exchange.beside_pass) {
                 answers.follow_sent(change, *leaves);
             }
         }
@@ -599,6 +628,8 @@ impl StyleEngineHandle {
         let (to_home, arrival) = channel();
         slot.away = Some((arrival, owed_at_best));
         home.holder.set(Some(holder));
+        // The pass's output waits in the engine for its drain, which what the main thread sends meanwhile goes behind.
+        home.beside_pass.set(holder == Holder::StylePass);
         crate::stage_thread::release_handoff();
         let home_pointer = self.0.cast::<StyleEngineHome>().cast_const();
         // SAFETY: The handle names a live home, which `Rc::into_raw` made; the settlement holds it too.
@@ -625,8 +656,9 @@ impl StyleEngineHandle {
         self.home().holder.get()
     }
 
-    /// Whether the main thread may write the engine now, without waiting for a stage.
-    pub(crate) fn is_home(self) -> bool {
+    /// Whether the engine is home, owing nothing.
+    #[cfg(test)]
+    fn is_home(self) -> bool {
         self.is_null() || self.home().state() == (true, Owed::Nothing)
     }
 

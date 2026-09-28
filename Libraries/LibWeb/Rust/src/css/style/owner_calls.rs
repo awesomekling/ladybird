@@ -1020,9 +1020,8 @@ impl StyleQueryRef {
     }
 }
 
-/// Leaves `change` for whoever reaches `engine` next to apply first. `entry` names the door the main thread took.
-pub(crate) fn send(engine: StyleEngineInputHandle, entry: &'static str, change: EngineChange) {
-    engine.home().bring_home(entry);
+/// Leaves `change` for whoever reaches `engine` next to apply first. The main thread goes on at once.
+pub(crate) fn send(engine: StyleEngineInputHandle, change: EngineChange) {
     engine.send(StyleChange::Engine(change));
 }
 

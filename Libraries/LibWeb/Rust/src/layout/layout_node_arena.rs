@@ -2956,9 +2956,6 @@ impl LayoutNodeArena {
         self.active_layout_pass_depth.get() > 0
     }
 
-    /// The writer a DOM tree mutation's writes to the style mirror and the arena are attributed to.
-    pub(crate) const DOM_TREE_MUTATION_WRITER: &str = "DOM tree mutation";
-
     pub(crate) fn begin_active_layout_pass(&self) {
         let depth = self.active_layout_pass_depth.get();
         if depth == 0 {
@@ -6395,113 +6392,6 @@ pub unsafe extern "C" fn layout_arena_set_node_flag(
     };
     // SAFETY: Guaranteed by the caller.
     unsafe { super::layout_changes::send(arena, change) };
-}
-
-/// What the door of one main-side writer cost: how often it was passed, and how often and for how
-/// long a pass had to wait for the frame in flight. The passes rank the writers for moving from the
-/// door to the journal, which queues a write instead of waiting.
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct FfiDoorCounters {
-    pub passes: u64,
-    pub waits: u64,
-    pub wait_nanoseconds: u64,
-}
-
-thread_local! {
-    // By writer, in the order each was first passed. There are only a few writers, so a scan is enough.
-    static DOOR_COUNTERS: RefCell<Vec<(&'static str, FfiDoorCounters)>> = const { RefCell::new(Vec::new()) };
-    // Whether the door passes are counted at all. See `layout_arena_count_door_passes`.
-    static COUNTS_DOOR_PASSES: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Counts the door passes on this thread from now on. Only internals reports them, and every DOM
-/// tree mutation passes a door: a page that rebuilds a list by innerHTML passes one for each node.
-#[unsafe(no_mangle)]
-pub extern "C" fn layout_arena_count_door_passes() {
-    COUNTS_DOOR_PASSES.set(true);
-}
-
-/// Counts a pass through `writer`'s door, and the wait for the frame in flight it took, if any.
-fn record_door_pass(writer: &'static str, wait: Option<std::time::Duration>) {
-    if !COUNTS_DOOR_PASSES.get() {
-        return;
-    }
-    DOOR_COUNTERS.with_borrow_mut(|counters| {
-        let index = match counters.iter().position(|(name, _)| *name == writer) {
-            Some(index) => index,
-            None => {
-                counters.push((writer, FfiDoorCounters::default()));
-                counters.len() - 1
-            }
-        };
-        let entry = &mut counters[index].1;
-        entry.passes += 1;
-        if let Some(wait) = wait {
-            entry.waits += 1;
-            entry.wait_nanoseconds += u64::try_from(wait.as_nanos()).unwrap_or(u64::MAX);
-        }
-    });
-}
-
-/// Calls `callback` with each door writer's name (UTF-8, not NUL-terminated) and counters on this
-/// thread.
-///
-/// # Safety
-///
-/// `callback` must be safe to call with `context`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_for_each_door_counters(
-    context: *mut c_void,
-    callback: unsafe extern "C" fn(
-        context: *mut c_void,
-        name: *const u8,
-        name_length: usize,
-        counters: FfiDoorCounters,
-    ),
-) {
-    // Copied out first, so the callback may pass a door itself.
-    let counters = DOOR_COUNTERS.with_borrow(|counters| counters.clone());
-    for (name, counters) in counters {
-        // SAFETY: The caller guarantees the callback is safe to call with its context.
-        unsafe { callback(context, name.as_ptr(), name.len(), counters) };
-    }
-}
-
-/// Forgets every door pass counted on this thread.
-#[unsafe(no_mangle)]
-pub extern "C" fn layout_arena_reset_door_counters() {
-    DOOR_COUNTERS.with_borrow_mut(Vec::clear);
-}
-
-/// The door of a DOM tree mutation. The mutation splices the style mirror as it goes, so it joins
-/// a frame in flight with a stage that reads the mirror (a style or layout pass) before it starts.
-/// A recording reads nothing of the mirror and goes on beside the mutation. What the mutation
-/// writes to the arena, the rows it frees or marks as it goes, goes to the arena's owner as
-/// changes or waits for the recording at the host tables' door ([`super::HostTables::from_handle`]),
-/// and its layout tree marks go to the invalidation journal.
-///
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_join_frame_for_dom_tree_mutation(arena: *mut c_void) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let location = std::panic::Location::caller();
-    // A style pass alone in flight is the exception: what the mutation writes to the style mirror
-    // goes through the engine's own entrances, which leave their inputs for the pass's drain or
-    // join the pass, and the rows it frees or marks are no longer the pass's to read. So is a
-    // layout pass: the inputs wait for it to be taken back, and the rows it owns wait at the
-    // arena's own doors.
-    if crate::stage_thread::dom_tree_mutation_joins_frame_in_flight(arena) {
-        crate::stage_thread::join_document_frame_in_flight_at(
-            arena,
-            location.file(),
-            location.line(),
-            location.column(),
-        );
-    }
-    record_door_pass(LayoutNodeArena::DOM_TREE_MUTATION_WRITER, None);
 }
 
 /// Whether the box keeps content the compositor animates, as the rendering update chose between frames.

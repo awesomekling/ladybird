@@ -186,7 +186,6 @@ void EventLoop::reset_rendering_scheduler_counters()
     m_rendering_scheduler_counters = {};
     m_rendering_scheduler_counters_at_last_update = {};
     m_last_rendering_update_end_time = 0;
-    Layout::RustFFI::layout_arena_reset_door_counters();
 }
 
 void EventLoop::did_submit_frame()
