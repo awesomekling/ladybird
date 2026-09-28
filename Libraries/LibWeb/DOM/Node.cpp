@@ -3985,20 +3985,6 @@ Layout::Node const* Node::unsafe_layout_node() const
     return layout_node;
 }
 
-Layout::Row Node::layout_row() const
-{
-    auto* arena = m_document->layout_node_arena_if_created();
-    if (!arena)
-        return {};
-    if (auto const* element = as_if<Element>(*this))
-        return element->style_node_id() != 0 ? arena->bound_row(element->style_node_id()) : Layout::Row {};
-    if (auto const* text = as_if<Text>(*this))
-        return text->style_node_id() != 0 ? arena->bound_row(text->style_node_id()) : Layout::Row {};
-    if (is_document())
-        return arena->bound_viewport_row();
-    return {};
-}
-
 bool Node::box_is_placed_in_top_layer() const
 {
     auto box = Painting::BoxSlot::bound_to(*this);

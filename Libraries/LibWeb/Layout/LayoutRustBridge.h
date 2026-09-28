@@ -75,6 +75,15 @@ WEB_API void apply_style_to_box(Painting::BoxSlot const&, CSS::PublishedStyleRec
 WEB_API void attach_style_resources_to_box(Painting::BoxSlot const&);
 // Makes the host's mirror of the box now, from the record its row holds, if nothing has made it yet.
 WEB_API void make_host_mirror_of_box(Painting::BoxSlot const&);
+// Sets the record the box holds as its DOM target's, unless the box holds a style of its own.
+void set_style_record_of_box(Painting::BoxSlot const&, CSS::PublishedStyleRecord const*);
+// Publishes the scroll offset of the box's DOM target to every row built for it.
+void publish_scroll_offset_of_box(Painting::BoxSlot const&);
+// Takes the spans of the table cell or column the box was built for into the box: whether they moved.
+bool synchronize_table_spans_of_box(Painting::BoxSlot const&);
+// Whether the text box produces a line box fragment when empty, as its text's editing state says now: whether that
+// changed.
+bool update_empty_line_box_fragment_flag_of_box(Painting::BoxSlot const& text_box);
 
 // Publishes what the SVG element's presentation attributes parse to, under its style node, and
 // retires that publication. An element's attributes are layout input that no pass can change, so

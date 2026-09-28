@@ -38,7 +38,6 @@ class WEB_API PseudoElement : public JS::Cell {
     GC_DECLARE_ALLOCATOR(PseudoElement);
 
 public:
-    virtual Layout::NodeWithStyle* layout_node() const = 0;
     virtual Layout::NodeWithStyle* unsafe_layout_node() const = 0;
     // Whether a layout tree build gave the pseudo-element a box, which the arena keeps bound to it.
     virtual bool has_box() const = 0;
@@ -61,7 +60,6 @@ public:
 
     CSS::PseudoElement type() const { return m_type; }
 
-    Layout::NodeWithStyle* layout_node() const override;
     Layout::NodeWithStyle* unsafe_layout_node() const override;
     bool has_box() const override;
     // The pseudo-element's box stops being bound to it, and holds its style record until it is detached.
@@ -120,7 +118,6 @@ class WEB_API ElementReferencePseudoElement : public PseudoElement {
     {
     }
 
-    Layout::NodeWithStyle* layout_node() const override;
     Layout::NodeWithStyle* unsafe_layout_node() const override;
     bool has_box() const override;
 

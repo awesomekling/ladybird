@@ -2964,7 +2964,7 @@ bool Document::client_rects_need_no_accumulated_visual_contexts_update() const
     return !navigable || navigable->viewport_scroll_offset().is_zero();
 }
 
-bool Document::can_compute_client_rects_without_accumulated_visual_contexts_update(Layout::Node const& layout_node) const
+bool Document::can_compute_client_rects_without_accumulated_visual_contexts_update(Painting::BoxSlot const& box) const
 {
     if (!m_needs_accumulated_visual_contexts_update || !has_layout_root())
         return false;
@@ -2972,7 +2972,7 @@ bool Document::can_compute_client_rects_without_accumulated_visual_contexts_upda
     auto navigable = this->navigable();
     bool viewport_scroll_offset_is_zero = !navigable || navigable->viewport_scroll_offset().is_zero();
     return Layout::RustFFI::layout_arena_can_compute_client_rects_without_visual_context_update(
-        layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), viewport_scroll_offset_is_zero);
+        box.arena(), box.slot(), viewport_scroll_offset_is_zero);
 }
 
 void Document::set_normal_link_color(Optional<Color> color)

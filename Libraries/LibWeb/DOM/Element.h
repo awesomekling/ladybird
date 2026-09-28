@@ -377,8 +377,6 @@ public:
     Layout::NodeWithStyle const* layout_node() const;
 
     // The box that CSSOM View geometry describes. For a table, this is the table wrapper box.
-    Layout::NodeWithStyle const* principal_layout_node() const;
-    // The same box, named by its slot.
     Painting::BoxSlot principal_box() const;
 
     Layout::NodeWithStyle* unsafe_layout_node();
@@ -653,7 +651,6 @@ public:
     bool should_indicate_focus() const;
     virtual bool is_focusable() const override;
 
-    Layout::NodeWithStyle* pseudo_element_layout_node(CSS::PseudoElement) const;
     Layout::NodeWithStyle* pseudo_element_unsafe_layout_node(CSS::PseudoElement) const;
     // Whether a layout tree build gave the pseudo-element a box: the one the arena binds to this element's identity and
     // the pseudo-element's type, or the box of the element an element-backed pseudo-element stands in for.

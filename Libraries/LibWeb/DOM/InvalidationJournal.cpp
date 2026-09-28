@@ -14,9 +14,6 @@
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/NodeArena.h>
-#include <LibWeb/Layout/TextNode.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/Scrollbar.h>
@@ -206,8 +203,7 @@ void InvalidationJournal::note_unanchored_paint_facts(Compositing::RustFFI::Node
 void InvalidationJournal::publish_unanchored_paint_facts()
 {
     auto updates = move(m_unanchored_paint_facts);
-    auto* arena = m_document.layout_node_arena_if_created();
-    if (!arena)
+    if (!m_document.layout_arena_handle())
         return;
     for (auto const& [slot, update] : updates) {
         if (auto box = Painting::BoxSlot::of(m_document, slot))
@@ -251,18 +247,16 @@ void InvalidationJournal::note_is_in_focused_text_control(NodeIdentity identity)
 // fragment), so the affected node also needs a relayout.
 static void refresh_editability_stamps(Node& node)
 {
-    auto* layout_node = node.unsafe_layout_node();
-    if (!layout_node)
+    auto box = Painting::BoxSlot::bound_to(node);
+    if (!box)
         return;
     auto is_editing_host = node.is_editing_host();
-    if (layout_node->is_editing_host() != is_editing_host) {
-        layout_node->set_is_editing_host(is_editing_host);
+    if (box.has_flag(Layout::RustFFI::NodeFlag::IsEditingHost) != is_editing_host) {
+        Layout::RustFFI::layout_arena_set_node_flag(box.arena(), box.slot(), Layout::RustFFI::HostNodeFlag::IsEditingHost, is_editing_host);
         node.set_needs_layout_update(SetNeedsLayoutReason::EditableStateChange);
     }
-    if (auto* layout_text_node = as_if<Layout::TextNode>(*layout_node)) {
-        if (layout_text_node->update_produces_line_box_fragment_when_empty_flag())
-            node.set_needs_layout_update(SetNeedsLayoutReason::EditableStateChange);
-    }
+    if (box.is_text() && Layout::update_empty_line_box_fragment_flag_of_box(box))
+        node.set_needs_layout_update(SetNeedsLayoutReason::EditableStateChange);
 }
 
 void InvalidationJournal::note_selection_states()
@@ -349,7 +343,7 @@ void InvalidationJournal::note_visual_viewport_transform()
 // the next update revisits for nothing.
 void InvalidationJournal::publish_visual_context_marks()
 {
-    auto* arena = m_document.layout_node_arena_if_created();
+    auto* arena = m_document.layout_arena_handle();
     auto box_dirty_marks = move(m_visual_context_box_dirty_marks);
     auto full_rebuild_reasons = move(m_visual_context_full_rebuild_reasons);
     if (exchange(m_visual_viewport_transform_is_stale, false)) {
@@ -364,10 +358,10 @@ void InvalidationJournal::publish_visual_context_marks()
     if (!arena)
         return;
     for (auto reason : full_rebuild_reasons)
-        Layout::RustFFI::layout_arena_visual_context_request_full_rebuild(arena->handle(), reason);
+        Layout::RustFFI::layout_arena_visual_context_request_full_rebuild(arena, reason);
     for (auto const& mark : box_dirty_marks)
-        Layout::RustFFI::layout_arena_visual_context_note_box_dirty(arena->handle(), mark.slot, mark.kind);
-    if (exchange(m_svg_paint_resources_changed, false) && Layout::RustFFI::layout_arena_note_svg_paint_resources_changed(arena->handle()))
+        Layout::RustFFI::layout_arena_visual_context_note_box_dirty(arena, mark.slot, mark.kind);
+    if (exchange(m_svg_paint_resources_changed, false) && Layout::RustFFI::layout_arena_note_svg_paint_resources_changed(arena))
         m_document.set_needs_accumulated_visual_contexts_update(true);
 }
 
@@ -404,10 +398,8 @@ void InvalidationJournal::note_table_spans(NodeIdentity identity)
 static void publish_table_spans(Element& element)
 {
     Layout::publish_table_spans(element);
-    if (auto* layout_node = element.unsafe_layout_node()) {
-        if (layout_node->synchronize_table_span_data())
-            element.document().render_inputs_for_write().set_needs_layout_update(Layout::Node::slot_id(layout_node), SetNeedsLayoutReason::TableSpanAttributeChange);
-    }
+    if (auto box = Painting::BoxSlot::bound_to(element); box && Layout::synchronize_table_spans_of_box(box))
+        element.document().render_inputs_for_write().set_needs_layout_update(box.slot(), SetNeedsLayoutReason::TableSpanAttributeChange);
 }
 
 // The mirror holds the characters the layout tree build renders, and a text box that already
@@ -421,19 +413,20 @@ static void publish_text_data(Text& text, bool whitespace_state_changed)
     }
     if (whitespace_state_changed)
         CSS::record_text_whitespace_state_changed(text);
-    auto* text_layout_node = as_if<Layout::TextNode>(text.unsafe_layout_node());
-    if (text_layout_node && Layout::RustFFI::layout_arena_text_has_source_range(text_layout_node->arena_handle(), Layout::Node::slot_id(text_layout_node))) {
+    auto text_box = Painting::BoxSlot::bound_to(text);
+    if (text_box && Layout::RustFFI::layout_arena_text_has_source_range(text_box.arena(), text_box.slot())) {
         // First-letter source ranges are determined while building the layout tree.
         if (auto* parent = text.parent())
             parent->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::CharacterDataReplaceData);
-    } else if (text_layout_node) {
+    } else if (text_box) {
         // NB: Since the text node's data has changed, we need to invalidate the text for rendering.
         //     This ensures that the new text is reflected in layout, even if we don't end up doing a full layout
         //     tree rebuild.
-        text_layout_node->invalidate_text_for_rendering();
+        auto& inputs = text.document().render_inputs_for_write();
+        inputs.invalidate_text_content(text_box.slot());
 
         // We also need to relayout.
-        text.document().render_inputs_for_write().set_needs_layout_update(Layout::Node::slot_id(text_layout_node), SetNeedsLayoutReason::CharacterDataReplaceData);
+        inputs.set_needs_layout_update(text_box.slot(), SetNeedsLayoutReason::CharacterDataReplaceData);
 
         if (whitespace_state_changed)
             text.set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::CharacterDataReplaceData);
@@ -450,12 +443,11 @@ static void publish_text_data(Text& text, bool whitespace_state_changed)
 // current box re-derives that fact whenever the stored offset changes. Layout need not be up to
 // date for that: the box is only annotated, not read, and a box that a pending layout tree rebuild
 // replaces is never consulted again, while its replacement derives the fact when it is constructed.
-// That is why the unchecked layout node accessor is the right one here.
 void InvalidationJournal::publish_scroll_offsets(Node& node, Entry const& entry)
 {
     if (auto* document = as_if<Document>(node)) {
-        if (auto* layout_node = document->unsafe_layout_node())
-            layout_node->publish_scroll_offset();
+        if (auto box = Painting::BoxSlot::viewport_of(*document))
+            Layout::publish_scroll_offset_of_box(box);
         return;
     }
     auto* element = as_if<Element>(node);
@@ -466,13 +458,13 @@ void InvalidationJournal::publish_scroll_offsets(Node& node, Entry const& entry)
         if (!pseudo_element.has_value())
             continue;
         pseudo_element->set_scroll_offset(offset);
-        if (auto* layout_node = pseudo_element->unsafe_layout_node())
-            layout_node->publish_scroll_offset();
+        if (auto box = Painting::BoxSlot::of_pseudo_element(*element, type))
+            Layout::publish_scroll_offset_of_box(box);
     }
     if (entry.needs_scroll_offset_publish) {
         Layout::publish_element_scroll_offset(*element);
-        if (auto* layout_node = element->unsafe_layout_node())
-            layout_node->publish_scroll_offset();
+        if (auto box = Painting::BoxSlot::bound_to(*element))
+            Layout::publish_scroll_offset_of_box(box);
     }
 }
 
@@ -507,9 +499,9 @@ void InvalidationJournal::drain()
     // NB: A style pass alone reads nothing the drain writes: it does not own the arena, and what the
     //     drain asks of the style engine joins it at the engine's own entrances.
     VERIFY(!m_holds_next_generation);
-    if (auto* arena = m_document.layout_node_arena_if_created()) {
+    if (auto* arena = m_document.layout_arena_handle()) {
         auto location = SourceLocation::current();
-        Layout::RustFFI::layout_arena_join_frame_owning_arena(arena->handle(), reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+        Layout::RustFFI::layout_arena_join_frame_owning_arena(arena, reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
         // Taking the frame in hands the document what was marked beside it, in the journal it drains from now on, and
         // this journal holds the marks made beside the next frame. What the drain was asked for is in the other one:
         // an up-to-date answer read after this drain would hide those marks from the read.
@@ -536,7 +528,6 @@ void InvalidationJournal::drain()
         auto entries = move(m_entries);
         m_entry_index_by_identity.clear_with_capacity();
 
-        auto* arena = m_document.layout_node_arena_if_created();
         for (auto const& entry : entries) {
             auto node = entry.identity.resolve(m_document);
             if (entry.needs_layout_tree_update && node) {
@@ -567,15 +558,13 @@ void InvalidationJournal::drain()
             if (!entry.needs_layout_update && !entry.needs_repaint && !entry.needs_subtree_repaint && !entry.has_dom_paint_facts && !rare && !entry.clears_layer_image_paint_facts && !entry.invalidate_paint_and_hit_test_cache && !entry.invalidate_propagated_text_decoration_caches)
                 continue;
             // A node whose box went away between the mark and here has nothing left to mark.
-            Layout::Row row;
-            if (arena)
-                row = entry.identity == NodeIdentity::of_document() ? arena->bound_viewport_row() : arena->bound_row(entry.identity.style_node());
-            if (!row)
+            auto box = Painting::BoxSlot::bound_to(m_document, entry.identity);
+            if (!box)
                 continue;
             if (entry.needs_layout_update)
-                m_document.render_inputs_for_write().set_needs_layout_update(row.slot(), entry.layout_reason, entry.layout_propagation);
+                m_document.render_inputs_for_write().set_needs_layout_update(box.slot(), entry.layout_reason, entry.layout_propagation);
             if (entry.has_dom_paint_facts) {
-                auto changed = Layout::RustFFI::layout_arena_set_node_dom_paint_facts(row.arena_handle(), row.slot(), entry.dom_paint_facts);
+                auto changed = Layout::RustFFI::layout_arena_set_node_dom_paint_facts(box.arena(), box.slot(), entry.dom_paint_facts);
                 if (changed && node)
                     node->set_needs_repaint();
             }
@@ -587,42 +576,42 @@ void InvalidationJournal::drain()
                     .canvas_id = rare->canvas_id,
                     .content_generation = rare->canvas_content_generation,
                 };
-                auto changed = Layout::RustFFI::layout_arena_set_canvas_paint_facts(row.arena_handle(), row.slot(), facts);
-                if (changed && Painting::has_committed_box(row))
-                    Painting::apply_paint_cache_invalidation(row, Painting::PaintCacheInvalidation::PaintAndHitTest);
+                auto changed = Layout::RustFFI::layout_arena_set_canvas_paint_facts(box.arena(), box.slot(), facts);
+                if (changed && Painting::has_committed_box(box))
+                    Painting::apply_paint_cache_invalidation(box, Painting::PaintCacheInvalidation::PaintAndHitTest);
             }
-            if (rare && rare->has_form_control_paint_facts && (row.kind() == Layout::RustFFI::NodeKind::CheckBox || row.kind() == Layout::RustFFI::NodeKind::RadioButton)) {
+            if (rare && rare->has_form_control_paint_facts && (box.kind() == Layout::RustFFI::NodeKind::CheckBox || box.kind() == Layout::RustFFI::NodeKind::RadioButton)) {
                 Layout::RustFFI::FfiFormControlPaintFacts facts {
                     .enabled = rare->form_control_enabled,
                     .checked = rare->form_control_checked,
                     .indeterminate = rare->form_control_indeterminate,
                     .being_activated = rare->form_control_being_activated,
                 };
-                auto changed = Layout::RustFFI::layout_arena_set_form_control_paint_facts(row.arena_handle(), row.slot(), facts);
-                if (changed && Painting::has_committed_box(row))
-                    Painting::set_needs_repaint(row, InvalidateDisplayList::PaintCommands);
+                auto changed = Layout::RustFFI::layout_arena_set_form_control_paint_facts(box.arena(), box.slot(), facts);
+                if (changed && Painting::has_committed_box(box))
+                    Painting::set_needs_repaint(box, InvalidateDisplayList::PaintCommands);
             }
             if (entry.clears_layer_image_paint_facts)
-                Layout::RustFFI::layout_arena_set_layer_image_paint_facts(row.arena_handle(), row.slot(), nullptr, 0);
+                Layout::RustFFI::layout_arena_set_layer_image_paint_facts(box.arena(), box.slot(), nullptr, 0);
             if (rare && rare->layer_image_paint_facts_update)
-                rare->layer_image_paint_facts_update(Painting::BoxSlot::of(m_document, row.slot()));
+                rare->layer_image_paint_facts_update(box);
             if (rare && rare->replaced_image_paint_facts_update)
-                rare->replaced_image_paint_facts_update(Painting::BoxSlot::of(m_document, row.slot()));
+                rare->replaced_image_paint_facts_update(box);
             if (rare && rare->video_paint_facts_update)
-                rare->video_paint_facts_update(Painting::BoxSlot::of(m_document, row.slot()));
+                rare->video_paint_facts_update(box);
             if (rare && rare->navigable_container_paint_facts_update)
-                rare->navigable_container_paint_facts_update(Painting::BoxSlot::of(m_document, row.slot()));
+                rare->navigable_container_paint_facts_update(box);
             if (entry.invalidate_paint_and_hit_test_cache)
-                Painting::apply_paint_cache_invalidation(row, Painting::PaintCacheInvalidation::PaintAndHitTest);
+                Painting::apply_paint_cache_invalidation(box, Painting::PaintCacheInvalidation::PaintAndHitTest);
             if (entry.invalidate_propagated_text_decoration_caches)
-                Painting::apply_paint_cache_invalidation(row, Painting::PaintCacheInvalidation::PropagatedTextDecorations);
+                Painting::apply_paint_cache_invalidation(box, Painting::PaintCacheInvalidation::PropagatedTextDecorations);
             if (entry.needs_subtree_repaint)
-                Painting::apply_subtree_repaint_damage(row);
+                Painting::apply_subtree_repaint_damage(box);
             if (entry.needs_repaint) {
-                if (row.is_text())
-                    Painting::apply_repaint_damage(as<Layout::TextNode>(row.shell()), entry.invalidate_display_list);
-                else if (Painting::has_committed_box(row))
-                    Painting::apply_repaint_damage(row, entry.invalidate_display_list);
+                if (box.is_text())
+                    Painting::apply_text_repaint_damage(box, entry.invalidate_display_list);
+                else if (Painting::has_committed_box(box))
+                    Painting::apply_repaint_damage(box, entry.invalidate_display_list);
             }
         }
         // The next generation reuses the storage, unless what the drain wrote through noted more.
