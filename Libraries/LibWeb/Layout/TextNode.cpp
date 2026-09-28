@@ -102,13 +102,6 @@ void TextNode::invalidate_text_for_rendering()
     document().render_inputs_for_write().invalidate_text_content(slot_id(this));
 }
 
-Utf16View TextNode::text_for_rendering() const
-{
-    document().drain_invalidation_journal();
-    auto view = RustFFI::layout_arena_text_for_rendering(arena_handle(), slot_id(this));
-    return Utf16View { reinterpret_cast<char16_t const*>(view.text), view.length_in_code_units };
-}
-
 Gfx::GlyphRun::TextType text_type_for_code_point(u32 code_point)
 {
     // Fast path for ASCII using a lookup table.

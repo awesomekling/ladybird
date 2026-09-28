@@ -50,12 +50,9 @@ public:
 
     static Compositing::RustFFI::NodeSlotId slot_id(Node const*);
     RustFFI::NodeKind kind() const { return m_kind; }
-    u32 arena_slot_index() const { return m_slot.index; }
     void* arena_handle() const;
     NodeArena& node_arena() const { return *m_arena; }
 
-    Compositing::RustFFI::NodeSlotId linked_slot(RustFFI::FfiNodeLink link) const { return RustFFI::layout_arena_node_link_slot(m_arena->handle(), m_slot, link); }
-    bool has_parent() const { return linked_slot(RustFFI::FfiNodeLink::Parent).index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX; }
     Node* parent_ptr() { return linked_node(RustFFI::FfiNodeLink::Parent); }
     Node const* parent_ptr() const { return linked_node(RustFFI::FfiNodeLink::Parent); }
     Node* first_child_ptr() { return linked_node(RustFFI::FfiNodeLink::FirstChild); }
@@ -182,7 +179,6 @@ public:
 
     bool is_anonymous() const { return has_flag(RustFFI::NodeFlag::Anonymous); }
     bool is_document_element() const { return has_flag(RustFFI::NodeFlag::IsDocumentElement); }
-    bool insets_use_anchor_functions() const { return has_flag(RustFFI::NodeFlag::InsetsUseAnchorFunctions); }
     DOM::Node const* dom_node() const;
     DOM::Node* dom_node();
     // The identity of the DOM node this row belongs to, which names nothing for an anonymous row
@@ -194,12 +190,6 @@ public:
     DOM::NodeIdentity pseudo_element_generator_identity() const;
 
     bool needs_layout_update() const { return has_flag(RustFFI::NodeFlag::NeedsLayoutUpdate); }
-    bool retains_compositor_animated_content() const { return has_flag(RustFFI::NodeFlag::HasAnimatedOpacityOrTransform); }
-    void set_retains_compositor_animated_content(bool value) { RustFFI::layout_arena_set_node_retains_compositor_animated_content(m_arena->handle(), m_slot, value); }
-    bool needs_compositor_effects_layer() const { return has_compositor_animation_frame(RustFFI::CompositorAnimationFrameKind::Opacity); }
-    void set_needs_compositor_effects_layer(bool value) { set_needs_compositor_animation_frame(RustFFI::CompositorAnimationFrameKind::Opacity, value); }
-    bool needs_compositor_background_color_frame() const { return has_compositor_animation_frame(RustFFI::CompositorAnimationFrameKind::BackgroundColor); }
-    void set_needs_compositor_background_color_frame(bool value) { set_needs_compositor_animation_frame(RustFFI::CompositorAnimationFrameKind::BackgroundColor, value); }
 
     // The arena measures a box that holds a scroll offset eagerly after a full commit, so the box carries that fact
     // as a flag: it is set when a box becomes an element's or a pseudo-element's box, and again whenever the stored
@@ -209,15 +199,8 @@ public:
     // viewport's box, whose offset the navigable stores.
     void publish_scroll_offset();
     void publish_own_scroll_offset();
-    void verify_published_scroll_offset() const;
-    void verify_own_published_scroll_offset() const;
     [[nodiscard]] CSSPixelPoint dom_target_scroll_offset() const;
 
-    // The unique node id of what this box is the box of: an element, the element a pseudo-element
-    // was generated for, or the document for the viewport's box. It is the name the compositor
-    // scrolls and snaps by, so the render side needs it without asking which of the three it is.
-    // Published when a box is built, when it becomes a pseudo-element's box, and for the viewport.
-    void publish_unique_node_id();
     [[nodiscard]] i64 dom_target_unique_node_id() const;
 
     // Whether this row's node sits in the user agent shadow tree of a text control that has focus.
@@ -238,13 +221,8 @@ public:
             return {};
         return static_cast<CSS::PseudoElement>(generated_for() - 1);
     }
-    // The principal box of a pseudo-element has no DOM node, but unlike an anonymous wrapper it has its own
-    // computed style.
-    bool is_pseudo_element_principal_box() const;
     bool is_generated_for_before_pseudo_element() const { return generated_for() == encode_generated_for(CSS::PseudoElement::Before); }
     bool is_generated_for_after_pseudo_element() const { return generated_for() == encode_generated_for(CSS::PseudoElement::After); }
-    bool is_generated_for_backdrop_pseudo_element() const { return generated_for() == encode_generated_for(CSS::PseudoElement::Backdrop); }
-    void set_generated_for(CSS::PseudoElement type, DOM::Element&);
     static constexpr u8 encode_generated_for(CSS::PseudoElement pseudo_element)
     {
         static_assert(static_cast<u8>(CSS::PseudoElement::UnknownWebKit) < 0xff);
@@ -257,14 +235,7 @@ public:
     // The StyleNodeID a row bound to this DOM node records, or 0 for a node that has none.
     static CSS::StyleNodeID style_node_of(DOM::Node const*);
 
-    void clear_committed_box();
-    void prepare_for_detach_from_layout_tree();
-    void prepare_subtree_for_detach_from_layout_tree();
     void pin_style_record_for_detachment();
-
-    // Returns the direct viewport child above this node (the node itself or its outermost
-    // anonymous table-fixup wrapper), or null when the node is not placed as a top layer box.
-    Node* topmost_layout_node_of_top_layer_placement();
 
     DOM::Document& document();
     DOM::Document const& document() const;
@@ -273,15 +244,12 @@ public:
 
     Viewport& root();
 
-    bool is_root_element() const;
-
     String debug_description() const;
 
     bool has_style() const { return has_flag(RustFFI::NodeFlag::HasStyle); }
     bool has_style_or_parent_with_style() const;
 
     bool is_atomic_inline() const;
-    bool is_fragmented_inline() const;
 
     // These optimize hot is<T> variants for the surviving layout classes where dynamic_cast is too slow.
     virtual bool is_box() const { return false; }
@@ -291,20 +259,11 @@ public:
 
     bool is_inline_node() const { return kind() == RustFFI::NodeKind::InlineNode; }
     bool is_svg_box() const { return RustFFI::layout_node_kind_is_svg_box(kind()); }
-    bool is_svg_geometry_box() const { return kind() == RustFFI::NodeKind::SVGGeometryBox; }
-    bool is_svg_clip_box() const { return kind() == RustFFI::NodeKind::SVGClipBox; }
-    bool is_svg_mask_box() const { return kind() == RustFFI::NodeKind::SVGMaskBox; }
-    bool is_svg_pattern_box() const { return kind() == RustFFI::NodeKind::SVGPatternBox; }
-    bool is_svg_graphics_box() const { return RustFFI::layout_node_kind_is_svg_graphics_box(kind()); }
     bool is_replaced_box() const { return RustFFI::layout_node_kind_is_replaced_box(kind()); }
-    bool is_list_item_box() const { return kind() == RustFFI::NodeKind::ListItemBox; }
-    bool is_list_item_marker_box() const { return kind() == RustFFI::NodeKind::ListItemMarkerBox; }
     bool is_table_wrapper() const { return kind() == RustFFI::NodeKind::TableWrapper; }
 
     template<typename T>
     bool fast_is() const = delete;
-
-    bool is_flex_item() const { return has_flag(RustFFI::NodeFlag::IsFlexItem); }
 
     // The arena finds the containing block by walking up the layout tree; it is always a Box or null.
     [[nodiscard]] Box const* containing_block() const;
@@ -314,11 +273,6 @@ public:
 
     NodeWithStyle* parent();
     NodeWithStyle const* parent() const;
-
-    bool children_are_inline() const { return has_flag(RustFFI::NodeFlag::ChildrenAreInline); }
-    void set_children_are_inline(bool value) { set_flag(RustFFI::HostNodeFlag::ChildrenAreInline, value); }
-
-    void set_list_marker_is_inside(bool value) { set_flag(RustFFI::HostNodeFlag::ListMarkerIsInside, value); }
 
     bool is_editing_host() const { return has_flag(RustFFI::NodeFlag::IsEditingHost); }
     void set_is_editing_host(bool value) { set_flag(RustFFI::HostNodeFlag::IsEditingHost, value); }
@@ -347,11 +301,6 @@ protected:
     bool has_compositor_animation_frame(RustFFI::CompositorAnimationFrameKind kind) const
     {
         return RustFFI::layout_arena_node_has_compositor_animation_frame(m_arena->handle(), m_slot, kind);
-    }
-
-    void set_needs_compositor_animation_frame(RustFFI::CompositorAnimationFrameKind kind, bool value)
-    {
-        RustFFI::layout_arena_set_node_needs_compositor_animation_frame(m_arena->handle(), m_slot, kind, value);
     }
 
     void set_flag(RustFFI::HostNodeFlag flag, bool value)
@@ -396,7 +345,6 @@ public:
 
     virtual ~NodeWithStyle() override;
 
-    NonnullRefPtr<CSS::ComputedValues const> copy_computed_values() const;
     CSS::StyleRecordID style_record_identity() const { return m_style_record_identity; }
     void const* style_payloads() const { return m_style_payloads; }
 
@@ -456,21 +404,6 @@ public:
             return {};
         return values.z_index;
     }
-    // https://drafts.csswg.org/css-sizing-4/#intrinsic-size-override
-    Optional<CSSPixels> explicit_intrinsic_inner_width() const
-    {
-        auto const& value = style_group<CSS::ComputedValues::BoxValues>().contain_intrinsic_width;
-        if (!value.has_length)
-            return {};
-        return CSSPixels::nearest_value_for(value.length_px);
-    }
-    Optional<CSSPixels> explicit_intrinsic_inner_height() const
-    {
-        auto const& value = style_group<CSS::ComputedValues::BoxValues>().contain_intrinsic_height;
-        if (!value.has_length)
-            return {};
-        return CSSPixels::nearest_value_for(value.length_px);
-    }
     CSS::Containment contain() const
     {
         auto const& values = style_group<CSS::ComputedValues::BoxValues>();
@@ -497,19 +430,6 @@ public:
         }
         VERIFY_NOT_REACHED();
     }
-    bool block_axis_is_reverse() const
-    {
-        switch (writing_mode()) {
-        case CSS::WritingMode::HorizontalTb:
-        case CSS::WritingMode::VerticalLr:
-        case CSS::WritingMode::SidewaysLr:
-            return false;
-        case CSS::WritingMode::VerticalRl:
-        case CSS::WritingMode::SidewaysRl:
-            return true;
-        }
-        VERIFY_NOT_REACHED();
-    }
     CSS::Visibility visibility() const { return static_cast<CSS::Visibility>(style_group<CSS::ComputedValues::InheritedBoxValues>().visibility); }
     CSS::ImageRendering image_rendering() const { return static_cast<CSS::ImageRendering>(style_group<CSS::ComputedValues::InheritedBoxValues>().image_rendering); }
     Color caret_color() const { return style_group<CSS::ComputedValues::InheritedUIValues>().caret_color_value(); }
@@ -522,16 +442,12 @@ public:
     CSS::Appearance appearance() const { return static_cast<CSS::Appearance>(style_group<CSS::ComputedValues::MiscResetValues>().appearance); }
     CSS::WillChange will_change() const { return style_group<CSS::ComputedValues::MiscResetValues>().will_change_value(); }
     CSS::LengthBox scroll_margin() const { return length_box(style_group<CSS::ComputedValues::MiscResetValues>().scroll_margin); }
-    CSS::LengthBox scroll_padding() const { return length_box(style_group<CSS::ComputedValues::MiscResetValues>().scroll_padding); }
-    CSS::ScrollSnapAlignData scroll_snap_align() const { return style_group<CSS::ComputedValues::MiscResetValues>().scroll_snap_align_value(); }
     CSS::ScrollSnapStop scroll_snap_stop() const { return static_cast<CSS::ScrollSnapStop>(style_group<CSS::ComputedValues::MiscResetValues>().scroll_snap_stop); }
-    CSS::ScrollSnapType scroll_snap_type() const { return style_group<CSS::ComputedValues::MiscResetValues>().scroll_snap_type_value(); }
     CSS::ScrollbarWidth scrollbar_width() const { return static_cast<CSS::ScrollbarWidth>(style_group<CSS::ComputedValues::MiscResetValues>().scrollbar_width); }
     CSS::UserSelect user_select() const { return static_cast<CSS::UserSelect>(style_group<CSS::ComputedValues::MiscResetValues>().user_select); }
     Optional<Utf16FlyString> view_transition_name() const { return style_group<CSS::ComputedValues::MiscResetValues>().view_transition_name_value(); }
     Color outline_color() const { return Color::from_bgra(style_group<CSS::ComputedValues::MiscResetValues>().outline_color); }
     Color column_rule_color() const { return Color::from_bgra(style_group<CSS::ComputedValues::MiscResetValues>().column_rule_color); }
-    CSSPixels outline_offset() const { return style_group<CSS::ComputedValues::MiscResetValues>().outline_offset; }
     CSS::OutlineStyle outline_style() const { return static_cast<CSS::OutlineStyle>(style_group<CSS::ComputedValues::MiscResetValues>().outline_style); }
     CSSPixels outline_width() const { return style_group<CSS::ComputedValues::MiscResetValues>().outline_width; }
     Color background_color() const { return style_group<CSS::ComputedValues::BackgroundValues>().background_color_value(); }
@@ -638,31 +554,18 @@ public:
     CSS::PaintOrderList paint_order() const { return style_group<CSS::ComputedValues::InheritedSVGValues>().paint_order_value(); }
     CSS::TextAnchor text_anchor() const { return style_group<CSS::ComputedValues::InheritedSVGValues>().text_anchor_value(); }
     bool is_inline_block() const;
-    bool is_inline_table() const;
     Gfx::AffineTransform used_svg_element_transform() const;
 
-    bool is_floating() const;
     bool is_positioned() const;
-    bool is_absolutely_positioned() const;
     bool is_fixed_position() const;
     bool is_sticky_position() const;
-
-    // An element is called out of flow if it is floated, absolutely positioned, or is the root element.
-    // https://www.w3.org/TR/CSS22/visuren.html#positioning-scheme
-    bool is_out_of_flow() const { return is_floating() || is_absolutely_positioned(); }
 
     bool establishes_an_absolute_positioning_containing_block() const;
     bool establishes_a_fixed_positioning_containing_block() const;
 
-    // https://drafts.csswg.org/css-contain-2/#containment-types
-    bool has_size_containment() const;
-
-    [[nodiscard]] bool has_css_transform() const;
-
-    void clear_image_observers();
     void apply_style(CSS::PublishedStyleRecord const&);
     // Applies the style to the row as apply_style() does to its shell, without making a shell for a row
-    // that has none, unless the style or the box keeps what only a shell does.
+    // that has none.
     static void apply_style(Row const&, CSS::PublishedStyleRecord const&);
     void attach_style_resources();
     bool synchronize_table_span_data();
@@ -670,13 +573,11 @@ public:
     Gfx::Font const& first_available_font() const;
     CSS::StyleScope const& style_scope() const;
 
-    bool is_body() const { return has_flag(RustFFI::NodeFlag::IsBody); }
     bool is_scroll_container() const;
 
     void set_computed_values(NonnullRefPtr<CSS::ComputedValues const>);
     void set_style_record(CSS::PublishedStyleRecord const*);
-    // Sets the row's record as set_style_record() does its shell's, without making a shell for a row that has none,
-    // unless the box can be a scroll snap container.
+    // Sets the row's record as set_style_record() does its shell's, without making a shell for a row that has none.
     static void set_style_record(Row const&, CSS::PublishedStyleRecord const*);
     void refresh_style_from_arena(CSS::StyleRecordID, void const* payloads, bool should_attach_resources);
     // The pin lives on the node's arena row and is released with it, so
@@ -684,16 +585,12 @@ public:
     // computer goes away. Every document destruction path goes through that teardown.
     void pin_style_record_for_cxx_consumers();
     void release_pinned_style_record();
-    void bind_generated_style_record(CSS::PublishedStyleRecord const*);
 
     void set_display(CSS::Display);
 
     void initialize_stamped_style_record();
 
 private:
-    CSS::ComputedStyleRecordView computed_style_record_view() const;
-    CSS::StyleRecordDependencyFlag style_dependency_flags() const;
-
     virtual bool is_node_with_style() const final { return true; }
 
     void initialize_from_style_record();
@@ -701,7 +598,6 @@ private:
     void publish_style_record_to_node_data();
     void did_update_style_record();
 
-    void rebuild_image_observers(Vector<RefPtr<CSS::CursorStyleValue const>> cursor_style_values);
     void const* m_style_payloads { nullptr };
     bool has_layout_derived_style() const;
     CSS::StyleRecordID m_style_record_identity;
