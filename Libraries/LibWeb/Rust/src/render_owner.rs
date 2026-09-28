@@ -93,6 +93,8 @@ pub(crate) enum ArenaChange {
     /// layout tree was built from (a `display: contents` element has no box of its own) paints again, so cached text
     /// commands take the new highlight.
     SelectionStyleChanged(StyleNodeID),
+    /// An element published a `::selection` style, which the rows that paint text under it take.
+    SelectionPseudoStylePublished(StyleNodeID),
     /// The host took these of the scroll containers finished layout tree builds gave a style.
     BuiltScrollSnapContainersTaken(Vec<NodeSlotId>),
     /// Each layout pass and formatting context run from now on leaves a line in the layout trace, for tests.
@@ -143,6 +145,9 @@ impl ArenaChange {
             ArenaChange::FinishOwnerStyleHostHalf => arena.finish_owner_style_host_half(),
             ArenaChange::SelectionStyleChanged(element) => {
                 crate::painting::selection::repaint_after_selection_style_change(arena, element);
+            }
+            ArenaChange::SelectionPseudoStylePublished(element) => {
+                crate::painting::selection::sync_selection_pseudo_style(arena, element);
             }
             ArenaChange::BuiltScrollSnapContainersTaken(taken) => arena.drop_built_scroll_snap_containers(&taken),
             ArenaChange::BeginLayoutTrace => arena.layout_trace().begin(),
