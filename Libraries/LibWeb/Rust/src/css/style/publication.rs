@@ -2244,7 +2244,8 @@ impl RetainedState {
     ) -> ElementReads {
         use std::hash::{Hash, Hasher};
         let written = self.state_written_facts(node, state);
-        let mut reads_random = false;
+        // Random bases and container units are the element's own: a record reading either is no one else's.
+        let mut reads_element = false;
         let mut reads_tree_counting = written.has_written_tree_counting;
         if written.may_read_element_random || written.has_substitutions {
             for winner in self.winner_groups.winners_in_state(state) {
@@ -2256,7 +2257,7 @@ impl RetainedState {
                 };
                 let substituted = match checks.substitution {
                     WrittenSubstitution::None => {
-                        reads_random |= checks.reads_element_random;
+                        reads_element |= checks.reads_element_random;
                         continue;
                     }
                     WrittenSubstitution::Unresolved => {
@@ -2277,17 +2278,20 @@ impl RetainedState {
                     },
                 };
                 let longhand = winner.property >= crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID;
-                let (random, tree_counting) = substituted.map_or((true, true), |value| {
+                let (element, tree_counting) = substituted.map_or((true, true), |value| {
                     let reads = crate::css::style_compute::collect_external_value_dependencies(value.data());
-                    (reads.has_unfixed_random_sharing, reads.uses_tree_counting_function)
+                    (
+                        reads.has_unfixed_random_sharing || reads.container_relative_length_unit_mask != 0,
+                        reads.uses_tree_counting_function,
+                    )
                 });
-                reads_random |= random;
+                reads_element |= element;
                 reads_tree_counting |= longhand && tree_counting;
             }
         }
-        let attributes = if reads_random || written.reads_attributes {
+        let attributes = if reads_element || written.reads_attributes {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            if reads_random {
+            if reads_element {
                 node.hash(&mut hasher);
             }
             self.facts
