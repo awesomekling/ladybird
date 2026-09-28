@@ -3354,6 +3354,11 @@ impl BoundScopeChain {
             self.limits.extend(end.selectors.iter().cloned());
         }
     }
+
+    /// The selectors of the scopes' roots and limits.
+    pub(crate) fn selectors(&self) -> impl Iterator<Item = &CompiledSelector> {
+        self.roots.iter().chain(&self.limits).map(AsRef::as_ref)
+    }
 }
 
 /// One concrete match, as the boundary carries it.
@@ -4820,6 +4825,10 @@ pub(crate) struct HomeAnswers {
     anchored: HashSet<StyleNodeID>,
     /// The transition steps the passes decided that the host has not taken yet.
     transition_steps: super::transition_step::TransitionStepsForHost,
+    /// The ASCII-lowercase local names of the attributes a selector the main thread sent tests the value text of.
+    attribute_value_text_names: Vec<crate::css::retained_fly_string::RetainedUtf16FlyString>,
+    /// Moves whenever `attribute_value_text_names` grows.
+    attribute_value_text_names_version: u64,
 }
 
 /// What a style engine holds that its home answers the main thread with, as whoever reached it left it: all it holds
@@ -5167,6 +5176,12 @@ impl HomeAnswers {
                 for identity in compiled.compiled_identities() {
                     self.rules.insert(identity, None);
                 }
+                compiled.visit_attribute_value_text_names(&mut |name| {
+                    if !self.attribute_value_text_names.contains(name) {
+                        self.attribute_value_text_names.push(name.clone());
+                        self.attribute_value_text_names_version += 1;
+                    }
+                });
             }
             StyleChange::Engine(EngineChange::RemoveNativeRules(identities)) => {
                 for identity in identities {
@@ -6149,6 +6164,58 @@ pub unsafe extern "C" fn style_engine_add_sheet(
         },
     );
     sheet.0 + 1
+}
+
+/// Moves whenever an attribute name comes to have a reader of its value text: a selector the main thread sent, or an
+/// `attr()` anywhere in the process. On the main thread, which knows it from what it sent.
+///
+/// # Safety
+/// Engine must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_attribute_value_text_requirements_version(engine: StyleEngineHandle) -> u64 {
+    // SAFETY: On the main thread.
+    unsafe { engine.answers() }
+        .attribute_value_text_names_version
+        .wrapping_add(crate::css::parser::arbitrary_substitution::attr_names_read_generation())
+}
+
+/// A selector reads the value text of an attribute name, as
+/// [`style_engine_attribute_value_text_readers`] answers.
+const ATTRIBUTE_VALUE_TEXT_READ_BY_SELECTORS: u32 = 1;
+/// An `attr()` can read the value text of an attribute name.
+const ATTRIBUTE_VALUE_TEXT_READ_BY_ATTR: u32 = 2;
+
+/// Which readers the value text of an attribute has, as `ATTRIBUTE_VALUE_TEXT_READ_BY_*` bits, by the ASCII-lowercase
+/// form of its local name: a selector the main thread sent whose operator an atom cannot answer, and an `attr()`,
+/// which reads only an attribute in no namespace. The host records the text of a value of the attribute only if
+/// there is one. On the main thread, which knows it from what it sent.
+///
+/// # Safety
+/// Engine must be live, and `folded_local_name` the raw form of a live `AK::Utf16FlyString`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_attribute_value_text_readers(
+    engine: StyleEngineHandle,
+    folded_local_name: usize,
+    has_no_namespace: bool,
+) -> u32 {
+    // SAFETY: On the main thread.
+    let names = &unsafe { engine.answers() }.attribute_value_text_names;
+    let mut readers = 0;
+    if names.iter().any(|name| name.raw() == folded_local_name) {
+        readers |= ATTRIBUTE_VALUE_TEXT_READ_BY_SELECTORS;
+    }
+    // SAFETY: Guaranteed by the caller.
+    let attr_may_read = has_no_namespace
+        && match unsafe { ak::utf16_string_units(&folded_local_name) } {
+            ak::Utf16StringUnits::Ascii(units) => crate::css::parser::arbitrary_substitution::attr_may_read_name(
+                &units.iter().copied().map(u16::from).collect::<Vec<_>>(),
+            ),
+            ak::Utf16StringUnits::Utf16(units) => crate::css::parser::arbitrary_substitution::attr_may_read_name(units),
+        };
+    if attr_may_read {
+        readers |= ATTRIBUTE_VALUE_TEXT_READ_BY_ATTR;
+    }
+    readers
 }
 
 /// Resolve a native rule identity in this document's engine, including shared sheets.

@@ -452,6 +452,27 @@ impl CompiledRules {
         self.plan.iter().filter_map(Planned::compiled_identity)
     }
 
+    /// Visits the ASCII-lowercase local name of every attribute the rules' selectors and scopes test the value of by
+    /// its text, as [`crate::css::selector::CompiledSelector::visit_attribute_value_text_names`] does.
+    pub(crate) fn visit_attribute_value_text_names(
+        &self,
+        visit: &mut impl FnMut(&crate::css::retained_fly_string::RetainedUtf16FlyString),
+    ) {
+        for planned in &self.plan {
+            let (selectors, scope) = match planned {
+                Planned::Compile(CompiledRule {
+                    kind: CompiledRuleKind::Style { selectors, scope, .. },
+                    ..
+                }) => (selectors, scope),
+                Planned::ReplaceSelectors(replaced) => (&replaced.selectors, &replaced.scope),
+                Planned::Compile(_) => continue,
+            };
+            for selector in selectors.iter().map(AsRef::as_ref).chain(scope.selectors()) {
+                selector.visit_attribute_value_text_names(visit);
+            }
+        }
+    }
+
     /// Publishes the rules into `engine`, on the owner.
     pub(crate) fn publish(self, engine: &mut crate::css::style::StyleEngine) {
         for planned in self.plan {

@@ -153,8 +153,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         transaction_fact_view,
         facts,
         programs,
-        attribute_value_text_names,
-        attribute_value_text_requirements_version,
         selector_programs_need_sweep,
         routing,
         selector_truth_changes,
@@ -288,8 +286,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(transaction_fact_view);
     assert_member_is_sync(facts);
     assert_member_is_sync(programs);
-    assert_member_is_sync(attribute_value_text_names);
-    assert_member_is_sync(attribute_value_text_requirements_version);
     assert_member_is_sync(selector_programs_need_sweep);
     assert_member_is_sync(routing);
     assert_member_is_sync(selector_truth_changes);
