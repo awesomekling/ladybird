@@ -630,6 +630,13 @@ pub(crate) struct NamedPseudoElementEnvironment {
     from_sample: bool,
 }
 
+impl NamedPseudoElementEnvironment {
+    /// What the engine's home reads of it: its identity, and whether it views the element's environment.
+    pub(crate) fn for_home(&self) -> (u64, bool) {
+        (self.identity, self.views_element_environment)
+    }
+}
+
 /// What the engine's own sample of an element leaves for the overlay record: the table after the
 /// animated box-type finalization, and the overlay.
 pub(crate) struct EngineSampledStyle {
@@ -1423,17 +1430,17 @@ impl super::StyleEngineState {
             .is_some_and(|named| named.from_sample)
     }
 
-    /// The host installs the record of a pseudo-element the engine settled: it takes the
-    /// environment the engine named for it, if any. Returns whether it did, and the host installs
-    /// none.
-    pub(crate) fn take_pseudo_element_environment_named_in_settle(
-        &mut self,
-        node: StyleNodeID,
-        pseudo_kind: u8,
-    ) -> bool {
+    /// The host installed the record of a pseudo-element the engine settled, and took the environment the engine named
+    /// for it from the home's copy: the pseudo-element takes it here as the copy did, unless the element no longer
+    /// holds the environment it views, and the host installs one itself.
+    pub(crate) fn take_pseudo_element_environment_named_in_settle(&mut self, node: StyleNodeID, pseudo_kind: u8) {
         let key = (node, pseudo_kind);
-        let Some(named) = self.retained.pseudo_element_environments_named_in_settle.remove(&key) else {
-            return false;
+        let Some(named) = self
+            .retained
+            .pseudo_element_environments_named_in_settle
+            .take_taken_by_host(&key)
+        else {
+            return;
         };
         // The host's object for an environment it resolved is the one the element holds.
         let data = match named {
@@ -1446,7 +1453,7 @@ impl super::StyleEngineState {
                     .and_then(|held| held.data.as_ref())
                     .map(inputs::RetainedCustomPropertyData::share)
                 else {
-                    return false;
+                    return;
                 };
                 Some(data)
             }
@@ -1479,7 +1486,6 @@ impl super::StyleEngineState {
         self.host
             .retired_custom_property_data
             .extend(retired.and_then(|held| held.data));
-        true
     }
 
     /// A sample of a synthetic pseudo-element over the record the host holds moved its

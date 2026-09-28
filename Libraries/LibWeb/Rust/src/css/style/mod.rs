@@ -812,7 +812,7 @@ pub struct RetainedState {
     /// settled their records, which each takes once the host installs its record; `None` for one
     /// holding none.
     pseudo_element_environments_named_in_settle:
-        HashMap<(StyleNodeID, u8), engine_sample::NamedPseudoElementEnvironment>,
+        drain_table::FollowedTable<(StyleNodeID, u8), engine_sample::NamedPseudoElementEnvironment>,
     /// The identity the next overlay the engine composes itself is published under, which the
     /// high bit keeps apart from the host's.
     next_engine_animation_overlay_identity: u64,

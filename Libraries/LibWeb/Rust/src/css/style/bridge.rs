@@ -4809,6 +4809,7 @@ pub(crate) struct EngineNews {
     deferred_inputs: Option<HashMap<StyleNodeID, (u8, u8)>>,
     environments: Vec<(StyleNodeID, Option<HeldEnvironment>)>,
     pseudo_element_environments: Vec<((StyleNodeID, u8), Option<HeldEnvironment>)>,
+    pseudo_element_environments_named: Vec<((StyleNodeID, u8), Option<NamedEnvironment>)>,
     anchored: Vec<(StyleNodeID, bool)>,
     rule_ids: Vec<(u64, Option<RuleID>)>,
     transition_steps: Option<super::transition_step::TransitionStepTables>,
@@ -4844,6 +4845,17 @@ impl EngineNews {
             self.pseudo_element_environments.push((
                 (node, pseudo),
                 held.then(|| engine.pseudo_element_custom_property_data(node, pseudo)),
+            ));
+        }
+        for key in engine
+            .retained
+            .pseudo_element_environments_named_in_settle
+            .take_written()
+        {
+            let named = engine.retained.pseudo_element_environments_named_in_settle.get(&key);
+            self.pseudo_element_environments_named.push((
+                key,
+                named.map(super::engine_sample::NamedPseudoElementEnvironment::for_home),
             ));
         }
         for node in engine.retained.anchor_names.take_written() {
@@ -4889,6 +4901,10 @@ impl EngineNews {
 /// A custom-property environment as the host reads it: the host's object for it, and its identity.
 type HeldEnvironment = (*const c_void, u64);
 
+/// What the host reads of the environment the engine named for a synthetic pseudo-element it settled: its identity, and
+/// whether it views the one the element holds.
+type NamedEnvironment = (u64, bool);
+
 /// The custom-property environment each element and each of its synthetic pseudo-elements holds, as the host reads it:
 /// the host's object for it, and its identity. The main thread follows each environment it hands the engine, and
 /// adopts what else moved.
@@ -4898,6 +4914,9 @@ pub(crate) struct HeldEnvironments {
     pseudo_elements: HashMap<(StyleNodeID, u8), HeldEnvironment>,
     /// The kinds of each element's synthetic pseudo-elements that hold one, one bit per kind.
     pseudo_element_kinds: HashMap<StyleNodeID, u64>,
+    /// The environments the engine named for the synthetic pseudo-elements it settled, which each takes as the host
+    /// installs its record.
+    named_in_settle: HashMap<(StyleNodeID, u8), NamedEnvironment>,
 }
 
 impl HeldEnvironments {
@@ -4934,6 +4953,30 @@ impl HeldEnvironments {
         }
     }
 
+    /// What a pseudo-element takes of the environment the engine named for it as it settled it, as
+    /// [`StyleEngine::take_pseudo_element_environment_named_in_settle`] takes it: `None` where the engine named none,
+    /// and `Some(None)` where it views the environment the element holds, which the element no longer does.
+    fn named_in_settle(&self, node: StyleNodeID, pseudo: u8) -> Option<Option<HeldEnvironment>> {
+        let &(identity, views_element_environment) = self.named_in_settle.get(&(node, pseudo))?;
+        if !views_element_environment {
+            return Some(Some((std::ptr::null(), identity)));
+        }
+        let (data, held) = self.element(node);
+        Some((!data.is_null() && held == identity).then_some((data, identity)))
+    }
+
+    /// Follows the host's take of the environment the engine named for a pseudo-element as it settled it.
+    fn take_named_in_settle(&mut self, node: StyleNodeID, pseudo: u8) {
+        if let Some(Some((data, identity))) = self.named_in_settle(node, pseudo) {
+            match identity {
+                0 => self.pseudo_elements.remove(&(node, pseudo)),
+                _ => self.pseudo_elements.insert((node, pseudo), (data, identity)),
+            };
+            self.note_pseudo_element(node, pseudo);
+        }
+        self.named_in_settle.remove(&(node, pseudo));
+    }
+
     /// Keeps `answer` for `key` as the engine does: an environment whose object is the one held already stays as it
     /// is.
     fn keep<K: Eq + std::hash::Hash>(held: &mut HashMap<K, HeldEnvironment>, key: K, answer: Option<HeldEnvironment>) {
@@ -4967,7 +5010,14 @@ impl HeldEnvironments {
         &mut self,
         elements: Vec<(StyleNodeID, Option<HeldEnvironment>)>,
         pseudo_elements: Vec<((StyleNodeID, u8), Option<HeldEnvironment>)>,
+        named_in_settle: Vec<((StyleNodeID, u8), Option<NamedEnvironment>)>,
     ) {
+        for (key, named) in named_in_settle {
+            match named {
+                Some(named) => self.named_in_settle.insert(key, named),
+                None => self.named_in_settle.remove(&key),
+            };
+        }
         for (node, held) in elements {
             match held {
                 Some(held) => self.elements.insert(node, held),
@@ -5129,6 +5179,9 @@ impl HomeAnswers {
             StyleChange::Engine(EngineChange::SetPseudoElementCustomPropertyData(node, pseudo, handed)) => {
                 self.environments.follow_handed(*node, Some(*pseudo), handed.as_ref());
             }
+            StyleChange::Engine(EngineChange::PseudoElementEnvironmentTakenByHost { node, pseudo_kind }) => {
+                self.environments.take_named_in_settle(*node, *pseudo_kind);
+            }
             StyleChange::Engine(EngineChange::RegisterAnchorNames { node, has_names, .. }) => {
                 match has_names {
                     true => self.anchored.insert(*node),
@@ -5204,8 +5257,11 @@ impl HomeAnswers {
         }
         self.deferred_inputs
             .adopt(news.applied_reactions_held, news.deferred_inputs);
-        self.environments
-            .adopt(news.environments, news.pseudo_element_environments);
+        self.environments.adopt(
+            news.environments,
+            news.pseudo_element_environments,
+            news.pseudo_element_environments_named,
+        );
         for (node, registers) in news.anchored {
             match registers {
                 true => self.anchored.insert(node),
@@ -6004,7 +6060,8 @@ unsafe fn with_declared_only_declarations<R>(
 
 /// The host installs the record of a synthetic pseudo-element the engine settled: the
 /// pseudo-element takes the custom-property environment the engine named for it as it settled it.
-/// Returns false where the engine named none, and the host installs the environment itself.
+/// Returns false where it takes none, and the host installs the environment itself. The home's copy
+/// answers, and the engine follows the take.
 ///
 /// # Safety
 /// `engine` must be live.
@@ -6014,28 +6071,24 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_environment_named_in_s
     node: u32,
     pseudo_kind: u8,
 ) -> bool {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_take_pseudo_element_environment_named_in_settle",
-        crate::css::style::owner_calls::StyleQuery::TakePseudoElementEnvironmentNamedInSettle { node, pseudo_kind },
-    )
-    .is()
-}
-
-/// Answers [`style_engine_take_pseudo_element_environment_named_in_settle`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_take_pseudo_element_environment_named_in_settle`].
-pub(crate) unsafe fn owner_take_pseudo_element_environment_named_in_settle(
-    engine: &mut crate::css::style::StyleEngine,
-    node: u32,
-    pseudo_kind: u8,
-) -> bool {
+    const ENTRY: &str = "style_engine_take_pseudo_element_environment_named_in_settle";
     let Some(node) = StyleNodeID::from_raw(node) else {
         return false;
     };
-    engine.take_pseudo_element_environment_named_in_settle(node, pseudo_kind)
+    engine.home().bring_home(ENTRY);
+    // SAFETY: On the main thread.
+    let Some(taken) = unsafe { engine.home().answers() }
+        .environments
+        .named_in_settle(node, pseudo_kind)
+    else {
+        return false;
+    };
+    crate::css::style::owner_calls::send(
+        engine,
+        ENTRY,
+        crate::css::style::owner_calls::EngineChange::PseudoElementEnvironmentTakenByHost { node, pseudo_kind },
+    );
+    taken.is_some()
 }
 
 /// The store of an environment the engine resolved, with one strong reference transferred to the
