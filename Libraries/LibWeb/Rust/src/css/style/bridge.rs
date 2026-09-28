@@ -2171,11 +2171,31 @@ pub unsafe extern "C" fn style_engine_take_transition_step_decided_in_pass(
     engine: StyleEngineInputHandle,
     node: u32,
 ) -> FfiTransitionStepDecidedInPass {
-    engine
-        .home()
-        .bring_home("style_engine_take_transition_step_decided_in_pass");
-    // SAFETY: The engine is home.
-    unsafe { engine.home().answers() }.take_transition_step(node, None)
+    take_transition_step(engine, "style_engine_take_transition_step_decided_in_pass", node, None)
+}
+
+/// Takes the transition step the pass decided for an element's row, or for its synthetic pseudo-element of
+/// `pseudo_kind`, from the engine's home, and tells the engine the host took it.
+fn take_transition_step(
+    engine: StyleEngineInputHandle,
+    entry: &'static str,
+    node: u32,
+    pseudo_kind: Option<u8>,
+) -> FfiTransitionStepDecidedInPass {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return FfiTransitionStepDecidedInPass::absent();
+    };
+    engine.home().bring_home(entry);
+    // SAFETY: On the main thread.
+    let step = unsafe { engine.home().answers() }.take_transition_step(node, pseudo_kind);
+    if step.present {
+        crate::css::style::owner_calls::send(
+            engine,
+            entry,
+            crate::css::style::owner_calls::EngineChange::TransitionStepTakenByHost { node, pseudo_kind },
+        );
+    }
+    step
 }
 
 /// Take the transition step the engine decided for a synthetic pseudo-element it settled, which
@@ -2190,11 +2210,12 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_transition_step_decide
     node: u32,
     pseudo_kind: u8,
 ) -> FfiTransitionStepDecidedInPass {
-    engine
-        .home()
-        .bring_home("style_engine_take_pseudo_element_transition_step_decided_in_pass");
-    // SAFETY: The engine is home.
-    unsafe { engine.home().answers() }.take_transition_step(node, Some(pseudo_kind))
+    take_transition_step(
+        engine,
+        "style_engine_take_pseudo_element_transition_step_decided_in_pass",
+        node,
+        Some(pseudo_kind),
+    )
 }
 
 /// The transform reference box the last committed layout left for `node`, which the animation
@@ -4775,9 +4796,12 @@ impl FfiRowSampledInPass {
 
 /// What the engine's home answers the main thread with, of what the engine holds, without asking the render owner: what
 /// the drain of the last style transaction reads and takes, which the main thread tells the engine it took, and what
-/// the engine holds that the main thread follows as it sends the engine a change.
+/// the engine holds for the main thread to read. It is the main thread's alone: it adopts the [`EngineNews`] whoever
+/// reached the engine left, and follows each change it sends over it.
 #[derive(Default)]
 pub(crate) struct HomeAnswers {
+    /// What the engine holds for its next style transaction.
+    pub(crate) pending: PendingFacts,
     /// The records the transaction's answer names, by record.
     records: Vec<(u64, std::sync::Arc<super::published_record::PublishedStyleRecord>)>,
     /// What each row's container conditions read of its containers.
@@ -4793,27 +4817,104 @@ pub(crate) struct HomeAnswers {
     sheets: u32,
     /// The elements with anchor names registered.
     anchored: HashSet<StyleNodeID>,
-    /// The transition steps the last pass decided, which the engine lends the home while nothing reaches it.
+    /// The transition steps the passes decided that the host has not taken yet.
     transition_steps: super::transition_step::TransitionStepsForHost,
 }
 
+/// What a style engine holds that its home answers the main thread with, as whoever reached it left it: all it holds
+/// of what moved since, and every entry written since of what the main thread reads by key. It moves into the home's
+/// exchange as the reach ends, and the main thread takes it from there, so nothing of it is shared.
+#[derive(Default)]
+pub(crate) struct EngineNews {
+    pending: PendingFacts,
+    records: Option<Vec<(u64, std::sync::Arc<super::published_record::PublishedStyleRecord>)>>,
+    container_effects: Option<HashMap<StyleNodeID, super::container_queries::ContainerVerdict>>,
+    rows_sampled: Option<HashMap<StyleNodeID, FfiRowSampledInPass>>,
+    applied_reactions_held: bool,
+    deferred_inputs: Option<HashMap<StyleNodeID, (u8, u8)>>,
+    environments: Vec<(StyleNodeID, Option<HeldEnvironment>)>,
+    pseudo_element_environments: Vec<((StyleNodeID, u8), Option<HeldEnvironment>)>,
+    anchored: Vec<(StyleNodeID, bool)>,
+    rule_ids: Vec<(u64, Option<RuleID>)>,
+    transition_steps: Option<super::transition_step::TransitionStepTables>,
+}
+
+// SAFETY: The pointers name the host's objects, which the main thread alone reads, and which the engine keeps alive
+// until the main thread takes their release.
+unsafe impl Send for EngineNews {}
+
+impl EngineNews {
+    /// Adds what `engine` holds now, as whoever reached it is done with it: what moved since the news began replaces
+    /// what it held, and entries written since go after the ones it held.
+    pub(crate) fn gather(&mut self, engine: &mut StyleEngine) {
+        self.pending = engine.pending_facts();
+        if let Some(records) = engine.host.records_for_drain.take() {
+            self.records = Some(records);
+        }
+        self.applied_reactions_held = engine.has_applied_style_reactions();
+        if std::mem::take(&mut engine.host.deferred_element_style_inputs_moved) {
+            self.deferred_inputs = Some(DeferredInputs::owed(engine).collect());
+        }
+        for node in engine.retained.element_custom_property_data.take_written() {
+            let held = engine.element_custom_property_data.get(&node).is_some();
+            self.environments
+                .push((node, held.then(|| engine.element_custom_property_data(node))));
+        }
+        for (node, pseudo) in engine.retained.pseudo_element_custom_property_data.take_written() {
+            let held = engine
+                .pseudo_element_custom_property_data
+                .get(&(node, pseudo))
+                .is_some();
+            self.pseudo_element_environments.push((
+                (node, pseudo),
+                held.then(|| engine.pseudo_element_custom_property_data(node, pseudo)),
+            ));
+        }
+        for node in engine.retained.anchor_names.take_written() {
+            self.anchored.push((node, engine.retained.anchor_names.registers(node)));
+        }
+        for identity in std::mem::take(&mut engine.native_rules.written_identities) {
+            self.rule_ids.push((identity, engine.native_rule_id(identity)));
+        }
+        if engine.retained.container_effects_for_host.take_moved() {
+            self.container_effects = Some((*engine.retained.container_effects_for_host).clone());
+        }
+        if engine.retained.rows_sampled_in_pass.take_moved() {
+            self.rows_sampled = Some(
+                engine
+                    .retained
+                    .rows_sampled_in_pass
+                    .iter()
+                    .map(|(&node, &published)| (node, row_sampled_in_pass(engine, Some(published))))
+                    .collect(),
+            );
+        }
+        if let Some(steps) = engine.transition_steps_moved() {
+            self.transition_steps = Some(steps);
+        }
+    }
+}
+
+/// A custom-property environment as the host reads it: the host's object for it, and its identity.
+type HeldEnvironment = (*const c_void, u64);
+
 /// The custom-property environment each element and each of its synthetic pseudo-elements holds, as the host reads it:
 /// the host's object for it, and its identity. The main thread follows each environment it hands the engine, and
-/// whoever reaches the engine what else moved.
+/// adopts what else moved.
 #[derive(Default)]
 pub(crate) struct HeldEnvironments {
-    elements: HashMap<StyleNodeID, (*const c_void, u64)>,
-    pseudo_elements: HashMap<(StyleNodeID, u8), (*const c_void, u64)>,
+    elements: HashMap<StyleNodeID, HeldEnvironment>,
+    pseudo_elements: HashMap<(StyleNodeID, u8), HeldEnvironment>,
     /// The kinds of each element's synthetic pseudo-elements that hold one, one bit per kind.
     pseudo_element_kinds: HashMap<StyleNodeID, u64>,
 }
 
 impl HeldEnvironments {
-    fn element(&self, node: StyleNodeID) -> (*const c_void, u64) {
+    fn element(&self, node: StyleNodeID) -> HeldEnvironment {
         self.elements.get(&node).copied().unwrap_or((std::ptr::null(), 0))
     }
 
-    fn pseudo_element(&self, node: StyleNodeID, pseudo: u8) -> (*const c_void, u64) {
+    fn pseudo_element(&self, node: StyleNodeID, pseudo: u8) -> HeldEnvironment {
         self.pseudo_elements
             .get(&(node, pseudo))
             .copied()
@@ -4826,7 +4927,7 @@ impl HeldEnvironments {
 
     /// Follows an environment the main thread hands the engine for an element, or for one of its synthetic
     /// pseudo-elements, as the engine will keep it.
-    pub(crate) fn follow_handed(
+    fn follow_handed(
         &mut self,
         node: StyleNodeID,
         pseudo: Option<u8>,
@@ -4844,11 +4945,7 @@ impl HeldEnvironments {
 
     /// Keeps `answer` for `key` as the engine does: an environment whose object is the one held already stays as it
     /// is.
-    fn keep<K: Eq + std::hash::Hash>(
-        held: &mut HashMap<K, (*const c_void, u64)>,
-        key: K,
-        answer: Option<(*const c_void, u64)>,
-    ) {
+    fn keep<K: Eq + std::hash::Hash>(held: &mut HashMap<K, HeldEnvironment>, key: K, answer: Option<HeldEnvironment>) {
         match answer {
             None => {
                 held.remove(&key);
@@ -4874,40 +4971,32 @@ impl HeldEnvironments {
         }
     }
 
-    fn follow(&mut self, engine: &mut StyleEngine) {
-        for node in engine.retained.element_custom_property_data.take_written() {
-            match engine.element_custom_property_data.get(&node) {
-                Some(_) => self.elements.insert(node, engine.element_custom_property_data(node)),
+    /// Takes the environments the engine holds now under the keys written since the last news.
+    fn adopt(
+        &mut self,
+        elements: Vec<(StyleNodeID, Option<HeldEnvironment>)>,
+        pseudo_elements: Vec<((StyleNodeID, u8), Option<HeldEnvironment>)>,
+    ) {
+        for (node, held) in elements {
+            match held {
+                Some(held) => self.elements.insert(node, held),
                 None => self.elements.remove(&node),
             };
         }
-        for (node, pseudo) in engine.retained.pseudo_element_custom_property_data.take_written() {
-            match engine.pseudo_element_custom_property_data.get(&(node, pseudo)) {
-                Some(_) => self
-                    .pseudo_elements
-                    .insert((node, pseudo), engine.pseudo_element_custom_property_data(node, pseudo)),
+        for ((node, pseudo), held) in pseudo_elements {
+            match held {
+                Some(held) => self.pseudo_elements.insert((node, pseudo), held),
                 None => self.pseudo_elements.remove(&(node, pseudo)),
             };
             self.note_pseudo_element(node, pseudo);
         }
-        debug_assert!(
-            self.elements.len() == engine.element_custom_property_data.len()
-                && self.pseudo_elements.len() == engine.pseudo_element_custom_property_data.len()
-                && self
-                    .elements
-                    .iter()
-                    .all(|(&node, &answer)| engine.element_custom_property_data(node) == answer)
-                && self.pseudo_elements.iter().all(|(&(node, pseudo), &answer)| engine
-                    .pseudo_element_custom_property_data(node, pseudo)
-                    == answer),
-            "the host's copy of the custom-property environments follows the engine's"
-        );
     }
 }
 
 /// The element style inputs the engine defers, by element, with what each owes: its reactions and inherited style
 /// groups. The main thread keeps them exact across what it sends as it follows each change it sends that may defer
-/// one, or knows they are not where it cannot say what the change defers.
+/// one, or knows they are not where it cannot say what the change defers, until whoever applies the change leaves it
+/// the engine's own.
 #[derive(Default)]
 pub(crate) struct DeferredInputs {
     exact: bool,
@@ -4938,9 +5027,26 @@ impl DeferredInputs {
         Some(u32::from(reaction | owed_reaction) | (u32::from(inherited_style_groups | owed_groups) << 8))
     }
 
+    /// Whether the main thread follows what `change`, which may leave `leaves`, does to the deferred inputs: where it
+    /// does not, whoever applies the change leaves it the engine's.
+    pub(crate) fn follows(change: &StyleChange, leaves: PendingFacts) -> bool {
+        use super::owner_calls::EngineChange;
+        !leaves.contains(PendingFacts::DEFERRED_ELEMENT_INPUTS)
+            || matches!(
+                change,
+                StyleChange::Engine(EngineChange::Boundary(
+                    BoundaryWrite::RecordElementStyleInput { .. }
+                        | BoundaryWrite::RecordDerivedElementStyleInput { .. }
+                        | BoundaryWrite::RecordTreeCountingStyleInput { .. }
+                        | BoundaryWrite::RecordContainerQueryInput { .. }
+                        | BoundaryWrite::ConsumeElementStyleInput { .. }
+                ))
+            )
+    }
+
     /// Follows a change the main thread sends, which may leave `leaves`.
-    fn follow_sent(&mut self, change: &crate::css::style::owner_calls::StyleChange, leaves: PendingFacts) {
-        use super::owner_calls::{EngineChange, StyleChange};
+    fn follow_sent(&mut self, change: &StyleChange, leaves: PendingFacts) {
+        use super::owner_calls::EngineChange;
         let recomputes =
             super::transaction::STYLE_REACTION_PUBLISHED_STYLE | super::transaction::STYLE_REACTION_RECOMPUTE_STYLE;
         let (node, reaction, groups) = match change {
@@ -4973,8 +5079,16 @@ impl DeferredInputs {
                 }
                 return;
             }
+            StyleChange::Engine(EngineChange::ElementStyleInputAbsorbedByHost {
+                node,
+                reaction,
+                inherited_style_groups,
+            }) => {
+                self.absorb(*node, *reaction, *inherited_style_groups);
+                return;
+            }
             _ => {
-                self.exact &= !leaves.contains(PendingFacts::DEFERRED_ELEMENT_INPUTS);
+                self.exact &= Self::follows(change, leaves);
                 return;
             }
         };
@@ -4987,19 +5101,14 @@ impl DeferredInputs {
         }
     }
 
-    fn follow(&mut self, engine: &mut StyleEngine) {
-        self.applied_reactions_held = engine.has_applied_style_reactions();
-        if !std::mem::take(&mut engine.host.deferred_element_style_inputs_moved) && self.exact {
-            debug_assert!(
-                self.inputs.len() == engine.host.deferred_element_style_inputs.len()
-                    && Self::owed(engine).all(|(node, owed)| self.inputs.get(&node) == Some(&owed)),
-                "the host's copy of the deferred element style inputs follows the engine's"
-            );
-            return;
+    /// Takes what the engine left: whether it holds applied reactions, and all it defers where that moved in a way the
+    /// main thread did not follow.
+    fn adopt(&mut self, applied_reactions_held: bool, inputs: Option<HashMap<StyleNodeID, (u8, u8)>>) {
+        self.applied_reactions_held = applied_reactions_held;
+        if let Some(inputs) = inputs {
+            self.inputs = inputs;
+            self.exact = true;
         }
-        self.inputs.clear();
-        self.inputs.extend(Self::owed(engine));
-        self.exact = true;
     }
 
     /// What each element owes of the engine's deferred inputs.
@@ -5018,9 +5127,10 @@ impl DeferredInputs {
 }
 
 impl HomeAnswers {
-    /// Follows a change the main thread sends, which may leave `leaves`.
-    pub(crate) fn follow_sent(&mut self, change: &crate::css::style::owner_calls::StyleChange, leaves: PendingFacts) {
-        use super::owner_calls::{EngineChange, StyleChange};
+    /// Follows a change the main thread sends, which may leave `leaves`, over what it adopted.
+    pub(crate) fn follow_sent(&mut self, change: &StyleChange, leaves: PendingFacts) {
+        use super::owner_calls::EngineChange;
+        self.pending = self.pending.union(leaves);
         match change {
             StyleChange::Engine(EngineChange::SetElementCustomPropertyData(node, handed)) => {
                 self.environments.follow_handed(*node, None, handed.as_ref());
@@ -5028,7 +5138,62 @@ impl HomeAnswers {
             StyleChange::Engine(EngineChange::SetPseudoElementCustomPropertyData(node, pseudo, handed)) => {
                 self.environments.follow_handed(*node, Some(*pseudo), handed.as_ref());
             }
+            StyleChange::Engine(EngineChange::RegisterAnchorNames { node, has_names, .. }) => {
+                match has_names {
+                    true => self.anchored.insert(*node),
+                    false => self.anchored.remove(node),
+                };
+            }
+            StyleChange::Engine(EngineChange::ContainerEffectsTakenByHost(node)) => {
+                self.container_effects.remove(node);
+            }
+            StyleChange::Engine(EngineChange::DiscardContainerEffects { node }) => {
+                if let Some(node) = StyleNodeID::from_raw(*node) {
+                    self.container_effects.remove(&node);
+                }
+            }
+            StyleChange::Engine(EngineChange::RowSampledTakenByHost(node)) => {
+                self.rows_sampled.remove(node);
+            }
+            StyleChange::Engine(EngineChange::TransitionStepTakenByHost { node, pseudo_kind }) => {
+                self.transition_steps.forget(*node, *pseudo_kind);
+            }
             _ => self.deferred_inputs.follow_sent(change, leaves),
+        }
+    }
+
+    /// Takes what whoever reached the engine left, which the main thread then follows each change it sent since over.
+    pub(crate) fn adopt(&mut self, news: EngineNews) {
+        self.pending = news.pending;
+        if let Some(records) = news.records {
+            self.records = records;
+        }
+        if let Some(container_effects) = news.container_effects {
+            self.container_effects = container_effects;
+        }
+        if let Some(rows_sampled) = news.rows_sampled {
+            self.rows_sampled = rows_sampled;
+        }
+        self.deferred_inputs
+            .adopt(news.applied_reactions_held, news.deferred_inputs);
+        self.environments
+            .adopt(news.environments, news.pseudo_element_environments);
+        for (node, registers) in news.anchored {
+            match registers {
+                true => self.anchored.insert(node),
+                false => self.anchored.remove(&node),
+            };
+        }
+        for (identity, id) in news.rule_ids {
+            match id {
+                Some(id) => self.rule_ids.insert(identity, id),
+                None => {
+                    self.rule_ids.remove(&identity);
+                }
+            }
+        }
+        if let Some(steps) = news.transition_steps {
+            self.transition_steps.adopt(steps);
         }
     }
 
@@ -5037,20 +5202,15 @@ impl HomeAnswers {
         self.rule_ids.get(&identity).map_or(0, |id| id.0 + 1)
     }
 
-    /// Follows the main thread registering an element's anchor names, which `has_names` says whether there are, and
-    /// answers whether it had names registered.
-    fn register_anchor_names(&mut self, node: StyleNodeID, has_names: bool) -> bool {
-        match has_names {
-            true => !self.anchored.insert(node),
-            false => self.anchored.remove(&node),
-        }
+    /// Whether an element has anchor names registered.
+    fn has_anchor_names(&self, node: StyleNodeID) -> bool {
+        self.anchored.contains(&node)
     }
 
     /// Takes the transition step the last pass decided for `node`'s row, or for its synthetic pseudo-element of
     /// `pseudo_kind`, so that exactly one installation applies it. What it points at stays alive until the next take.
-    fn take_transition_step(&mut self, node: u32, pseudo_kind: Option<u8>) -> FfiTransitionStepDecidedInPass {
-        let step = StyleNodeID::from_raw(node).and_then(|node| self.transition_steps.take(node, pseudo_kind));
-        match step {
+    fn take_transition_step(&mut self, node: StyleNodeID, pseudo_kind: Option<u8>) -> FfiTransitionStepDecidedInPass {
+        match self.transition_steps.take(node, pseudo_kind) {
             Some(step) => FfiTransitionStepDecidedInPass {
                 present: true,
                 actions: step.actions().as_ptr(),
@@ -5060,54 +5220,11 @@ impl HomeAnswers {
         }
     }
 
-    /// Lends `engine` back what the home keeps of it while nothing reaches it, as whoever reaches it first begins, or
-    /// takes it again as the last is done: the home and the engine trade places.
-    pub(crate) fn trade_with(&mut self, engine: &mut StyleEngine) {
-        engine.lend_transition_steps(&mut self.transition_steps);
-    }
-
     /// Names the next sheet the main thread adds.
     fn add_sheet(&mut self) -> SheetID {
         let sheet = SheetID(self.sheets);
         self.sheets += 1;
         sheet
-    }
-
-    /// Follows what `engine` keeps, as whoever reached it is done with it.
-    pub(crate) fn follow(&mut self, engine: &mut StyleEngine) {
-        if let Some(records) = engine.host.records_for_drain.take() {
-            self.records = records;
-        }
-        self.deferred_inputs.follow(engine);
-        self.environments.follow(engine);
-        for node in engine.retained.anchor_names.take_written() {
-            match engine.retained.anchor_names.registers(node) {
-                true => self.anchored.insert(node),
-                false => self.anchored.remove(&node),
-            };
-        }
-        for identity in std::mem::take(&mut engine.native_rules.written_identities) {
-            match engine.native_rule_id(identity) {
-                Some(id) => self.rule_ids.insert(identity, id),
-                None => {
-                    self.rule_ids.remove(&identity);
-                }
-            }
-        }
-        if engine.retained.container_effects_for_host.take_moved() {
-            self.container_effects
-                .clone_from(&engine.retained.container_effects_for_host);
-        }
-        if engine.retained.rows_sampled_in_pass.take_moved() {
-            self.rows_sampled.clear();
-            self.rows_sampled.extend(
-                engine
-                    .retained
-                    .rows_sampled_in_pass
-                    .iter()
-                    .map(|(&node, &published)| (node, row_sampled_in_pass(engine, Some(published)))),
-            );
-        }
     }
 
     pub(crate) fn record(
@@ -6323,15 +6440,14 @@ pub unsafe extern "C" fn style_engine_register_anchor_names(
         return 0;
     };
     engine.home().bring_home(ENTRY);
-    // SAFETY: The engine is home.
-    let had_names = unsafe { engine.home().answers() }.register_anchor_names(node, has_names);
+    // SAFETY: On the main thread.
+    let had_names = unsafe { engine.home().answers() }.has_anchor_names(node);
     crate::css::style::owner_calls::send(
         engine,
         ENTRY,
         crate::css::style::owner_calls::EngineChange::RegisterAnchorNames {
             node,
             style_record,
-            had_names,
             has_names,
         },
     );

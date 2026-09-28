@@ -69,9 +69,11 @@ pub(crate) enum EngineChange {
     RegisterAnchorNames {
         node: StyleNodeID,
         style_record: u64,
-        had_names: bool,
         has_names: bool,
     },
+    /// The host took the transition step the pass decided for an element's row, or for its synthetic pseudo-element
+    /// of `pseudo_kind`.
+    TransitionStepTakenByHost { node: StyleNodeID, pseudo_kind: Option<u8> },
     /// The transitions one of an element's lists now holds.
     SetElementTransitions {
         node: StyleNodeID,
@@ -140,6 +142,7 @@ impl EngineChange {
             | Self::PrepareRootFontResolution { .. }
             | Self::PublishFontFaceSnapshot { .. }
             | Self::RowSampledTakenByHost(_)
+            | Self::TransitionStepTakenByHost { .. }
             | Self::ElementStyleInputAbsorbedByHost { .. }
             | Self::SetElementCustomPropertyData(..)
             | Self::SetPseudoElementCustomPropertyData(..)
@@ -245,17 +248,11 @@ impl EngineChange {
             } => {
                 engine.absorb_element_style_input(node, reaction, inherited_style_groups, false);
             }
-            Self::RegisterAnchorNames {
-                node,
-                style_record,
-                had_names,
-                has_names,
-            } => {
-                let registered = engine.register_anchor_names(node, style_record);
-                debug_assert!(
-                    registered.had_names == had_names && registered.has_names == has_names,
-                    "the main thread knows which elements register anchor names as the engine does"
-                );
+            Self::RegisterAnchorNames { node, style_record, .. } => {
+                engine.register_anchor_names(node, style_record);
+            }
+            Self::TransitionStepTakenByHost { node, pseudo_kind } => {
+                engine.transition_step_taken_by_host(node, pseudo_kind);
             }
             Self::SetElementTransitions {
                 node,
@@ -306,11 +303,15 @@ impl StyleChange {
         }
     }
 
-    pub(crate) fn apply(self, engine: &mut StyleEngine) {
+    /// Applies the change, which the main thread took to leave `leaves`, to `engine`.
+    pub(crate) fn apply(self, engine: &mut StyleEngine, leaves: PendingFacts) {
+        // What the main thread cannot follow of the deferred inputs, it adopts from the engine.
+        let followed = super::bridge::DeferredInputs::follows(&self, leaves);
         match self {
             Self::Inputs(inputs) => inputs.apply(engine),
             Self::Engine(change) => change.apply(engine),
         }
+        engine.host.deferred_element_style_inputs_moved |= !followed;
     }
 }
 
