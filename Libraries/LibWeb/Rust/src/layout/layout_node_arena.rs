@@ -867,18 +867,21 @@ impl FreedSubtree {
 }
 
 /// Pins a record for the host's readers in the document thread's table, or with the arena's engine when no document
-/// thread has one (an engine a test drives).
+/// thread has one (an engine a test drives). The render owner, which writes beside the document thread, sends the pin
+/// for the table to take in.
 fn pin_host_style_record(arena: &LayoutNodeArena, record: u64) {
     match arena.host_style_record_pins.get() {
-        // SAFETY: The arena's owner is the document thread, or runs while it waits.
+        Some(pins) if crate::stage_thread::on_owner_thread() => pins.pin_from_owner(record),
+        // SAFETY: The document thread does the owner's work itself.
         Some(pins) => unsafe { pins.pins() }.pin(record),
         None => arena.with_style_engine(|engine| engine.pin_layout_style_record(record)),
     }
 }
 
-/// Releases a pin [`pin_host_style_record`] took.
+/// Releases a pin [`pin_host_style_record`] took, as that does.
 fn unpin_host_style_record(arena: &LayoutNodeArena, record: u64) {
     match arena.host_style_record_pins.get() {
+        Some(pins) if crate::stage_thread::on_owner_thread() => pins.unpin_from_owner(record),
         // SAFETY: As for `pin_host_style_record`.
         Some(pins) => unsafe { pins.pins() }.unpin(record),
         None => arena.with_style_engine(|engine| engine.unpin_layout_style_record(record)),
