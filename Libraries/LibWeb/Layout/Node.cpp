@@ -23,8 +23,6 @@
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
-#include <LibWeb/HTML/HTMLTableCellElement.h>
-#include <LibWeb/HTML/HTMLTableColElement.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
@@ -44,22 +42,6 @@
 #include <LibWeb/SVG/SVGTextContentElement.h>
 
 namespace Web::Layout {
-
-static u8 dom_paint_facts_of(GC::Ptr<DOM::Node const> node)
-{
-    if (!node)
-        return 0;
-    u8 facts = 0;
-    if (node->is_inert())
-        facts |= static_cast<u8>(RustFFI::DomPaintFact::Inert);
-    if (node->is_editable_or_editing_host())
-        facts |= static_cast<u8>(RustFFI::DomPaintFact::EditableOrEditingHost);
-    if (node->inside_blocking_wheel_event_handler())
-        facts |= static_cast<u8>(RustFFI::DomPaintFact::InsideBlockingWheelEventHandler);
-    if (auto const* navigable_container = as_if<HTML::NavigableContainer>(*node); navigable_container && navigable_container->content_navigable())
-        facts |= static_cast<u8>(RustFFI::DomPaintFact::NestedNavigableContainer);
-    return facts;
-}
 
 // The StyleNodeID a row bound to this DOM node records: an element's or a text node's.
 CSS::StyleNodeID Node::style_node_of(DOM::Node const* node)
@@ -82,71 +64,6 @@ static RustFFI::FfiNodeConstructionFacts build_node_construction_facts(GC::Ptr<D
         .dom_paint_facts = dom_paint_facts_of(node),
         .style_node = Node::style_node_of(node.ptr()).value(),
     };
-}
-
-// What a row built for the node is painted and hit-tested with, recorded under the node's
-// identity for the rows the build has yet to stamp and journalled for the rows it already has.
-// Neither half needs the node to have a box, which is why this is not a row's own business: the
-// build reads the recorded answer for a node that gains one.
-void publish_dom_paint_facts(DOM::Node const& dom_node)
-{
-    auto& document = const_cast<DOM::Document&>(dom_node.document());
-    auto facts = dom_paint_facts_of(&dom_node);
-    // A document nothing is ever inert, editable or wheel-handled in publishes nothing, and the
-    // flag is what keeps a node's arrival free on such a page. It is set before the first non-zero
-    // publication, so a later drop back to zero is still published.
-    if (facts == 0 && !document.may_have_dom_paint_facts())
-        return;
-    if (facts != 0)
-        document.set_may_have_dom_paint_facts();
-    auto identity = dom_node.is_document() ? document.style_node_id() : Node::style_node_of(&dom_node);
-    // A change is recorded as the arrival was, so the last one recorded is what goes in.
-    if (identity.value() != 0)
-        document.render_inputs_for_write().style_engine().record_dom_paint_facts(identity, facts);
-    document.invalidation_journal().note_dom_paint_facts(DOM::NodeIdentity::of(dom_node), facts);
-}
-
-// Whether a row built for the node sits in the user agent shadow tree of the focused text
-// control, which is what a caret and a selection are painted inside. The answer moves only when
-// the focused area does, and a node in no user agent shadow tree can never hold it, so the
-// published set holds one control's shadow tree at a time.
-void publish_is_in_focused_text_control(DOM::Node const& node)
-{
-    auto& document = const_cast<DOM::Document&>(node.document());
-    auto shadow_root = node.containing_shadow_root();
-    auto value = shadow_root
-        && shadow_root->is_user_agent_internal()
-        && is<HTML::FormAssociatedTextControlElement>(shadow_root->host())
-        && shadow_root->host()->is_focused();
-    auto* arena = document.layout_node_arena_if_created();
-    if (!arena) {
-        if (!value)
-            return;
-        arena = &document.layout_node_arena();
-    }
-    auto identity = Node::style_node_of(&node);
-    if (identity.value() != 0)
-        RustFFI::layout_arena_set_identity_in_focused_text_control(arena->handle(), identity.value(), value);
-}
-
-// What a row built for the element is scrolled to. The element's box is replaced whenever its
-// subtree is rebuilt, so the offset is held against the identity that outlives it and a row the
-// build stamps reads it there, the way a pseudo-element's box already does. The rows the element
-// already has are published to separately, by the caller that has one in hand.
-void publish_element_scroll_offset(DOM::Element const& element)
-{
-    auto& document = const_cast<DOM::Document&>(element.document());
-    auto offset = element.scroll_offset({});
-    auto* arena = document.layout_node_arena_if_created();
-    if (!arena) {
-        // Nothing has scrolled anything before a layout tree exists, so there is no offset to
-        // forget, as for a pseudo-element's.
-        if (offset.is_zero())
-            return;
-        arena = &document.layout_node_arena();
-    }
-    if (element.style_node_id().value() != 0)
-        RustFFI::layout_arena_set_element_scroll_offset(arena->handle(), element.style_node_id().value(), offset);
 }
 
 Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind kind, AttachToDOMNode attach_to_dom_node)
@@ -722,6 +639,12 @@ void NodeWithStyle::set_style_record(CSS::PublishedStyleRecord const* style_reco
         document().render_inputs_for_write().reset_intrinsic_size_caches_of_self_and_ancestors(slot_id(this));
 }
 
+void set_box_style_record(Painting::BoxSlot const& box, CSS::PublishedStyleRecord const* style_record)
+{
+    if (auto row = row_of_box(box); row && !row.is_text())
+        NodeWithStyle::set_style_record(row, style_record);
+}
+
 void NodeWithStyle::set_style_record(Row const& row, CSS::PublishedStyleRecord const* style_record)
 {
     // A box has style for as long as it lives (see set_style_record() above).
@@ -775,51 +698,10 @@ void NodeWithStyle::did_update_style_record()
     did_update_row_style_record(Painting::BoxSlot::of(document(), slot_id(this)), dom_node(), m_style_payloads);
 }
 
-namespace {
-
-struct TableSpans {
-    u16 column_span { 1 };
-    u16 row_span { 1 };
-    u32 raw_column_span { 1 };
-};
-
-}
-
-static TableSpans table_spans_of(DOM::Node const* node)
-{
-    TableSpans spans;
-    if (auto const* cell = as_if<HTML::HTMLTableCellElement>(node)) {
-        spans.column_span = static_cast<u16>(cell->col_span());
-        spans.row_span = static_cast<u16>(cell->row_span());
-    } else if (auto const* column = as_if<HTML::HTMLTableColElement>(node)) {
-        spans.column_span = static_cast<u16>(column->span());
-        // The raw span keeps the unclamped attribute value; its only consumer is the
-        // table formatting context's column handling, so other elements' span
-        // attributes stay out of the arena map.
-        spans.raw_column_span = column->get_attribute_value(HTML::AttributeNames::span).to_number<u32>().value_or(1);
-    }
-    return spans;
-}
-
 bool NodeWithStyle::synchronize_table_span_data()
 {
     auto spans = table_spans_of(dom_node());
     return RustFFI::layout_arena_set_table_spans(arena_handle(), slot_id(this), spans.column_span, spans.row_span, spans.raw_column_span);
-}
-
-// The spans a row built for a table cell or table column takes from its attributes, recorded
-// under the element's identity for the rows the build has yet to stamp. The rows the element
-// already has are synchronised by the attribute change that moved the spans.
-void publish_table_spans(DOM::Element const& element)
-{
-    if (!is<HTML::HTMLTableCellElement>(element) && !is<HTML::HTMLTableColElement>(element))
-        return;
-    auto identity = element.style_node_id();
-    if (identity.value() == 0)
-        return;
-    auto spans = table_spans_of(&element);
-    // A change is recorded as the arrival was, so the last one recorded is what goes in.
-    const_cast<DOM::Document&>(element.document()).render_inputs_for_write().style_engine().record_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span);
 }
 
 void NodeWithStyle::set_display(CSS::Display display)
