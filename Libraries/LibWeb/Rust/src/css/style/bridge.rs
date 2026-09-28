@@ -4606,7 +4606,7 @@ pub unsafe extern "C" fn style_engine_clock_tick_take_entry(
     // SAFETY: Guaranteed by the caller.
     unsafe {
         *node = entry.style_node.raw();
-        *style_record_before = entry.style_record_before;
+        *style_record_before = entry.style_record_before.get();
         *installed_in_arena = entry.installed_in_arena;
         sample.write(entry.sample);
     }

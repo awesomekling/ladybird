@@ -1,0 +1,4 @@
+leased: true, held: before-completion, tick ran beside the pass: true, taken: true
+display: none, float: none, animations: 0
+leased: true, held: before-completion, tick ran beside the pass: true, taken: true
+display: block, float: none, animations: 0

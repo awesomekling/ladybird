@@ -26,17 +26,18 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
+use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::ThreadId;
 
 use crate::css::style::StyleEngine;
-use crate::css::style::StyleEngineInputHandle;
 use crate::css::style::bridge::{
     FfiRowSampledInPass, FfiStyleInvalidationField, sample_installed_record_for_clock_tick,
 };
-use crate::css::style::engine_home::{Holder, Owed, StyleEngineLoan};
+use crate::css::style::engine_home::{AtHome, Holder, Owed, StyleEngineLoan};
 use crate::css::style::tree::StyleNodeID;
+use crate::css::style::{StyleEngineHandle, StyleEngineInputHandle};
 use crate::layout::node_data::NodeSlotId;
 use crate::layout::update_layout::ClockLayoutFrame;
 use crate::layout::{ArenaHandle, LayoutNodeArena};
@@ -84,8 +85,8 @@ impl FfiClockScrollTimeline {
 /// What one tick did for one target, for the host to adopt.
 pub(crate) struct ClockTickEntry {
     pub(crate) style_node: StyleNodeID,
-    /// The record the target held before the tick.
-    pub(crate) style_record_before: u64,
+    /// The record the target held before the tick: one, so that an element that holds none adopts nothing.
+    pub(crate) style_record_before: NonZeroU64,
     /// The sample; `present` is false where the engine could not take it and the host samples the
     /// target itself.
     pub(crate) sample: FfiRowSampledInPass,
@@ -176,13 +177,22 @@ impl ClockPublication {
 /// What the ticks of a document's clocks left for the host to adopt.
 #[derive(Default)]
 struct Adoption {
-    /// One entry per target.
+    /// One entry per target, which the host takes with its style engine home ([`Self::take_entries`]).
     entries: Vec<ClockTickEntry>,
     /// The committed geometry the last display tick laid out, which the host's reads answer from once it adopted the
     /// entries, as they would from a snapshot it published.
     query_snapshot: Option<QuerySnapshot>,
     /// The rows the last display tick published, which the host's row reads answer from once it adopted the entries.
     rows: Option<Arc<crate::layout::row_reads::RowSnapshot>>,
+}
+
+impl Adoption {
+    /// The entries, which the host checks against what its elements hold and installs with nothing in between that
+    /// takes a frame in: a frame that holds the engine would move what an element holds under a sample it checked, or
+    /// drop the sample's record.
+    fn take_entries(&mut self, _: AtHome) -> Vec<ClockTickEntry> {
+        std::mem::take(&mut self.entries)
+    }
 }
 
 /// The clock of a document, which the owner keeps in the document's render state: what its ticks
@@ -319,20 +329,22 @@ impl DocumentClock {
         let mut presentable = true;
         for target in &self.targets {
             // A tick samples over the record the target's box holds: the host's, or the one an earlier
-            // tick installed ahead of it.
+            // tick installed ahead of it. A target without a box, or whose box holds no style, is the host's.
             let row = arena.bound_row(target.style_node);
-            if row.is_invalid() {
+            let Some(style_record) = (!row.is_invalid())
+                .then(|| arena.node_style_record(row))
+                .and_then(NonZeroU64::new)
+            else {
                 outcome = FfiClockTickOutcome::NeedsMain;
                 presentable = false;
                 continue;
-            }
-            let style_record = arena.node_style_record(row);
+            };
             // SAFETY: As above; the borrow ends with the call.
             let sampled = unsafe {
                 sample_installed_record_for_clock_tick(
                     &mut *engine,
                     target.style_node,
-                    style_record,
+                    style_record.get(),
                     arena_handle,
                     &samples,
                 )
@@ -349,7 +361,7 @@ impl DocumentClock {
                 continue;
             };
             // The sample moved nothing the record composed.
-            if sample.style_record == style_record {
+            if sample.style_record == style_record.get() {
                 continue;
             }
             let level = sample.invalidation.invalidation & 0x3;
@@ -370,7 +382,7 @@ impl DocumentClock {
             // host holds: the arena's log keeps only the last record too.
             if let Some(entry) = entries.iter_mut().find(|entry| {
                 entry.style_node == target.style_node
-                    && entry.sample.style_record == style_record
+                    && entry.sample.style_record == style_record.get()
                     && entry.installed_in_arena
                     && installed_in_arena
             }) {
@@ -869,15 +881,17 @@ pub struct FfiClockAdoption {
     pub query_snapshot: *const c_void,
 }
 
-/// Takes what the ticks of the clocks of the document whose layout arena is `arena` left for the
-/// host to adopt. The query snapshot converts rects to viewport space with `viewport`, the document's
-/// scroll state as it holds it now.
+/// Takes what the ticks of the clocks of the document whose layout arena is `arena` and whose style
+/// engine is `engine` left for the host to adopt. The query snapshot converts rects to viewport space
+/// with `viewport`, the document's scroll state as it holds it now. Where the ticks left samples, a
+/// frame in flight that holds the engine is taken in first.
 ///
 /// # Safety
 ///
 /// `viewport.device_scroll_offsets` addresses `viewport.device_scroll_offsets_len` points.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_document_clock_take_adoption(
+    engine: StyleEngineHandle,
     arena: *mut c_void,
     viewport: FfiQuerySnapshotViewport,
 ) -> FfiClockAdoption {
@@ -890,15 +904,19 @@ pub unsafe extern "C" fn rust_document_clock_take_adoption(
             query_snapshot: std::ptr::null(),
         };
     };
+    // With the publication unlocked: taking a frame in can adopt a tick of its own.
+    let left_samples = !published.adoption().entries.is_empty();
+    let home = left_samples.then(|| engine.bring_home("rust_document_clock_take_adoption"));
     let mut adoption = published.adoption();
-    let has_samples = !adoption.entries.is_empty();
+    let entries = home.map_or_else(Vec::new, |home| adoption.take_entries(home));
+    let has_samples = !entries.is_empty();
     if let Some(rows) = adoption.rows.take() {
         // SAFETY: Every caller passes the live arena of a document on the main thread, which borrows no rows here.
         unsafe { crate::layout::HostTables::beside_frame(arena) }
             .adopted_rows
             .publish(rows);
     }
-    ADOPTING.with_borrow_mut(|adopting| *adopting = std::mem::take(&mut adoption.entries).into());
+    ADOPTING.with_borrow_mut(|adopting| *adopting = entries.into());
     FfiClockAdoption {
         has_samples,
         time: if running { published.time() } else { f64::NAN },
