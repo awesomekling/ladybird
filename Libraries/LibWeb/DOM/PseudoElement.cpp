@@ -71,19 +71,6 @@ void SyntheticPseudoElement::set_scroll_offset(CSSPixelPoint value)
         m_originating_element->style_node_id().value(), encode_generated_for(m_type), value);
 }
 
-void SyntheticPseudoElement::unbind_box()
-{
-    if (!m_originating_element)
-        return;
-    auto box = Painting::BoxSlot::of_pseudo_element(*m_originating_element, m_type);
-    if (!box)
-        return;
-    // The box is read until it is detached, so its style record stays pinned until then.
-    Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(box.arena(), m_originating_element->style_node_id().value(), encode_generated_for(m_type));
-    Layout::RustFFI::layout_arena_set_node_flag(box.arena(), box.slot(), Layout::RustFFI::HostNodeFlag::IsPseudoElementPrincipalBox, false);
-    Layout::RustFFI::layout_arena_unbind_row(box.arena(), box.slot());
-}
-
 Node& SyntheticPseudoElement::root() const
 {
     VERIFY(m_originating_element);

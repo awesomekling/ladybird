@@ -692,23 +692,6 @@ void ComputedValues::adopt_identical_computed_longhand_table(ComputedValues cons
         const_cast<ComputedValues&>(*this).copy_computed_longhand_table_from(previous);
 }
 
-bool ComputedValues::layout_affecting_group_payloads_differ(void const* const* a, void const* const* b)
-{
-    auto differs = [&]<typename T>() {
-        auto const* mine = static_cast<T const*>(a[T::style_group_index]);
-        auto const* theirs = static_cast<T const*>(b[T::style_group_index]);
-        return mine != theirs && !(*mine == *theirs);
-    };
-#define LIBWEB_COMPARE_STYLE_GROUP_PAYLOAD(name, path, sharing_name, affects_layout) \
-    if constexpr (affects_layout) {                                                  \
-        if (differs.template operator()<name>())                                     \
-            return true;                                                             \
-    }
-    LIBWEB_ENUMERATE_COMPUTED_VALUE_STYLE_GROUPS(LIBWEB_COMPARE_STYLE_GROUP_PAYLOAD)
-#undef LIBWEB_COMPARE_STYLE_GROUP_PAYLOAD
-    return false;
-}
-
 void const* ComputedValues::style_group_payload(StyleGroupIndex group) const
 {
     switch (group) {

@@ -628,17 +628,6 @@ static void did_update_box_style_record(Painting::BoxSlot const& box, void const
     document.forget_snapped_areas_of_scroll_container(snap_container);
 }
 
-// Whether moving a box from one record to the other can change its layout, from the payloads each record names: an
-// overlay record borrows other payloads than its base, so carrying one is reason enough.
-static bool style_change_affects_layout(CSS::StyleRecordID old_style_record, void const* old_style_payloads, CSS::PublishedStyleRecord const& new_style_record)
-{
-    return !old_style_record
-        || !old_style_payloads
-        || CSS::PublishedStyleRecord::identity_is_animation_overlay(old_style_record)
-        || new_style_record.is_animation_overlay()
-        || CSS::ComputedValues::layout_affecting_group_payloads_differ(static_cast<void const* const*>(old_style_payloads), new_style_record.view().payloads);
-}
-
 void apply_style_to_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord const& style_record)
 {
     if (!box.is_live() || box.is_text())
@@ -725,18 +714,10 @@ void set_style_record_of_box(Painting::BoxSlot const& box, CSS::PublishedStyleRe
     // A box has style for as long as it lives: a record taken away from its DOM target leaves the box the one it has.
     if (!style_record || !box.is_live() || box.is_text())
         return;
-    auto* arena = box.arena();
-    auto slot = box.slot();
     // A layout-derived record is independent of its DOM target's record. A rendering consequence replaces and
     // re-derives it explicitly through apply_style_to_box().
-    auto const row_style_record = RustFFI::layout_arena_row_style_record(arena, slot);
-    if (row_style_record.derived)
-        return;
-    auto const old_style_record_identity = CSS::StyleRecordID { row_style_record.record };
-    bool changes_layout_affecting_style = old_style_record_identity != style_record->identity()
-        && style_change_affects_layout(old_style_record_identity, RustFFI::layout_arena_node_style_payloads(arena, slot), *style_record);
-    RustFFI::layout_arena_replace_row_style_record(arena, slot, style_record->identity().value(), changes_layout_affecting_style);
-    did_update_box_style_record(box, style_record->payloads());
+    if (RustFFI::layout_arena_replace_row_style_record(box.arena(), box.slot(), style_record->identity().value()))
+        did_update_box_style_record(box, style_record->payloads());
 }
 
 // Whether a box is the one its pseudo-element is bound to. The generated content inside the box carries the same

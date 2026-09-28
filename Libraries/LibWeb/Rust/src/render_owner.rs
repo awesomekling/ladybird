@@ -1380,6 +1380,18 @@ pub extern "C" fn render_owner_arena_counts(document: DocumentId) -> FfiArenaCou
     }
 }
 
+/// How many rows of the layout subtree `root` heads come in pre-order after a row with a label not below theirs, for
+/// tests.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_pre_order_label_violation_count(arena: *mut c_void, root: NodeSlotId) -> u64 {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { ask_about(arena, Query::PreOrderLabelViolations { root }) }.count()
+}
+
 /// On a document thread: takes back the frame in flight of `document`, if any, so that a read finds the document as
 /// the frame left it.
 #[track_caller]

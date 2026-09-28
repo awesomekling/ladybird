@@ -3446,7 +3446,7 @@ bool Element::has_synthetic_pseudo_elements() const
 
 void Element::clear_synthetic_pseudo_element_layout_nodes()
 {
-    for_each_synthetic_pseudo_element([&](CSS::PseudoElement type, SyntheticPseudoElement& pseudo_element) {
+    for_each_synthetic_pseudo_element([&](CSS::PseudoElement type, SyntheticPseudoElement&) {
         if (auto box = Painting::BoxSlot::of_pseudo_element(*this, type)) {
             // The pseudo-element's box leaves the layout tree with everything in it, its committed boxes cleared first.
             Vector<Compositing::RustFFI::NodeSlotId> boxes;
@@ -3456,10 +3456,8 @@ void Element::clear_synthetic_pseudo_element_layout_nodes()
             });
             for (auto slot : boxes)
                 Layout::RustFFI::layout_arena_paintable_cleared_from_node(box.arena(), slot);
-            Layout::RustFFI::layout_arena_prepare_subtree_for_detach(box.arena(), box.slot());
-            Layout::RustFFI::layout_arena_detach_and_free_subtree(box.arena(), box.slot());
+            Layout::RustFFI::layout_arena_drop_subtree(box.arena(), box.slot());
         }
-        pseudo_element.unbind_box();
     });
 }
 

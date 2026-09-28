@@ -815,10 +815,6 @@ public:
     };
     static Statistics const& statistics() { return s_statistics; }
 
-    // The same question answered straight from two style records' group payload arrays, so a caller
-    // that only wants the answer does not have to materialize a ComputedValues for either record.
-    static bool layout_affecting_group_payloads_differ(void const* const* a, void const* const* b);
-
     // Returns the Rust-owned payload for direct read-only layout access. The
     // pointer is borrowed from this immutable ComputedValues instance.
     void const* style_group_payload(StyleGroupIndex) const;

@@ -42,6 +42,7 @@ mod partial_relayout;
 mod read_scope;
 pub(crate) mod rendered_text;
 mod replaced_with_children_formatting_context;
+mod row_reads;
 pub(crate) mod run_records;
 pub(crate) mod seal;
 pub(crate) mod sizing_context;
