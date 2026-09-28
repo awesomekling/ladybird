@@ -235,9 +235,6 @@ thread_local! {
     // submitted to the paint lane, which reach neither. Together they are the frame in flight.
     static SUBMITTED: RefCell<Vec<SubmittedStage>> = const { RefCell::new(Vec::new()) };
     static PAINTING: RefCell<Vec<PaintStage>> = const { RefCell::new(Vec::new()) };
-    // While above zero, the style engine entrances of this thread only wait for a stage that reaches
-    // their engine (see rust_stage_thread_begin_style_engine_entrances_that_only_wait).
-    static STYLE_ENGINE_ENTRANCES_ONLY_WAIT: Cell<u32> = const { Cell::new(0) };
     // On the calling thread, how many forced joins took a style pass back.
     static STYLE_PASS_FORCED_JOINS: Cell<u64> = const { Cell::new(0) };
     // On the calling thread, the call sites that forced a join already logged.
@@ -1507,12 +1504,6 @@ pub unsafe extern "C" fn rust_stage_thread_forced_joins(label: *const u8, label_
     })
 }
 
-/// Whether the calling thread's style engine entrances only wait for the stage that holds their
-/// engine (see [`rust_stage_thread_begin_style_engine_entrances_that_only_wait`]).
-pub(crate) fn style_engine_entrances_only_wait() -> bool {
-    STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(Cell::get) != 0
-}
-
 /// Orders what the calling thread wrote before it hands a style engine over (the main thread to a stage,
 /// or a stage back home) before what the thread that takes it reads after [`acquire_handoff`].
 pub(crate) fn release_handoff() {
@@ -1526,21 +1517,6 @@ pub(crate) fn acquire_handoff() {
     if let Some(thread) = stage_thread() {
         tsan::acquire(thread);
     }
-}
-
-/// Makes the calling thread's style engine entrances only wait for the stage that holds their
-/// engine, until the matching [`rust_stage_thread_end_style_engine_entrances_that_only_wait`].
-/// For code that must not take in a frame: its consume runs script and allocates, which a garbage
-/// collector's finalizer must not do. The stage has finished once such an entrance returns, so the
-/// entrance does not race it, and the frame waits for its consume at the top of the event loop.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_begin_style_engine_entrances_that_only_wait() {
-    STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(|depth| depth.set(depth.get() + 1));
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_end_style_engine_entrances_that_only_wait() {
-    STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(|depth| depth.set(depth.get() - 1));
 }
 
 /// Test only: waits up to `timeout_ms` for every stage of the main thread's frame in flight to

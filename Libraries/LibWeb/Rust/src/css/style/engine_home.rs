@@ -274,19 +274,13 @@ impl StyleEngineHome {
         if self.state() == (true, Owed::Nothing) {
             return;
         }
-        let only_wait = crate::stage_thread::style_engine_entrances_only_wait();
         let mut joined = false;
         loop {
             let (arrived, owed) = self.state();
-            if arrived && (only_wait || access.goes_on_owing(owed)) {
-                return;
-            }
-            if !arrived && (only_wait || access.goes_on_owing(owed)) {
-                // The main thread may hold the loan that would send the engine home.
-                debug_assert!(
-                    !only_wait,
-                    "a style engine entrance that must not wait waits for its engine"
-                );
+            if access.goes_on_owing(owed) {
+                if arrived {
+                    return;
+                }
                 self.take_in_arrival(true);
                 continue;
             }
