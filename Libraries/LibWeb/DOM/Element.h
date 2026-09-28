@@ -240,6 +240,14 @@ public:
     WebIDL::ExceptionOr<bool> toggle_attribute(Utf16FlyString const& name, Optional<bool> force);
     size_t attribute_list_size() const;
 
+    struct Attribute {
+        QualifiedName name;
+        Utf16String value;
+    };
+
+    // The element's attributes in order, borrowed until they next change.
+    ReadonlySpan<Attribute> attribute_list() const;
+
     GC::Ptr<NamedNodeMap const> attributes() const;
     GC::Ptr<NamedNodeMap> attributes();
 
@@ -896,10 +904,6 @@ protected:
     struct RareData;
 
 private:
-    struct Attribute {
-        QualifiedName name;
-        Utf16String value;
-    };
     using AttributeList = Vector<Attribute, 1>;
 
     AttributeList& ensure_attribute_list();
