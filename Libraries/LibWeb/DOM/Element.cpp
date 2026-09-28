@@ -3062,13 +3062,9 @@ CSSPixelRect Element::bounding_client_rect_assuming_layout_clean() const
 
 CSSPixelRect Element::bounding_client_rect_assuming_layout_clean(Compositing::AccumulatedVisualContextTree const& visual_context_tree) const
 {
-    // The table wrapper box is the principal box of a table, and contains its caption boxes.
-    auto principal_box = Painting::BoxSlot::bound_to(*this);
+    auto principal_box = this->principal_box();
     if (!principal_box)
         return {};
-    if (auto const* box_values = principal_box.style_group<CSS::ComputedValues::BoxValues>();
-        box_values && CSS::display_from_ffi_display(box_values->display).is_table_inside() && principal_box.parent().kind() == Layout::RustFFI::NodeKind::TableWrapper)
-        principal_box = principal_box.parent();
     return Painting::bounding_client_rect(principal_box, Painting::rect_to_viewport_transform(document(), visual_context_tree));
 }
 
@@ -5119,6 +5115,16 @@ Layout::NodeWithStyle const* Element::principal_layout_node() const
     if (auto const* parent = layout_node->parent(); parent && parent->is_table_wrapper())
         return parent;
     return layout_node;
+}
+
+Painting::BoxSlot Element::principal_box() const
+{
+    // The table wrapper box is the principal box of a table, and contains its caption boxes.
+    auto box = Painting::BoxSlot::bound_to(*this);
+    if (auto const* box_values = box.style_group<CSS::ComputedValues::BoxValues>();
+        box_values && CSS::display_from_ffi_display(box_values->display).is_table_inside() && box.parent().kind() == Layout::RustFFI::NodeKind::TableWrapper)
+        return box.parent();
+    return box;
 }
 
 Layout::NodeWithStyle* Element::unsafe_layout_node()
