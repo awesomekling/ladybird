@@ -39,6 +39,10 @@ pub(crate) enum EngineChange {
     /// The cascade layer order of the author sheets of the tree scope `tree_scope`, by name; an empty name is the
     /// unlayered rules' place.
     LayerOrder { tree_scope: u32, names: Vec<Vec<u16>> },
+    /// Drops what the container conditions of a declined row read of its containers.
+    DiscardContainerEffects { node: u32 },
+    /// Publishes the previous document-element font answer before style evaluation begins.
+    PrepareRootFontResolution { generation: u64 },
 }
 
 impl EngineChange {
@@ -69,6 +73,12 @@ impl EngineChange {
                     .collect::<Vec<_>>();
                 super::bridge::operations::set_layer_order(engine, tree_scope, &layers);
             }
+            Self::DiscardContainerEffects { node } => unsafe {
+                crate::css::style::bridge::owner_discard_container_effects(engine, node);
+            },
+            Self::PrepareRootFontResolution { generation } => unsafe {
+                crate::css::style::bridge::owner_prepare_root_font_resolution(engine, generation);
+            },
         }
     }
 }
@@ -317,6 +327,48 @@ pub(crate) enum StyleQuery {
     },
     /// Compiles a sheet's rules into the engine, or replaces their selectors, as the walk says.
     Compile(crate::css::rule::compilation::OwnerCompilation),
+    TakeContainerEffects {
+        node: u32,
+    },
+    RegisterAnchorNames {
+        node: u32,
+        style_record: u64,
+    },
+    TakePseudoElementEnvironmentNamedInSettle {
+        node: u32,
+        pseudo_kind: u8,
+    },
+    TakePseudoElementSampledInPass {
+        node: u32,
+        pseudo_kind: u8,
+    },
+    TakePseudoElementTransitionStepDecidedInPass {
+        node: u32,
+        pseudo_kind: u8,
+    },
+    TakeRowSampledInPass {
+        node: u32,
+    },
+    TakeSettledAnimationDefinitions {
+        node: u32,
+        pseudo_kind: u8,
+    },
+    TakeTransitionStepDecidedInPass {
+        node: u32,
+    },
+    PublishFontFaceSnapshot {
+        snapshot: *const c_void,
+        memo: usize,
+    },
+    /// Publishes the anchor names registration moved to the layout arena whose handle is `arena`, or leaves them for
+    /// an arena where it is null.
+    PublishAnchorNames {
+        arena: *mut c_void,
+    },
+    /// A record as a published value, which the drain installs.
+    PublishStyleRecord {
+        style_record: u64,
+    },
 }
 
 /// The answer to a [`StyleQuery`], of the variant the query asks for.
@@ -331,6 +383,9 @@ pub(crate) enum StyleAnswer {
     RowSampled(super::bridge::FfiRowSampledInPass),
     RecordDelta(super::bridge::FfiStyleRecordDelta),
     RuleDeclarations(Option<super::bridge::PublishedRuleDeclarations>),
+    ContainerEffects(super::bridge::FfiNativeContainerMatchResult),
+    TransitionStep(super::bridge::FfiTransitionStepDecidedInPass),
+    AnimationDefinitions(super::bridge::FfiSettledAnimationDefinitions),
     RecordDemand(super::bridge::FfiRecordDemandAnswer),
 }
 
@@ -431,6 +486,36 @@ impl StyleAnswer {
             _ => {
                 debug_assert!(false, "a declaration edit is answered with what it published");
                 None
+            }
+        }
+    }
+
+    pub(crate) fn container_effects(self) -> super::bridge::FfiNativeContainerMatchResult {
+        match self {
+            Self::ContainerEffects(value) => value,
+            _ => {
+                debug_assert!(false, "container effects are answered with container effects");
+                super::bridge::FfiNativeContainerMatchResult::default()
+            }
+        }
+    }
+
+    pub(crate) fn transition_step(self) -> super::bridge::FfiTransitionStepDecidedInPass {
+        match self {
+            Self::TransitionStep(value) => value,
+            _ => {
+                debug_assert!(false, "a transition step is answered with a transition step");
+                super::bridge::FfiTransitionStepDecidedInPass::absent()
+            }
+        }
+    }
+
+    pub(crate) fn animation_definitions(self) -> super::bridge::FfiSettledAnimationDefinitions {
+        match self {
+            Self::AnimationDefinitions(value) => value,
+            _ => {
+                debug_assert!(false, "animation definitions are answered with animation definitions");
+                super::bridge::FfiSettledAnimationDefinitions::absent()
             }
         }
     }
@@ -883,6 +968,51 @@ impl StyleQuery {
                 unsafe { compilation.run() };
                 StyleAnswer::None
             }
+            Self::TakeContainerEffects { node } => StyleAnswer::ContainerEffects(unsafe {
+                crate::css::style::bridge::owner_take_container_effects(engine, node)
+            }),
+            Self::RegisterAnchorNames { node, style_record } => StyleAnswer::U32(u32::from(unsafe {
+                crate::css::style::bridge::owner_register_anchor_names(engine, node, style_record)
+            })),
+            Self::TakePseudoElementEnvironmentNamedInSettle { node, pseudo_kind } => StyleAnswer::Bool(unsafe {
+                crate::css::style::bridge::owner_take_pseudo_element_environment_named_in_settle(
+                    engine,
+                    node,
+                    pseudo_kind,
+                )
+            }),
+            Self::TakePseudoElementSampledInPass { node, pseudo_kind } => StyleAnswer::RowSampled(unsafe {
+                crate::css::style::bridge::owner_take_pseudo_element_sampled_in_pass(engine, node, pseudo_kind)
+            }),
+            Self::TakePseudoElementTransitionStepDecidedInPass { node, pseudo_kind } => {
+                StyleAnswer::TransitionStep(unsafe {
+                    crate::css::style::bridge::owner_take_pseudo_element_transition_step_decided_in_pass(
+                        engine,
+                        node,
+                        pseudo_kind,
+                    )
+                })
+            }
+            Self::TakeRowSampledInPass { node } => StyleAnswer::RowSampled(unsafe {
+                crate::css::style::bridge::owner_take_row_sampled_in_pass(engine, node)
+            }),
+            Self::TakeSettledAnimationDefinitions { node, pseudo_kind } => StyleAnswer::AnimationDefinitions(unsafe {
+                crate::css::style::bridge::owner_take_settled_animation_definitions(engine, node, pseudo_kind)
+            }),
+            Self::TakeTransitionStepDecidedInPass { node } => StyleAnswer::TransitionStep(unsafe {
+                crate::css::style::bridge::owner_take_transition_step_decided_in_pass(engine, node)
+            }),
+            Self::PublishFontFaceSnapshot { snapshot, memo } => {
+                unsafe { crate::css::style::bridge::owner_publish_font_face_snapshot(engine, snapshot, memo) };
+                StyleAnswer::None
+            }
+            Self::PublishAnchorNames { arena } => {
+                unsafe { crate::css::style::bridge::owner_publish_anchor_names(engine, arena) };
+                StyleAnswer::None
+            }
+            Self::PublishStyleRecord { style_record } => StyleAnswer::Pointer(
+                crate::css::style::bridge::owner_publish_style_record(engine, style_record),
+            ),
         }
     }
 
@@ -970,6 +1100,18 @@ pub(crate) fn send(engine: StyleEngineInputHandle, entry: &'static str, change: 
 /// sent before. `entry` names the door the main thread took, for the style seal.
 pub(crate) fn ask(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
     engine.bring_home(entry);
+    super::seal::note_engine_call(entry);
+    let Some(document) = owning_document(engine) else {
+        // SAFETY: No owner reaches an engine no document's render state links: the calling thread holds it alone.
+        return query.answer(unsafe { engine.enter(entry) });
+    };
+    ask_document(document, entry, query)
+}
+
+/// Like [`ask`], for a read of what a published record holds only, which goes on while the install of the batch a
+/// stage published is still owed.
+pub(crate) fn ask_records(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
+    engine.bring_home_to_read_records(entry);
     super::seal::note_engine_call(entry);
     let Some(document) = owning_document(engine) else {
         // SAFETY: No owner reaches an engine no document's render state links: the calling thread holds it alone.

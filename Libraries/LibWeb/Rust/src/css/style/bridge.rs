@@ -1674,7 +1674,23 @@ pub unsafe extern "C" fn style_engine_publish_font_face_snapshot(
     snapshot: *const c_void,
     memo: usize,
 ) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_publish_font_face_snapshot") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_publish_font_face_snapshot",
+        crate::css::style::owner_calls::StyleQuery::PublishFontFaceSnapshot { snapshot, memo },
+    );
+}
+
+/// Answers [`style_engine_publish_font_face_snapshot`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_publish_font_face_snapshot`].
+pub(crate) unsafe fn owner_publish_font_face_snapshot(
+    engine: &mut crate::css::style::StyleEngine,
+    snapshot: *const c_void,
+    memo: usize,
+) {
     if engine
         .retained
         .font_cascade_memo
@@ -1701,7 +1717,19 @@ pub unsafe extern "C" fn style_engine_publish_font_face_snapshot(
 /// `engine` must point to a live style engine.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_prepare_root_font_resolution(engine: StyleEngineInputHandle, generation: u64) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_prepare_root_font_resolution") };
+    crate::css::style::owner_calls::send(
+        engine,
+        "style_engine_prepare_root_font_resolution",
+        crate::css::style::owner_calls::EngineChange::PrepareRootFontResolution { generation },
+    );
+}
+
+/// Answers [`style_engine_prepare_root_font_resolution`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_prepare_root_font_resolution`].
+pub(crate) unsafe fn owner_prepare_root_font_resolution(engine: &mut crate::css::style::StyleEngine, generation: u64) {
     let state = &mut engine.state;
     let Some(request) = state
         .retained
@@ -2177,6 +2205,17 @@ pub struct FfiTransitionStepDecidedInPass {
     pub action_count: usize,
 }
 
+impl FfiTransitionStepDecidedInPass {
+    /// What a row the pass decided no step for is answered with.
+    pub(crate) fn absent() -> Self {
+        Self {
+            present: false,
+            actions: std::ptr::null(),
+            action_count: 0,
+        }
+    }
+}
+
 /// Take the transition step the pass decided for an element's row, which the host applies instead
 /// of deciding it: the pass already composed the transitions it starts into the row's composition.
 ///
@@ -2187,20 +2226,30 @@ pub unsafe extern "C" fn style_engine_take_transition_step_decided_in_pass(
     engine: StyleEngineInputHandle,
     node: u32,
 ) -> FfiTransitionStepDecidedInPass {
-    // The handle the document's render inputs gave out, to write the engine through.
-    let engine = engine.home();
-    let engine = unsafe { engine.enter("style_engine_take_transition_step_decided_in_pass") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_take_transition_step_decided_in_pass",
+        crate::css::style::owner_calls::StyleQuery::TakeTransitionStepDecidedInPass { node },
+    )
+    .transition_step()
+}
+
+/// Answers [`style_engine_take_transition_step_decided_in_pass`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_take_transition_step_decided_in_pass`].
+pub(crate) unsafe fn owner_take_transition_step_decided_in_pass(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+) -> FfiTransitionStepDecidedInPass {
     match StyleNodeID::from_raw(node).and_then(|node| engine.take_transition_step_decided_in_pass(node)) {
         Some(step) => FfiTransitionStepDecidedInPass {
             present: true,
             actions: step.actions().as_ptr(),
             action_count: step.actions().len(),
         },
-        None => FfiTransitionStepDecidedInPass {
-            present: false,
-            actions: std::ptr::null(),
-            action_count: 0,
-        },
+        None => FfiTransitionStepDecidedInPass::absent(),
     }
 }
 
@@ -2216,9 +2265,24 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_transition_step_decide
     node: u32,
     pseudo_kind: u8,
 ) -> FfiTransitionStepDecidedInPass {
-    // The handle the document's render inputs gave out, to write the engine through.
-    let engine = engine.home();
-    let engine = unsafe { engine.enter("style_engine_take_pseudo_element_transition_step_decided_in_pass") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_take_pseudo_element_transition_step_decided_in_pass",
+        crate::css::style::owner_calls::StyleQuery::TakePseudoElementTransitionStepDecidedInPass { node, pseudo_kind },
+    )
+    .transition_step()
+}
+
+/// Answers [`style_engine_take_pseudo_element_transition_step_decided_in_pass`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_take_pseudo_element_transition_step_decided_in_pass`].
+pub(crate) unsafe fn owner_take_pseudo_element_transition_step_decided_in_pass(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    pseudo_kind: u8,
+) -> FfiTransitionStepDecidedInPass {
     match StyleNodeID::from_raw(node)
         .and_then(|node| engine.take_pseudo_element_transition_step_decided_in_pass(node, pseudo_kind))
     {
@@ -2227,11 +2291,7 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_transition_step_decide
             actions: step.actions().as_ptr(),
             action_count: step.actions().len(),
         },
-        None => FfiTransitionStepDecidedInPass {
-            present: false,
-            actions: std::ptr::null(),
-            action_count: 0,
-        },
+        None => FfiTransitionStepDecidedInPass::absent(),
     }
 }
 
@@ -4213,7 +4273,23 @@ pub unsafe extern "C" fn style_engine_take_row_sampled_in_pass(
     engine: StyleEngineInputHandle,
     node: u32,
 ) -> FfiRowSampledInPass {
-    let engine = unsafe { engine_entrance(engine, "style_engine_take_row_sampled_in_pass") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_take_row_sampled_in_pass",
+        crate::css::style::owner_calls::StyleQuery::TakeRowSampledInPass { node },
+    )
+    .row_sampled()
+}
+
+/// Answers [`style_engine_take_row_sampled_in_pass`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_take_row_sampled_in_pass`].
+pub(crate) unsafe fn owner_take_row_sampled_in_pass(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+) -> FfiRowSampledInPass {
     let published = StyleNodeID::from_raw(node).and_then(|node| engine.take_row_sampled_in_pass(node));
     row_sampled_in_pass(engine, published)
 }
@@ -4229,9 +4305,24 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_sampled_in_pass(
     node: u32,
     pseudo_kind: u8,
 ) -> FfiRowSampledInPass {
-    // The handle the document's render inputs gave out, to write the engine through.
-    let engine = engine.home();
-    let engine = unsafe { engine.enter("style_engine_take_pseudo_element_sampled_in_pass") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_take_pseudo_element_sampled_in_pass",
+        crate::css::style::owner_calls::StyleQuery::TakePseudoElementSampledInPass { node, pseudo_kind },
+    )
+    .row_sampled()
+}
+
+/// Answers [`style_engine_take_pseudo_element_sampled_in_pass`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_take_pseudo_element_sampled_in_pass`].
+pub(crate) unsafe fn owner_take_pseudo_element_sampled_in_pass(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    pseudo_kind: u8,
+) -> FfiRowSampledInPass {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return row_sampled_in_pass(engine, None);
     };
@@ -4737,6 +4828,18 @@ pub struct FfiSettledAnimationDefinitions {
     pub in_display_none_subtree: bool,
 }
 
+impl FfiSettledAnimationDefinitions {
+    /// What a row that owes no animation plan is answered with.
+    pub(crate) fn absent() -> Self {
+        Self {
+            definitions: std::ptr::null(),
+            count: 0,
+            owed: false,
+            in_display_none_subtree: false,
+        }
+    }
+}
+
 /// Takes the animation plan an engine-settled row left for the host, so that exactly one
 /// application drains it.
 ///
@@ -4748,25 +4851,32 @@ pub unsafe extern "C" fn style_engine_take_settled_animation_definitions(
     node: u32,
     pseudo_kind: u8,
 ) -> FfiSettledAnimationDefinitions {
-    let engine = unsafe { engine_entrance(engine, "style_engine_take_settled_animation_definitions") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_take_settled_animation_definitions",
+        crate::css::style::owner_calls::StyleQuery::TakeSettledAnimationDefinitions { node, pseudo_kind },
+    )
+    .animation_definitions()
+}
+
+/// Answers [`style_engine_take_settled_animation_definitions`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_take_settled_animation_definitions`].
+pub(crate) unsafe fn owner_take_settled_animation_definitions(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    pseudo_kind: u8,
+) -> FfiSettledAnimationDefinitions {
     let Some(node) = StyleNodeID::from_raw(node) else {
-        return FfiSettledAnimationDefinitions {
-            definitions: std::ptr::null(),
-            count: 0,
-            owed: false,
-            in_display_none_subtree: false,
-        };
+        return FfiSettledAnimationDefinitions::absent();
     };
     let Some(element_display_is_none) = engine
         .take_settled_animation_definitions(node, pseudo_kind)
         .map(|plan| plan.element_display_is_none())
     else {
-        return FfiSettledAnimationDefinitions {
-            definitions: std::ptr::null(),
-            count: 0,
-            owed: false,
-            in_display_none_subtree: false,
-        };
+        return FfiSettledAnimationDefinitions::absent();
     };
     // https://drafts.csswg.org/css-animations-1/#animations
     // An element that is not rendered starts no animation. The record says whether the element's
@@ -4805,7 +4915,16 @@ pub unsafe extern "C" fn style_engine_publish_style_record(
     engine: StyleEngineHandle,
     style_record: u64,
 ) -> *const c_void {
-    let engine = unsafe { record_read_entrance(engine, "style_engine_publish_style_record") };
+    crate::css::style::owner_calls::ask_records(
+        engine,
+        "style_engine_publish_style_record",
+        crate::css::style::owner_calls::StyleQuery::PublishStyleRecord { style_record },
+    )
+    .pointer()
+}
+
+/// Answers [`style_engine_publish_style_record`] from `engine`, on the render owner.
+pub(crate) fn owner_publish_style_record(engine: &StyleEngine, style_record: u64) -> *const c_void {
     if engine.recording_id().is_some() {
         record_style_record_view(engine, style_record);
     }
@@ -5309,7 +5428,24 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_environment_named_in_s
     node: u32,
     pseudo_kind: u8,
 ) -> bool {
-    let engine = unsafe { engine_entrance(engine, "style_engine_take_pseudo_element_environment_named_in_settle") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_take_pseudo_element_environment_named_in_settle",
+        crate::css::style::owner_calls::StyleQuery::TakePseudoElementEnvironmentNamedInSettle { node, pseudo_kind },
+    )
+    .is()
+}
+
+/// Answers [`style_engine_take_pseudo_element_environment_named_in_settle`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_take_pseudo_element_environment_named_in_settle`].
+pub(crate) unsafe fn owner_take_pseudo_element_environment_named_in_settle(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    pseudo_kind: u8,
+) -> bool {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return false;
     };
@@ -5756,7 +5892,23 @@ pub unsafe extern "C" fn style_engine_take_container_effects(
     engine: StyleEngineInputHandle,
     node: u32,
 ) -> FfiNativeContainerMatchResult {
-    let engine = unsafe { engine_entrance(engine, "style_engine_take_container_effects") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_take_container_effects",
+        crate::css::style::owner_calls::StyleQuery::TakeContainerEffects { node },
+    )
+    .container_effects()
+}
+
+/// Answers [`style_engine_take_container_effects`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_take_container_effects`].
+pub(crate) unsafe fn owner_take_container_effects(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+) -> FfiNativeContainerMatchResult {
     let Some(verdict) = StyleNodeID::from_raw(node).and_then(|node| engine.take_and_record_container_effects(node))
     else {
         return FfiNativeContainerMatchResult::default();
@@ -5782,7 +5934,19 @@ pub unsafe extern "C" fn style_engine_take_container_effects(
 /// Engine must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_discard_container_effects(engine: StyleEngineInputHandle, node: u32) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_discard_container_effects") };
+    crate::css::style::owner_calls::send(
+        engine,
+        "style_engine_discard_container_effects",
+        crate::css::style::owner_calls::EngineChange::DiscardContainerEffects { node },
+    );
+}
+
+/// Answers [`style_engine_discard_container_effects`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_discard_container_effects`].
+pub(crate) unsafe fn owner_discard_container_effects(engine: &mut crate::css::style::StyleEngine, node: u32) {
     if let Some(node) = StyleNodeID::from_raw(node) {
         let _ = engine.take_container_effects_for_host(node);
     }
@@ -5801,7 +5965,26 @@ pub unsafe extern "C" fn style_engine_register_anchor_names(
     node: u32,
     style_record: u64,
 ) -> u8 {
-    let engine = unsafe { engine_entrance(engine, "style_engine_register_anchor_names") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_register_anchor_names",
+        crate::css::style::owner_calls::StyleQuery::RegisterAnchorNames { node, style_record },
+    )
+    .u32()
+    .try_into()
+    .unwrap_or(0)
+}
+
+/// Answers [`style_engine_register_anchor_names`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_register_anchor_names`].
+pub(crate) unsafe fn owner_register_anchor_names(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    style_record: u64,
+) -> u8 {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return 0;
     };
@@ -5816,7 +5999,19 @@ pub unsafe extern "C" fn style_engine_register_anchor_names(
 /// Engine must be live, and `arena` null or a live layout node arena.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_publish_anchor_names(engine: StyleEngineInputHandle, arena: *mut c_void) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_publish_anchor_names") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_publish_anchor_names",
+        crate::css::style::owner_calls::StyleQuery::PublishAnchorNames { arena },
+    );
+}
+
+/// Answers [`style_engine_publish_anchor_names`] with `engine`, on the render owner, which holds the arena.
+///
+/// # Safety
+///
+/// As for [`style_engine_publish_anchor_names`].
+pub(crate) unsafe fn owner_publish_anchor_names(engine: &mut StyleEngine, arena: *mut c_void) {
     // SAFETY: The caller keeps the arena alive for this call.
     let arena = (!arena.is_null()).then(|| unsafe { crate::layout::LayoutNodeArena::from_handle(arena) });
     engine.publish_anchor_names(arena);
@@ -8056,17 +8251,6 @@ pub(crate) unsafe fn engine_entrance<'a>(engine: StyleEngineInputHandle, entry: 
 pub(crate) unsafe fn engine_read_entrance<'a>(engine: StyleEngineHandle, entry: &'static str) -> &'a StyleEngine {
     // SAFETY: Guaranteed by the caller.
     let engine = unsafe { engine.enter(entry) };
-    super::seal::note_engine_call(entry);
-    engine
-}
-
-/// Like [`engine_entrance`], for an entrance that only reads what a published record holds.
-///
-/// # Safety
-/// As for [`engine_entrance`].
-pub(crate) unsafe fn record_read_entrance<'a>(engine: StyleEngineHandle, entry: &'static str) -> &'a StyleEngine {
-    // SAFETY: Guaranteed by the caller.
-    let engine = unsafe { engine.enter_to_read_records(entry) };
     super::seal::note_engine_call(entry);
     engine
 }

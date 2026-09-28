@@ -529,17 +529,6 @@ impl StyleEngineHandle {
         unsafe { self.enter_for(Access::Any, entry) }
     }
 
-    /// Like [`Self::enter`], for an entrance that only reads what a published record holds, which
-    /// the record keeps as it is whatever else the engine does.
-    ///
-    /// # Safety
-    ///
-    /// As for [`Self::enter`].
-    pub(crate) unsafe fn enter_to_read_records<'a>(self, entry: &'static str) -> &'a StyleEngine {
-        // SAFETY: Guaranteed by the caller.
-        unsafe { self.enter_for(Access::RecordRead, entry) }
-    }
-
     /// # Safety
     ///
     /// As for [`Self::enter`].
@@ -609,6 +598,19 @@ impl StyleEngineHandle {
     /// once it has done what it does before.
     pub(crate) fn bring_home(self, entry: &'static str) {
         self.bring_home_at(entry, 0, 0);
+    }
+
+    /// Like [`Self::bring_home`], for a read of what a published record holds only, which goes on while the install of
+    /// the stage's batch is still owed.
+    pub(crate) fn bring_home_to_read_records(self, entry: &'static str) {
+        if self.is_null() || crate::stage_thread::no_stage_is_submitted() {
+            return;
+        }
+        let (lent_home, _) = LENT_TO_THIS_THREAD.get();
+        if lent_home == self.address() || crate::stage_thread::running_inside_stage() {
+            return;
+        }
+        self.home().bring_home(Access::RecordRead, entry, 0, 0);
     }
 
     /// Like [`Self::bring_home`], for a C++ call site `file` and `line` name (`column` 0 where it
