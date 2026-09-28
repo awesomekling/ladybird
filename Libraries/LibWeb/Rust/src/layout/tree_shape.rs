@@ -451,7 +451,7 @@ mod tests {
         for id in [root, first, second] {
             assert!(node(&nodes, id) == Some(&PaintNode::of(arena.data(id), arena.node_style_node(id))));
         }
-        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(root).invoke_callbacks();
     }
 
     #[test]
@@ -466,7 +466,7 @@ mod tests {
 
         arena.remove_child(root, first);
         arena.set_node_flag(second, NodeFlag::IsFlexItem, true);
-        arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(first).invoke_callbacks();
         let added = arena.allocate_for_test().slot;
         arena.write_shape(added).set_kind(NodeKind::Box);
         arena.insert_child(root, added, NodeSlotId::INVALID);
@@ -488,7 +488,7 @@ mod tests {
         assert_eq!(node(&later, second).unwrap().next_sibling, added);
         assert_eq!(node(&later, added).unwrap().kind, NodeKind::Box);
         assert_ne!(node(&later, second).unwrap().flags & NodeFlag::IsFlexItem as u32, 0);
-        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(root).invoke_callbacks();
     }
 
     #[test]
@@ -502,7 +502,7 @@ mod tests {
         assert!(!arena.paint_tree_changed_since_publish());
         arena.set_node_flag(first, NodeFlag::IsGridItem, true);
         assert!(arena.paint_tree_changed_since_publish());
-        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(root).invoke_callbacks();
     }
 
     #[test]
@@ -515,7 +515,7 @@ mod tests {
             ..
         } = arena.publish_paint_tree();
         arena.remove_child(root, first);
-        arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(first).invoke_callbacks();
 
         let while_published = arena.allocate_for_test().slot;
         assert_ne!(while_published.slot_index(), first.slot_index());
@@ -525,11 +525,9 @@ mod tests {
         let once_dropped = arena.allocate_for_test().slot;
         assert_eq!(once_dropped.slot_index(), first.slot_index());
         assert_ne!(once_dropped.generation(), first.generation());
-        arena
-            .free_subtree(while_published)
-            .destroy_shells_and_invoke_callbacks();
-        arena.free_subtree(once_dropped).destroy_shells_and_invoke_callbacks();
-        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(while_published).invoke_callbacks();
+        arena.free_subtree(once_dropped).invoke_callbacks();
+        arena.free_subtree(root).invoke_callbacks();
     }
 
     #[test]
@@ -543,7 +541,7 @@ mod tests {
         } = arena.publish_paint_tree();
         let later = arena.publish_paint_tree();
         arena.remove_child(root, first);
-        arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(first).invoke_callbacks();
 
         drop(later);
         let while_earlier_is_alive = arena.allocate_for_test().slot;
@@ -553,13 +551,9 @@ mod tests {
         drop((earlier, earlier_retired));
         let once_both_are_dropped = arena.allocate_for_test().slot;
         assert_eq!(once_both_are_dropped.slot_index(), first.slot_index());
-        arena
-            .free_subtree(while_earlier_is_alive)
-            .destroy_shells_and_invoke_callbacks();
-        arena
-            .free_subtree(once_both_are_dropped)
-            .destroy_shells_and_invoke_callbacks();
-        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(while_earlier_is_alive).invoke_callbacks();
+        arena.free_subtree(once_both_are_dropped).invoke_callbacks();
+        arena.free_subtree(root).invoke_callbacks();
     }
 
     #[test]
@@ -568,11 +562,11 @@ mod tests {
         let (root, first, _) = tree(&mut arena);
         drop(arena.publish_paint_tree());
         arena.remove_child(root, first);
-        arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(first).invoke_callbacks();
         let reused = arena.allocate_for_test().slot;
         assert_eq!(reused.slot_index(), first.slot_index());
-        arena.free_subtree(reused).destroy_shells_and_invoke_callbacks();
-        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(reused).invoke_callbacks();
+        arena.free_subtree(root).invoke_callbacks();
     }
 
     #[test]
@@ -581,7 +575,7 @@ mod tests {
         let (root, first, _) = tree(&mut arena);
         let published = arena.publish_paint_tree();
         arena.remove_child(root, first);
-        arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(first).invoke_callbacks();
         std::thread::spawn(move || {
             let PublishedShape {
                 nodes,
@@ -594,8 +588,8 @@ mod tests {
         .unwrap();
         let reused = arena.allocate_for_test().slot;
         assert_eq!(reused.slot_index(), first.slot_index());
-        arena.free_subtree(reused).destroy_shells_and_invoke_callbacks();
-        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(reused).invoke_callbacks();
+        arena.free_subtree(root).invoke_callbacks();
     }
 
     #[test]
@@ -604,7 +598,7 @@ mod tests {
         let (root, first, _) = tree(&mut arena);
         let frame = arena.freeze_paint_frame();
         arena.remove_child(root, first);
-        arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(first).invoke_callbacks();
 
         let while_published = arena.allocate_for_test().slot;
         assert_ne!(while_published.slot_index(), first.slot_index());
@@ -612,10 +606,8 @@ mod tests {
         std::thread::spawn(move || drop(frame)).join().unwrap();
         let once_dropped = arena.allocate_for_test().slot;
         assert_eq!(once_dropped.slot_index(), first.slot_index());
-        arena
-            .free_subtree(while_published)
-            .destroy_shells_and_invoke_callbacks();
-        arena.free_subtree(once_dropped).destroy_shells_and_invoke_callbacks();
-        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(while_published).invoke_callbacks();
+        arena.free_subtree(once_dropped).invoke_callbacks();
+        arena.free_subtree(root).invoke_callbacks();
     }
 }

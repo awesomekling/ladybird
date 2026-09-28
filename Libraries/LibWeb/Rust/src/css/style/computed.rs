@@ -5111,7 +5111,7 @@ mod tests {
         );
         let frame = arena.freeze_paint_frame();
 
-        arena.free_subtree(slot).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(slot).invoke_callbacks();
         drop(arena);
         drop(sets);
         // The catalog's own reference is gone with it; the frame's is left.

@@ -21,14 +21,14 @@
 //! **The stage is sealed, and the compiler holds it to that**: the whole suite passes with the
 //! gate in `abort`, and nothing the walk can reach is able to call the host. The walk is not handed
 //! the main-thread capability, and every host call the arena and the tree builder can make takes
-//! it: the tree builder's callbacks, the shell factory, and paying what the arena owes the host.
+//! it: the tree builder's callbacks, and paying what the arena owes the host.
 //! What the build owes the host - what it found out, and what it let go of - it queues, and its
 //! entry pays once the walk has returned. A box's style resources and a generated image's provider wait longer: the frame the
 //! build runs in carries them out, and the host attaches them once it is over.
 //!
-//! What the build lets go of is the arena's handbacks: the boxes nodes gained or lost, the shells,
-//! owned image providers and image observer sets of the rows it freed, the resets of rows whose
-//! paint state went with them, and a kept box's new style. The operations the walk shares with the
+//! What the build lets go of is the arena's handbacks: the boxes nodes gained or lost, the owned
+//! image providers and image observer sets of the rows it freed, and the resets of rows whose paint
+//! state went with them. The operations the walk shares with the
 //! DOM mutation entries only queue these; a main-thread entry pays the queue as its change returns,
 //! and the build returns its queue as part of its output.
 //!
@@ -51,11 +51,6 @@
 //! | `owned_image_provider_destroy` | 96 | 0 |
 //! | `owned_image_provider_notify_detach` | 96 | 0 |
 //! | `attach_generated_image` | 20 | 0 |
-//!
-//! A build owes no row a shell: a row gets one when something first asks for its box. Of the 4.6
-//! million rows a suite run stamps, 2.8 million ever get a shell, most of them asked for by the
-//! layout tree dumps the tests print; of the rows `treebuild.html` stamps, fewer than three in ten
-//! do.
 //!
 //! # No allow-list
 //!

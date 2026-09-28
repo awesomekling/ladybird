@@ -643,12 +643,11 @@ pub(crate) struct LayoutCounts {
     pub(crate) arena: FfiArenaCounts,
 }
 
-/// How many slots, shells and measurements a document's layout arena holds or has taken, for tests.
+/// How many slots and measurements a document's layout arena holds or has taken, for tests.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FfiArenaCounts {
     pub live_slots: u64,
-    pub shells: u64,
     pub pre_order_relabels: u64,
     pub intrinsic_measurements: u64,
     pub intrinsic_inline_measurements: u64,
@@ -728,7 +727,6 @@ impl Answer {
                 tree_builds: arena.layout_tree_build_stats(),
                 arena: FfiArenaCounts {
                     live_slots: u64::from(arena.live_slot_count()),
-                    shells: u64::from(arena.shell_count()),
                     pre_order_relabels: arena.pre_order_relabel_count(),
                     intrinsic_measurements: arena.intrinsic_measurement_count(),
                     intrinsic_inline_measurements: arena.intrinsic_inline_measurement_count(),

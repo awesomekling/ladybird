@@ -801,13 +801,7 @@ void register_layout_host(DOM::Document& document)
 {
     auto* arena = document_layout_arena_if_created(document);
     VERIFY(arena);
-    RustFFI::FfiStyleRecordHostCallbacks style_record_host_callbacks {
-        .style_engine = document.style_computer().style_engine().rust_handle(),
-        .context = &document,
-        // The host makes no shells, so no shell hears of its row's style.
-        .shell_style_changed = [](void*, void*, u64, void const*, bool) { VERIFY_NOT_REACHED(); },
-    };
-    RustFFI::layout_arena_set_style_record_host_callbacks(arena, style_record_host_callbacks);
+    RustFFI::layout_arena_register_style_engine(arena, document.style_computer().style_engine().rust_handle());
     // The render side says which nodes have a box and which of those boxes layout committed, so that DOM code reads a
     // bit instead of looking up the node's row.
     RustFFI::layout_arena_set_box_presence_host(arena, &document, [](void* context, u32 style_node, u8 bits) {
@@ -868,7 +862,7 @@ void unregister_layout_host(DOM::Document& document)
     if (!arena)
         return;
     RustFFI::layout_arena_clear_chrome_state_callback(arena);
-    RustFFI::layout_arena_clear_style_record_host_callbacks(arena);
+    RustFFI::layout_arena_unregister_style_engine(arena);
     RustFFI::layout_arena_clear_layout_host_callbacks(arena);
     RustFFI::layout_arena_clear_layout_update_host_callbacks(arena);
 }

@@ -637,7 +637,7 @@ mod tests {
         arena.set_text_content(text, TextContent::for_test("world", 0, 5, Vec::new()));
         assert!(arena.searchable_text.is_none());
         arena.searchable_text = Some(Vec::new());
-        arena.free_subtree(text).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(text).invoke_callbacks();
         assert!(arena.searchable_text.is_none());
     }
 

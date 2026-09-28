@@ -15,12 +15,8 @@ unsafe extern "C" {
     fn ladybird_layout_owned_image_provider_notify_detach(provider: *mut c_void);
 }
 
-/// The host makes no shells any more, so it has none to destroy; only a test binds a row one.
-pub(crate) fn destroy_shell(_: &crate::stage::MainThread, _shell: *mut c_void) {}
-
 /// An image provider a row owns outlives no row: the arena hands it back when the row is freed and
-/// the host deletes it. Deleting one never reads a layout node, so the order against the shells is
-/// free.
+/// the host deletes it. Deleting one never reads a layout node.
 pub(crate) fn destroy_owned_image_provider(_: &crate::stage::MainThread, provider: *mut c_void) {
     if provider.is_null() {
         return;

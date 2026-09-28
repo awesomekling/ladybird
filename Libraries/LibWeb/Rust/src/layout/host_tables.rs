@@ -11,7 +11,7 @@
 
 use super::LayoutNodeArena;
 use super::formatting_context::FfiLayoutHostCallbacks;
-use super::layout_node_arena::{BoxPresenceHost, ShellStyleChangedHost};
+use super::layout_node_arena::BoxPresenceHost;
 use super::node_data::NodeSlotId;
 use super::update_layout::LayoutUpdateHost;
 use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
@@ -32,7 +32,6 @@ pub(crate) struct HostTables {
     /// recording reads and submits it.
     pub(super) prepared_flight: RefCell<Option<super::update_layout::PreparedFlight>>,
     pub(super) box_presence_host: Cell<Option<BoxPresenceHost>>,
-    pub(super) shell_style_changed_host: Cell<Option<ShellStyleChangedHost>>,
     pub(crate) geometry_host: Cell<Option<GeometryHostCallbacks>>,
     pub(crate) chrome_state_callback: Cell<Option<ChromeStateCallback>>,
     /// The image provider the host gave each row that owns one. The owner is told which rows those are, and hands

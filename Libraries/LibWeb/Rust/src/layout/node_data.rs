@@ -8,7 +8,6 @@ use super::tree_shape::{ShapeCell, StyleCell};
 use crate::layout::CssPixels;
 use std::cell::Cell;
 use std::ffi::c_void;
-use std::num::NonZeroUsize;
 
 pub use super::node_slot_id::INVALID_NODE_SLOT_INDEX;
 pub const GENERATED_FOR_AFTER: u8 = 1;
@@ -28,24 +27,6 @@ pub const STYLE_GROUP_COUNT: usize = 23;
 /// row, or null for a row with no style. A pinned record's array is never written while a stage
 /// runs, and the groups it names are immutable payloads, so the row shares it as a `HostShared`.
 pub(crate) type StylePayloadsRef = crate::css::host_shared::HostShared<c_void>;
-
-/// The host's name for a row's shell. A row, and whatever a stage hands back for one, holds this
-/// id rather than the host object; only the document thread turns it back into the object.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ShellId(NonZeroUsize);
-
-impl ShellId {
-    /// The id of the shell a test passes, or `None` for no shell.
-    #[cfg(test)]
-    pub(crate) fn of_host_object(shell: *mut c_void) -> Option<Self> {
-        NonZeroUsize::new(shell.expose_provenance()).map(Self)
-    }
-
-    /// The host object the id names, which only the document thread may reach.
-    pub(crate) fn host_object(self, _: &crate::stage::MainThread) -> *mut c_void {
-        std::ptr::with_exposed_provenance_mut(self.0.get())
-    }
-}
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 #[repr(C)]
@@ -234,11 +215,11 @@ pub enum DomPaintFact {
     NestedNavigableContainer = 1 << 3,
 }
 
+/// What a test stamps a row with.
+#[cfg(test)]
 #[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiNodeConstructionFacts {
+pub(crate) struct NodeConstructionFacts {
     pub kind: NodeKind,
-    pub shell: *mut c_void,
     pub is_anonymous: bool,
     pub dom_paint_facts: u8,
     /// The StyleNodeID of the element the row is bound to, or 0. Every element fact the row is
@@ -273,7 +254,6 @@ pub(crate) struct NodeData {
     pub dom_paint_facts: ShapeCell<u8>,
     pub ancestor_facts: Cell<u8>,
     pub style: StyleCell,
-    pub shell: Cell<Option<ShellId>>,
 }
 
 /// What the paint side reads of a layout node, copied out of its [`NodeData`] when the arena
@@ -348,7 +328,6 @@ impl Default for NodeData {
             ancestor_facts: Cell::new(0),
             fragment_cache_epoch: Cell::new(0),
             style: StyleCell::new(),
-            shell: Cell::new(None),
         }
     }
 }
@@ -365,7 +344,7 @@ mod tests {
 
     #[test]
     fn intrinsic_cache_epoch_uses_existing_node_data_padding() {
-        assert_eq!(std::mem::size_of::<NodeData>(), 56);
+        assert_eq!(std::mem::size_of::<NodeData>(), 48);
         assert_eq!(std::mem::offset_of!(NodeData, intrinsic_cache_epoch), 22);
         assert_eq!(std::mem::offset_of!(NodeData, flags), 24);
         assert_eq!(std::mem::offset_of!(NodeData, fragment_cache_epoch), 28);
@@ -376,7 +355,6 @@ mod tests {
         assert_eq!(std::mem::offset_of!(NodeData, dom_paint_facts), 38);
         assert_eq!(std::mem::offset_of!(NodeData, ancestor_facts), 39);
         assert_eq!(std::mem::offset_of!(NodeData, style), 40);
-        assert_eq!(std::mem::offset_of!(NodeData, shell), 48);
     }
 
     #[test]

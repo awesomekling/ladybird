@@ -451,15 +451,15 @@ pub(crate) fn has_ancestor_fact(data: &NodeData, fact: AncestorFact) -> bool {
 
 /// The row flags a node is built with, from the kind and anonymity the caller names and the
 /// element facts the style mirror holds for the element the row is built for.
-pub(crate) fn construction_flags(facts: &FfiNodeConstructionFacts, element_facts: u32) -> u32 {
+pub(crate) fn construction_flags(kind: NodeKind, is_anonymous: bool, element_facts: u32) -> u32 {
     use crate::css::style::bridge::element_construction_fact as fact;
-    let has_style = facts.kind != NodeKind::Node && !kind_is_text(facts.kind);
+    let has_style = kind != NodeKind::Node && !kind_is_text(kind);
     let holds = |bit: u32| element_facts & bit != 0;
     // Some native controls use a generic box so they can host their internal shadow tree, but
     // remain replaced elements for CSS box generation and inline layout.
-    let is_replaced_element = kind_is_replaced_box(facts.kind) || holds(fact::IS_HTML_INPUT_ELEMENT);
+    let is_replaced_element = kind_is_replaced_box(kind) || holds(fact::IS_HTML_INPUT_ELEMENT);
     [
-        (NodeFlag::Anonymous, facts.is_anonymous),
+        (NodeFlag::Anonymous, is_anonymous),
         (NodeFlag::HasStyle, has_style),
         (NodeFlag::IsReplacedElement, is_replaced_element),
         (NodeFlag::IsHtmlInputElement, holds(fact::IS_HTML_INPUT_ELEMENT)),
