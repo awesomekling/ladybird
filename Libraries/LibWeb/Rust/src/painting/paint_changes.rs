@@ -267,7 +267,7 @@ impl PaintChange {
 ///
 /// `arena` must be a live handle from `layout_arena_create`, on the document thread or inside a unit the owner runs
 /// for it.
-pub(crate) unsafe fn send(arena: *mut c_void, change: PaintChange) {
+pub(crate) unsafe fn send(arena: *mut c_void, change: PaintChange) -> Option<crate::render_owner::ChangeSeq> {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
@@ -287,7 +287,10 @@ pub(crate) unsafe fn send(arena: *mut c_void, change: PaintChange) {
         if !crate::stage_thread::running_inside_stage() {
             arena.publish_rows();
         }
-        return;
+        return None;
     }
-    crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::Paint(change));
+    Some(crate::render_owner::send_arena_change(
+        document,
+        crate::render_owner::ArenaChange::Paint(change),
+    ))
 }

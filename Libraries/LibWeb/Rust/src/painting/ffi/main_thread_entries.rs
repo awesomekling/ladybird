@@ -236,7 +236,7 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
                 document_declares_light_or_dark_color_scheme: inputs.document_declares_light_or_dark_color_scheme,
                 image_color_scheme_fallback: inputs.image_color_scheme_fallback,
             },
-            ScriptForcedRead::for_internal_hop(),
+            crate::render_owner::LockstepProof::recording_on_main(),
         )
     }) else {
         return;

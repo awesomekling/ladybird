@@ -7142,9 +7142,15 @@ pub(crate) unsafe fn apply_enrolled_content_sources(state: *mut super::ArenaHand
 
     let mut live_replaced_nodes = Vec::with_capacity(sources.replaced_content_inputs.len());
     for (node, input) in sources.replaced_content_inputs {
-        // SAFETY: As above.
-        let facts = super::node_facts::derived_replaced_content_facts(unsafe { (*arena).data(node) }, input);
         live_replaced_nodes.push(node);
+        // SAFETY: As above.
+        let data = unsafe { (*arena).data(node) };
+        if matches!(input, crate::css::style::tree::ReplacedContentInput::None)
+            && super::node_facts::derives_facts_from_published_input(data.kind.get())
+        {
+            continue;
+        }
+        let facts = super::node_facts::derived_replaced_content_facts(data, input);
         // Changed facts invalidate cached formatting-context runs regardless of which
         // channel produced the change, including sources with no invalidation of their own.
         // SAFETY: As above; the shared borrows ended with their statements.

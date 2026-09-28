@@ -472,7 +472,7 @@ pub unsafe extern "C" fn layout_arena_text_word_range(
         crate::render_owner::ask_arena_of(
             arena,
             ArenaQuery::WordRange { primary, dom_offset },
-            ScriptForcedRead::for_internal_hop(),
+            crate::render_owner::LockstepProof::input_selects_by_word(),
         )
     } {
         ArenaAnswer::Range(range) => range,

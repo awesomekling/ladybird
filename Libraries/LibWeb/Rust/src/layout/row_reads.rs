@@ -30,8 +30,7 @@ use crate::render_owner::{ChangeSeq, ScriptForcedRead};
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::ffi::c_void;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// The rows of a document's layout as the arena published them: the shape and style of every row, the row each node is
 /// bound to, and the paintable rows with what they paint from. It is immutable and owns all of it, through the
@@ -295,49 +294,89 @@ enum Freshness {
     Settled,
 }
 
-/// Where the arena keeps the latest [`RowSnapshot`] it published. The arena's owner replaces it only where the
-/// document thread cannot be reading it: in a unit the document thread waits for, takes back before it reads, or idles
-/// through.
-pub(crate) struct RowSnapshotSlot(AtomicPtr<RowSnapshot>);
-
-impl Default for RowSnapshotSlot {
-    fn default() -> Self {
-        Self(AtomicPtr::new(Arc::into_raw(Arc::<RowSnapshot>::default()).cast_mut()))
-    }
-}
-
-impl Drop for RowSnapshotSlot {
-    fn drop(&mut self) {
-        // SAFETY: The slot holds the reference it took in `publish`, or in `default`.
-        drop(unsafe { Arc::from_raw(*self.0.get_mut()) });
-    }
-}
+/// Where the arena keeps the latest [`RowSnapshot`] it published. The arena's owner replaces it wherever it runs; the
+/// document thread takes a reference of its own on the rows it reads beside a frame in flight ([`FrameRows`]), and
+/// borrows them only where no frame in flight owns the arena ([`RowSnapshot::published`]).
+#[derive(Default)]
+pub(crate) struct RowSnapshotSlot(Mutex<Arc<RowSnapshot>>);
 
 impl RowSnapshotSlot {
+    fn rows(&self) -> std::sync::MutexGuard<'_, Arc<RowSnapshot>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Replaces the rows the slot holds with `rows`, on the thread that writes the slot: the arena's owner, or the
     /// document thread for the rows it adopted.
     pub(crate) fn publish(&self, rows: Arc<RowSnapshot>) {
-        let previous = self.0.swap(Arc::into_raw(rows).cast_mut(), Ordering::AcqRel);
-        // SAFETY: The slot held the reference `previous` came from, and nothing borrows it: see the type.
-        drop(unsafe { Arc::from_raw(previous) });
+        // The rows it held go once the slot is let go of: a reader may hold the last reference to them.
+        let previous = std::mem::replace(&mut *self.rows(), rows);
+        drop(previous);
     }
 
-    /// The rows the slot holds, for the arena's owner to share.
-    pub(super) fn shared(&self) -> Arc<RowSnapshot> {
-        let rows = self.0.load(Ordering::Acquire);
-        // SAFETY: The slot holds a reference to `rows`, which only its owner, the calling thread, lets go of.
-        unsafe {
-            Arc::increment_strong_count(rows);
-            Arc::from_raw(rows)
-        }
+    /// The rows the slot holds, with a reference of the caller's own.
+    pub(crate) fn shared(&self) -> Arc<RowSnapshot> {
+        self.rows().clone()
     }
 
     /// # Safety
     ///
     /// Nothing may publish rows while the borrow is live.
     unsafe fn latest<'a>(&self) -> &'a RowSnapshot {
+        // SAFETY: Guaranteed by the caller: the slot keeps the rows until the next publication.
+        unsafe { &*Arc::as_ptr(&self.rows()) }
+    }
+}
+
+/// The rows the arena's owner published last, with a reference of the document thread's own: a frame's own snapshot.
+/// Reading them waits for nothing (no frame in flight, no owner that publishes rows reflecting what the document thread
+/// sent since), so internal code reads the rows through this and only a script's forced read asks for current ones.
+pub(crate) struct FrameRows(Arc<RowSnapshot>);
+
+impl std::ops::Deref for FrameRows {
+    type Target = RowSnapshot;
+
+    fn deref(&self) -> &RowSnapshot {
+        &self.0
+    }
+}
+
+impl FrameRows {
+    /// The rows the arena `handle` names published last: the arena's, or those the document thread adopted from display
+    /// ticks, where those are later.
+    ///
+    /// # Safety
+    ///
+    /// `handle` must be a live handle on the document thread.
+    pub(crate) unsafe fn of(handle: *mut c_void) -> Self {
+        assert!(!handle.is_null(), "layout node arena handle is null");
+        // SAFETY: Guaranteed by the caller. A handle is also a pointer to its arena, and the projection borrows nothing
+        // of the arena beside the slot, which guards what it holds.
+        let published = unsafe { &*std::ptr::addr_of!((*handle.cast::<LayoutNodeArena>()).published_rows) }.shared();
+        // SAFETY: As above; only the document thread writes the rows it adopted.
+        let adopted = unsafe { &HostTables::beside_frame(handle).adopted_rows }.shared();
+        Self(if adopted.generation > published.generation {
+            adopted
+        } else {
+            published
+        })
+    }
+
+    /// The rows, for a holder that keeps them beyond the read.
+    pub(crate) fn into_shared(self) -> Arc<RowSnapshot> {
+        self.0
+    }
+
+    /// Whether the rows include every change the document thread sent that alters them, which a read that answers
+    /// conservatively where they do not asks before it trusts what they lack.
+    ///
+    /// # Safety
+    ///
+    /// `handle` must be the live handle the rows were read from, on the document thread.
+    pub(crate) unsafe fn include_sent_changes(&self, handle: *mut c_void) -> bool {
         // SAFETY: Guaranteed by the caller.
-        unsafe { &*self.0.load(Ordering::Acquire) }
+        let document = unsafe { super::ArenaHandle::document_of(handle) };
+        // An arena of no document (a unit test's) is written in place.
+        !document.is_valid() || self.changes_taken_in >= crate::render_owner::sent_row_changes_through(document)
     }
 }
 
@@ -352,6 +391,8 @@ pub(crate) struct RowsSentAhead {
     detached: HashMap<NodeSlotId, ChangeSeq>,
     cleared: HashMap<NodeSlotId, ChangeSeq>,
     links: HashMap<NodeSlotId, LinksSentAhead>,
+    /// The scroll offsets it wrote to rows.
+    scroll_offsets: HashMap<NodeSlotId, (ChangeSeq, crate::css::css_pixels::CssPixelPoint)>,
     /// The change that wrote the latest of them.
     latest: ChangeSeq,
     /// The last change the rows it forgot what they include of had taken in: every change noted since is later.
@@ -386,6 +427,7 @@ impl RowsSentAhead {
         self.styles.retain(|_, (seq, _)| ahead(seq));
         self.detached.retain(|_, seq| ahead(seq));
         self.cleared.retain(|_, seq| ahead(seq));
+        self.scroll_offsets.retain(|_, (seq, _)| ahead(seq));
         self.links.retain(|_, links| {
             for link in [
                 &mut links.first_child,
@@ -405,6 +447,24 @@ impl RowsSentAhead {
     fn note_style(&mut self, sent: Option<ChangeSeq>, row: NodeSlotId, style: Option<Arc<PublishedStyleRecord>>) {
         if let Some(sent) = sent {
             self.styles.insert(row, (sent, style));
+            self.latest = sent;
+        }
+    }
+
+    /// The scroll offset the document thread wrote to the box `row`, which the rows do not include yet.
+    pub(crate) fn scroll_offset(&self, row: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelPoint> {
+        self.scroll_offsets.get(&row).map(|(_, offset)| *offset)
+    }
+
+    /// Notes that the change `sent` scrolled the box `row` to `offset`.
+    fn note_scroll_offset(
+        &mut self,
+        sent: Option<ChangeSeq>,
+        row: NodeSlotId,
+        offset: crate::css::css_pixels::CssPixelPoint,
+    ) {
+        if let Some(sent) = sent {
+            self.scroll_offsets.insert(row, (sent, offset));
             self.latest = sent;
         }
     }
@@ -556,6 +616,42 @@ impl super::tree_builder::RemovedBoxRows for RowsAsSent<'_> {
     fn viewport_row(&self) -> Option<NodeSlotId> {
         self.rows.viewport_row()
     }
+}
+
+/// Notes that the change `sent` scrolled the box `row` of the arena `arena` names to `offset`, for the document thread
+/// to read its own write until the rows include it.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+pub(crate) unsafe fn note_scroll_offset_sent_ahead(
+    arena: *mut c_void,
+    sent: Option<ChangeSeq>,
+    row: NodeSlotId,
+    offset: crate::css::css_pixels::CssPixelPoint,
+) {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { HostTables::beside_frame(arena) }
+        .rows_sent_ahead
+        .borrow_mut()
+        .note_scroll_offset(sent, row, offset);
+}
+
+/// The rows the owner published last, with what the document thread wrote to them since, which the rows do not
+/// include: its own writes, read without waiting for anything.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+pub(crate) unsafe fn frame_rows_and_sent_ahead<'a>(
+    arena: *mut c_void,
+) -> (FrameRows, std::cell::RefMut<'a, RowsSentAhead>) {
+    // SAFETY: Guaranteed by the caller.
+    let rows = unsafe { FrameRows::of(arena) };
+    // SAFETY: As above.
+    let mut sent = unsafe { HostTables::beside_frame(arena) }.rows_sent_ahead.borrow_mut();
+    sent.forget_taken_in(&rows);
+    (rows, sent)
 }
 
 /// The rows the arena `arena` names published last, and what the document thread wrote to them that they do not
@@ -887,6 +983,30 @@ mod tests {
             dom_paint_facts: 0,
             style_node: style_node.map_or(0, StyleNodeID::raw),
         })
+    }
+
+    #[test]
+    fn the_document_thread_reads_its_own_scroll_offset_until_the_rows_include_it() {
+        use crate::css::css_pixels::{CssPixelPoint, CssPixels};
+        use crate::render_owner::ChangeSeq;
+
+        let mut arena = LayoutNodeArena::new();
+        let scroller = row(&mut arena, NodeKind::BlockContainer, None);
+        let offset = CssPixelPoint::new(CssPixels::from_integer(0), CssPixels::from_integer(40));
+        let mut sent = super::RowsSentAhead::default();
+        sent.note_scroll_offset(Some(ChangeSeq::nth(2)), scroller, offset);
+
+        let mut rows = super::RowSnapshot {
+            changes_taken_in: ChangeSeq::nth(1),
+            ..Default::default()
+        };
+        sent.forget_taken_in(&rows);
+        assert_eq!(sent.scroll_offset(scroller), Some(offset));
+
+        rows.changes_taken_in = ChangeSeq::nth(2);
+        sent.forget_taken_in(&rows);
+        assert_eq!(sent.scroll_offset(scroller), None);
+        arena.free_subtree(scroller).invoke_callbacks();
     }
 
     #[test]

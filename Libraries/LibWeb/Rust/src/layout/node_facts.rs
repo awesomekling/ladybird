@@ -43,6 +43,21 @@ fn style_has_size_containment(style: ComputedValuesView<'_>) -> bool {
     style.has_size_containment() || style.is_size_container()
 }
 
+/// Whether a node of `kind` derives its replaced content facts from what its element publishes as it arrives. A node
+/// whose element left the document beside a frame has no input any more, and keeps its facts until its removal frees
+/// it.
+pub(crate) fn derives_facts_from_published_input(kind: NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::SVGImageBox
+            | NodeKind::TextAreaBox
+            | NodeKind::CanvasBox
+            | NodeKind::TextInputBox
+            | NodeKind::VideoBox
+            | NodeKind::ImageBox
+    )
+}
+
 /// The replaced-content facts of an enrolled node, from its kind, its computed style and what its
 /// element published as the input of its replaced content.
 pub(crate) fn derived_replaced_content_facts(data: &NodeData, input: ReplacedContentInput) -> FfiReplacedContentFacts {

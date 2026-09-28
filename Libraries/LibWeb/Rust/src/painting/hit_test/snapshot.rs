@@ -27,7 +27,6 @@ use crate::painting::geometry_read::GeometryRead;
 use crate::painting::hit_test::HitTestList;
 use crate::painting::published_frame::{PaintRead, PaintSource};
 use crate::painting::visual_context::VisualContextTree;
-use crate::render_owner::ScriptForcedRead;
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::sync::Arc;
@@ -376,8 +375,8 @@ pub(super) unsafe fn snapshot_from_handle<'a>(snapshot: *const c_void) -> HitTes
 }
 
 /// The document's rows as the owner published them last, with its hit-test list, as a snapshot the caller releases
-/// with `hit_test_snapshot_release`. It is read without waiting for the owner, unless the document thread sent a change
-/// that alters the rows which they do not include yet.
+/// with `hit_test_snapshot_release`. It is read without waiting for the owner: a script's hit test read the rows as of
+/// what it sent when it laid the document out first.
 ///
 /// # Safety
 ///
@@ -385,7 +384,7 @@ pub(super) unsafe fn snapshot_from_handle<'a>(snapshot: *const c_void) -> HitTes
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_hit_test_snapshot(arena: *mut c_void) -> *const c_void {
     // SAFETY: Guaranteed by the caller.
-    Arc::into_raw(unsafe { RowSnapshot::current_shared(arena, ScriptForcedRead::for_internal_hop()) }).cast()
+    Arc::into_raw(unsafe { crate::layout::row_reads::FrameRows::of(arena) }.into_shared()).cast()
 }
 
 /// # Safety

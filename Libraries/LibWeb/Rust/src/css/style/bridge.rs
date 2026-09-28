@@ -24,7 +24,6 @@
 //! and asks for a run of `StyleNodeID` values, Rust owns the arena and the relation columns keyed by
 //! them.
 
-use crate::render_owner::ScriptForcedRead;
 use std::ffi::c_void;
 
 use crate::abort_on_panic as abort_on_boundary_panic;
@@ -2168,7 +2167,7 @@ pub unsafe extern "C" fn layout_arena_committed_transform_reference_box(
         .and_then(|node| {
             // SAFETY: Guaranteed by the caller; the read calls nothing of the host.
             unsafe {
-                crate::painting::ffi::read_current(arena, ScriptForcedRead::for_internal_hop(), |rows| {
+                crate::painting::ffi::read_frame(arena, |rows| {
                     super::animations::committed_transform_reference_box(rows, rows.rows().bound_row(node))
                 })
             }
