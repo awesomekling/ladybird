@@ -2611,7 +2611,7 @@ void record_style_rule_removed(StyleSheetState& sheet_it_left, RustRule const& r
                     });
                 }
             },
-            [](void* opaque, u32, bool declares_layer) {
+            [](void* opaque, bool declares_layer) {
                 auto& context = *static_cast<RemovalContext*>(opaque);
                 if (declares_layer)
                     publish_layer_order_for_sheet(context.sheet, context.document);

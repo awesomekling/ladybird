@@ -5158,6 +5158,11 @@ impl HomeAnswers {
             StyleChange::Engine(EngineChange::TransitionStepTakenByHost { node, pseudo_kind }) => {
                 self.transition_steps.forget(*node, *pseudo_kind);
             }
+            StyleChange::Engine(EngineChange::RemoveNativeRules(identities)) => {
+                for identity in identities {
+                    self.rule_ids.remove(identity);
+                }
+            }
             _ => self.deferred_inputs.follow_sent(change, leaves),
         }
     }
@@ -6223,7 +6228,7 @@ pub unsafe extern "C" fn style_engine_remove_native_rule(
     _sheet_id: u32,
     context: *mut c_void,
     begin: unsafe extern "C" fn(*mut c_void, bool, bool),
-    notify: unsafe extern "C" fn(*mut c_void, u32, bool),
+    notify: unsafe extern "C" fn(*mut c_void, bool),
 ) {
     use crate::css::rule::{NativeRule, NativeRuleType, mutation, read::RuleRef};
     use crate::css::style_sheet::NativeStyleSheet;
@@ -6239,28 +6244,23 @@ pub unsafe extern "C" fn style_engine_remove_native_rule(
     let has_counter_style = removed
         .iter()
         .any(|rule| RuleRef::Materialized(rule).rule_type() == NativeRuleType::CounterStyle);
-    // The owner removes the rules in order, each with what removing the ones before it left, and names the engine id
-    // each had then (0 for one removed with an ancestor), which the host is told of. The host's callbacks reach no
-    // engine: they note what the document and its scopes derive from the rules, and republish the layer order.
-    let identities = removed
-        .iter()
-        .map(|rule| RuleRef::Materialized(rule).identity())
-        .collect::<Vec<_>>();
-    let mut ids = vec![0u32; identities.len()];
-    crate::css::style::owner_calls::ask(
-        engine.home(),
+    // The owner removes the rules in order. The host's callbacks reach no engine: they note what the document and its
+    // scopes derive from the rules, and republish the layer order.
+    crate::css::style::owner_calls::send(
+        engine,
         "style_engine_remove_native_rule",
-        crate::css::style::owner_calls::StyleQuery::RemoveNativeRules {
-            identities: identities.as_ptr(),
-            ids: ids.as_mut_ptr(),
-            count: identities.len(),
-        },
+        crate::css::style::owner_calls::EngineChange::RemoveNativeRules(
+            removed
+                .iter()
+                .map(|rule| RuleRef::Materialized(rule).identity())
+                .collect(),
+        ),
     );
     super::seal::note_host_call("remove_native_rule.begin");
     unsafe { begin(context, changes_environment, has_counter_style) };
-    for (rule, id) in removed.iter().zip(ids) {
+    for rule in &removed {
         super::seal::note_host_call("remove_native_rule.notify");
-        unsafe { notify(context, id, mutation::declares_layer(rule)) };
+        unsafe { notify(context, mutation::declares_layer(rule)) };
     }
 }
 

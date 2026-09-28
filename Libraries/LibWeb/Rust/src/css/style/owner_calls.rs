@@ -74,6 +74,9 @@ pub(crate) enum EngineChange {
     /// The host took the transition step the pass decided for an element's row, or for its synthetic pseudo-element
     /// of `pseudo_kind`.
     TransitionStepTakenByHost { node: StyleNodeID, pseudo_kind: Option<u8> },
+    /// The native rules of `identities` left their sheet, in the order the engine removes them: each with what
+    /// removing the ones before it left, where it still holds it.
+    RemoveNativeRules(Box<[u64]>),
     /// The transitions one of an element's lists now holds.
     SetElementTransitions {
         node: StyleNodeID,
@@ -265,6 +268,13 @@ impl EngineChange {
             Self::AddSheet { object, origin, sheet } => {
                 let added = engine.add_sheet(object, origin);
                 debug_assert!(added == sheet, "the engine numbers its sheets as the main thread does");
+            }
+            Self::RemoveNativeRules(identities) => {
+                for identity in identities {
+                    if let Some(rule) = engine.native_rule_id(identity) {
+                        super::bridge::operations::remove_rule(engine, rule.0 + 1);
+                    }
+                }
             }
             Self::RuleDeclarationsChanged { identity, declarations } => {
                 super::bridge::owner_rule_declarations_changed(engine, identity, declarations);
@@ -485,11 +495,6 @@ pub(crate) enum StyleQuery {
     },
     /// Removes the native rules of `count` identities in order, and writes the engine id plus one each had as it went,
     /// or 0 for one gone already.
-    RemoveNativeRules {
-        identities: *const u64,
-        ids: *mut u32,
-        count: usize,
-    },
     /// Compiles a sheet's rules into the engine, or replaces their selectors, as the walk says.
     Compile(crate::css::rule::compilation::OwnerCompilation),
     TakePseudoElementEnvironmentNamedInSettle {
@@ -955,22 +960,6 @@ impl StyleQuery {
             #[cfg(feature = "style-recording")]
             Self::BenchmarkMarker { name, length, is_ascii } => {
                 unsafe { super::bridge::owner_record_benchmark_marker(engine, name, length, is_ascii) };
-                StyleAnswer::None
-            }
-            Self::RemoveNativeRules { identities, ids, count } => {
-                // SAFETY: The main thread lends both arrays, of `count` each, until it has the answer.
-                let (identities, ids) = unsafe {
-                    (
-                        std::slice::from_raw_parts(identities, count),
-                        std::slice::from_raw_parts_mut(ids, count),
-                    )
-                };
-                for (identity, id) in identities.iter().zip(ids) {
-                    *id = engine.native_rule_id(*identity).map_or(0, |rule| rule.0 + 1);
-                    if *id != 0 {
-                        super::bridge::operations::remove_rule(engine, *id);
-                    }
-                }
                 StyleAnswer::None
             }
             Self::Compile(compilation) => {
