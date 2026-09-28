@@ -45,27 +45,26 @@ fn visit_list(
     ControlFlow::Continue(())
 }
 
-pub(crate) fn successor(sheet: &NativeStyleSheet, identity: u64, mut compiled_id: impl FnMut(u64) -> u32) -> u32 {
+/// The identity of the first rule after the subtree of the rule of `identity`, in sheet order, that the engine `holds`,
+/// or zero where none is.
+pub(crate) fn successor(sheet: &NativeStyleSheet, identity: u64, mut holds: impl FnMut(u64) -> bool) -> u64 {
     fn walk(
         rule: RuleRef<'_>,
         sheet: &NativeStyleSheet,
         identity: u64,
         found: &mut bool,
-        compiled_id: &mut impl FnMut(u64) -> u32,
-    ) -> ControlFlow<u32> {
+        holds: &mut impl FnMut(u64) -> bool,
+    ) -> ControlFlow<u64> {
         if rule.identity() == identity {
             *found = true;
             return ControlFlow::Continue(());
         }
-        if *found {
-            let id = compiled_id(rule.identity());
-            if id != 0 {
-                return ControlFlow::Break(id);
-            }
+        if *found && holds(rule.identity()) {
+            return ControlFlow::Break(rule.identity());
         }
         let mut successor = 0;
         let mut visit = |child: RuleRef<'_>, sheet: &NativeStyleSheet| {
-            if let ControlFlow::Break(id) = walk(child, sheet, identity, found, compiled_id) {
+            if let ControlFlow::Break(id) = walk(child, sheet, identity, found, holds) {
                 successor = id;
                 ControlFlow::Break(())
             } else {
@@ -88,7 +87,7 @@ pub(crate) fn successor(sheet: &NativeStyleSheet, identity: u64, mut compiled_id
     let mut found = false;
     let mut successor = 0;
     let _ = sheet.rules().visit_rules(&mut |rule| {
-        if let ControlFlow::Break(id) = walk(rule, sheet, identity, &mut found, &mut compiled_id) {
+        if let ControlFlow::Break(id) = walk(rule, sheet, identity, &mut found, &mut holds) {
             successor = id;
             ControlFlow::Break(())
         } else {
@@ -152,19 +151,9 @@ mod tests {
         let inside = first.children.as_ref().unwrap().materialized_rules()[0].identity;
         let next = rules[2].children.as_ref().unwrap().materialized_rules()[0].identity;
         let last = rules[3].identity;
-        let compiled = |identity| {
-            if identity == inside {
-                1
-            } else if identity == next {
-                2
-            } else if identity == last {
-                3
-            } else {
-                0
-            }
-        };
-        assert_eq!(successor(&sheet, first.identity, compiled), 2);
-        assert_eq!(successor(&sheet, rules[2].identity, compiled), 3);
+        let compiled = |identity| [inside, next, last].contains(&identity);
+        assert_eq!(successor(&sheet, first.identity, compiled), next);
+        assert_eq!(successor(&sheet, rules[2].identity, compiled), last);
         assert_eq!(successor(&sheet, last, compiled), 0);
         assert_eq!(successor(&sheet, 0, compiled), 0);
     }
@@ -182,17 +171,9 @@ mod tests {
         }
         let middle = imported.rules().materialized_rules()[1].identity;
         let last = root.rules().materialized_rules()[1].identity;
-        let compiled = |identity| {
-            if identity == middle {
-                7
-            } else if identity == last {
-                8
-            } else {
-                0
-            }
-        };
-        assert_eq!(successor(&root, nested_import.identity, compiled), 7);
-        assert_eq!(successor(&root, import.identity, compiled), 8);
+        let compiled = |identity| [middle, last].contains(&identity);
+        assert_eq!(successor(&root, nested_import.identity, compiled), middle);
+        assert_eq!(successor(&root, import.identity, compiled), last);
         assert!(declares_layer(&import));
         assert!(!declares_layer(&nested_import));
 
