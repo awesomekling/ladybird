@@ -765,12 +765,12 @@ void publish_scroll_offset_of_box(Painting::BoxSlot const& box)
         });
 }
 
-bool synchronize_table_spans_of_box(Painting::BoxSlot const& box)
+void synchronize_table_spans_of_box(Painting::BoxSlot const& box)
 {
     if (!box.is_live())
-        return false;
+        return;
     auto spans = table_spans_of(box.dom_node().ptr());
-    return RustFFI::layout_arena_set_table_spans(box.arena(), box.slot(), spans.column_span, spans.row_span, spans.raw_column_span);
+    RustFFI::layout_arena_set_table_spans(box.arena(), box.slot(), spans.column_span, spans.row_span, spans.raw_column_span);
 }
 
 bool update_empty_line_box_fragment_flag_of_box(Painting::BoxSlot const& text_box)

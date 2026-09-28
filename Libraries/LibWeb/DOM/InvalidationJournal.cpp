@@ -397,8 +397,8 @@ void InvalidationJournal::note_table_spans(NodeIdentity identity)
 static void publish_table_spans(Element& element)
 {
     Layout::publish_table_spans(element);
-    if (auto box = Painting::BoxSlot::bound_to(element); box && Layout::synchronize_table_spans_of_box(box))
-        element.document().render_inputs_for_write().set_needs_layout_update(box.slot(), SetNeedsLayoutReason::TableSpanAttributeChange);
+    if (auto box = Painting::BoxSlot::bound_to(element))
+        Layout::synchronize_table_spans_of_box(box);
 }
 
 // The mirror holds the characters the layout tree build renders, and a text box that already
