@@ -151,25 +151,44 @@ pub(crate) struct TransitionStepForHost {
 unsafe impl Send for TransitionStepForHost {}
 unsafe impl Sync for TransitionStepForHost {}
 
-/// The steps a pass decided for the rows it published and for the synthetic pseudo-elements it settled, which the
-/// host takes as it installs them, from the engine's home: whoever reaches the engine lends them back to it first.
+/// A transition step the engine decided, which the engine and the main thread's copy of its steps share.
+pub(crate) type SharedTransitionStep = std::sync::Arc<TransitionStepForHost>;
+
+/// The steps the passes decided for the rows they published and for the synthetic pseudo-elements they settled.
+#[derive(Default)]
+pub(crate) struct TransitionStepTables {
+    elements: super::fast_hash::FastMap<StyleNodeID, SharedTransitionStep>,
+    pseudo_elements: super::fast_hash::FastMap<(StyleNodeID, u8), SharedTransitionStep>,
+}
+
+/// The main thread's copy of the steps the engine decided, which the host takes as it installs them, and tells the
+/// engine it took.
 #[derive(Default)]
 pub(crate) struct TransitionStepsForHost {
-    elements: super::fast_hash::FastMap<StyleNodeID, TransitionStepForHost>,
-    pseudo_elements: super::fast_hash::FastMap<(StyleNodeID, u8), TransitionStepForHost>,
+    tables: TransitionStepTables,
     /// The step the host took last, which what it was handed points into until it takes the next.
-    taken: Option<TransitionStepForHost>,
+    taken: Option<SharedTransitionStep>,
 }
 
 impl TransitionStepsForHost {
     /// Takes the step decided for `node`'s row, or for its synthetic pseudo-element of `pseudo_kind`, so that exactly
     /// one installation applies it.
     pub(crate) fn take(&mut self, node: StyleNodeID, pseudo_kind: Option<u8>) -> Option<&TransitionStepForHost> {
-        let step = match pseudo_kind {
-            None => self.elements.remove(&node),
-            Some(kind) => self.pseudo_elements.remove(&(node, kind)),
-        }?;
+        let step = self.forget(node, pseudo_kind)?;
         Some(self.taken.insert(step))
+    }
+
+    /// Drops the step decided for `node`'s row, or for its synthetic pseudo-element of `pseudo_kind`.
+    pub(crate) fn forget(&mut self, node: StyleNodeID, pseudo_kind: Option<u8>) -> Option<SharedTransitionStep> {
+        match pseudo_kind {
+            None => self.tables.elements.remove(&node),
+            Some(kind) => self.tables.pseudo_elements.remove(&(node, kind)),
+        }
+    }
+
+    /// Takes the steps the engine holds, which moved since the main thread's copy was made.
+    pub(crate) fn adopt(&mut self, tables: TransitionStepTables) {
+        self.tables = tables;
     }
 }
 
@@ -477,7 +496,9 @@ impl StyleEngineState {
         ) {
             Ok((step, _)) => {
                 engine_sample_check::note_taken("transition step");
-                self.retained.transition_steps_decided_in_pass.insert(node, step);
+                self.retained
+                    .transition_steps_decided_in_pass
+                    .insert(node, std::sync::Arc::new(step));
             }
             Err(reason) => engine_sample_check::note_declined(&format!("transition step: {reason}")),
         }
@@ -523,7 +544,7 @@ impl StyleEngineState {
                 engine_sample_check::note_taken("pseudo-element transition step");
                 self.retained
                     .pseudo_element_transition_steps_decided_in_pass
-                    .insert((node, pseudo_kind), step);
+                    .insert((node, pseudo_kind), std::sync::Arc::new(step));
                 Some(composition.unwrap_or(installed_style_record))
             }
             Err(reason) => {
@@ -567,11 +588,14 @@ impl StyleEngineState {
             counters,
         )?;
         match pseudo {
-            None => self.retained.transition_steps_decided_in_pass.insert(node, step),
+            None => self
+                .retained
+                .transition_steps_decided_in_pass
+                .insert(node, std::sync::Arc::new(step)),
             Some(kind) => self
                 .retained
                 .pseudo_element_transition_steps_decided_in_pass
-                .insert((node, kind), step),
+                .insert((node, kind), std::sync::Arc::new(step)),
         };
         let Some(composition) = composition else {
             return Ok(None);
@@ -715,14 +739,29 @@ impl StyleEngineState {
             .style_record)
     }
 
-    /// Hands the engine's home the steps decided in the pass for the host to take, as whoever reached the engine is
-    /// done with it: `steps` holds the engine's until it reaches the engine again.
-    pub(crate) fn lend_transition_steps(&mut self, steps: &mut TransitionStepsForHost) {
-        std::mem::swap(&mut self.retained.transition_steps_decided_in_pass, &mut steps.elements);
-        std::mem::swap(
-            &mut self.retained.pseudo_element_transition_steps_decided_in_pass,
-            &mut steps.pseudo_elements,
-        );
+    /// The steps decided in the passes for the host to take, where they moved but for the host's takes since the last
+    /// time this answered.
+    pub(crate) fn transition_steps_moved(&mut self) -> Option<TransitionStepTables> {
+        let elements_moved = self.retained.transition_steps_decided_in_pass.take_moved();
+        let pseudo_elements_moved = self
+            .retained
+            .pseudo_element_transition_steps_decided_in_pass
+            .take_moved();
+        (elements_moved || pseudo_elements_moved).then(|| TransitionStepTables {
+            elements: (*self.retained.transition_steps_decided_in_pass).clone(),
+            pseudo_elements: (*self.retained.pseudo_element_transition_steps_decided_in_pass).clone(),
+        })
+    }
+
+    /// The host took the step decided for `node`'s row, or for its synthetic pseudo-element of `pseudo_kind`.
+    pub(crate) fn transition_step_taken_by_host(&mut self, node: StyleNodeID, pseudo_kind: Option<u8>) {
+        match pseudo_kind {
+            None => self.retained.transition_steps_decided_in_pass.take_taken_by_host(&node),
+            Some(kind) => self
+                .retained
+                .pseudo_element_transition_steps_decided_in_pass
+                .take_taken_by_host(&(node, kind)),
+        };
     }
 
     /// A row the pass settles again leaves no earlier decision behind: the host applies only a step

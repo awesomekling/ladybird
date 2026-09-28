@@ -59,18 +59,11 @@ impl AnchorNameRegistry {
     }
 }
 
-/// What registering an element's names changed about it.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct AnchorNamesRegistered {
-    pub(crate) had_names: bool,
-    pub(crate) has_names: bool,
-}
-
 impl StyleEngine {
     /// Register the anchor names of the record `style_record` installs on `node` in place of the
     /// ones it registered before. The names that moved wait for `publish_anchor_names`. A zero
     /// record registers nothing: the element's style was discarded, or it left the tree.
-    pub(crate) fn register_anchor_names(&mut self, node: StyleNodeID, style_record: u64) -> AnchorNamesRegistered {
+    pub(crate) fn register_anchor_names(&mut self, node: StyleNodeID, style_record: u64) {
         let names: Vec<RetainedUtf16FlyString> = if style_record == 0 {
             Vec::new()
         } else {
@@ -93,16 +86,12 @@ impl StyleEngine {
         let registry = &mut self.retained.anchor_names;
         registry.written.push(node);
         let old = registry.by_element.remove(&node);
-        let registered = AnchorNamesRegistered {
-            had_names: old.is_some(),
-            has_names: !names.is_empty(),
-        };
         if let Some((old_scope, old_names)) = &old
             && *old_scope == tree_scope
             && *old_names == names
         {
             registry.by_element.insert(node, (tree_scope, names));
-            return registered;
+            return;
         }
         let moved = &mut registry.unpublished;
         if let Some((old_scope, old_names)) = old {
@@ -128,7 +117,6 @@ impl StyleEngine {
             }
             registry.by_element.insert(node, (tree_scope, names));
         }
-        registered
     }
 
     /// Publish the names registration moved since the last publication to `arena`.

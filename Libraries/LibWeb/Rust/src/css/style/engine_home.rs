@@ -20,20 +20,21 @@
 //! style batch, or the frame's take-back) keeps the entrance out: then it takes that frame in, as a
 //! forced join does.
 //!
-//! What the main thread writes to the engine waits in the home ([`StyleEngineInputHandle::send`]), and whoever
-//! reaches the engine next applies it first: the render owner, a stage the engine is lent to, or the main thread at an
-//! entrance of its own. What the engine then holds for its next style transaction the main thread reads from the
-//! home, without asking the owner: whoever reaches the engine leaves the [`PendingFacts`] it found there as it is done,
-//! and the main thread adds what each change it sends may leave.
+//! Whoever reaches the engine may run beside the main thread (a display tick does), so the two share nothing but the
+//! home's [`Exchange`], which a lock guards. What the main thread writes to the engine waits there
+//! ([`StyleEngineInputHandle::send`]), and whoever reaches the engine next applies it first: the render owner, a stage
+//! the engine is lent to, or the main thread at an entrance of its own. Whoever reaches the engine leaves the main
+//! thread [`EngineNews`] of what the engine holds as it is done, moved into the exchange. The main thread reads only
+//! its own [`HomeAnswers`]: the news it adopted last, with what each change it sent since leaves.
 
 use super::StyleEngine;
-use super::bridge::HomeAnswers;
+use super::bridge::{EngineNews, HomeAnswers};
 use super::owner_calls::StyleChange;
 use std::cell::{Cell, UnsafeCell};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -58,15 +59,13 @@ impl StyleEngineInputHandle {
         self.0
     }
 
-    /// Leaves `change` in the engine's home, for whoever reaches the engine next to apply first. On the main thread,
-    /// with the engine home.
+    /// Leaves `change` in the engine's home, for whoever reaches the engine next to apply first. On the main thread.
     pub(crate) fn send(self, change: StyleChange) {
-        let home = self.0.home();
-        let leaves = change.leaves(self.0.pending_facts());
-        home.pending.fetch_or(leaves.0, Ordering::Relaxed);
-        // SAFETY: On the main thread, with the engine home: nothing reaches the engine, or what the home keeps for it.
-        unsafe { &mut *home.answers.get() }.follow_sent(&change, leaves);
-        home.exchange().unapplied.push(change);
+        // SAFETY: On the main thread, which borrows its answers only here.
+        let answers = unsafe { self.0.answers() };
+        let leaves = change.leaves(answers.pending);
+        answers.follow_sent(&change, leaves);
+        self.0.home().exchange().unapplied.push((change, leaves));
     }
 }
 
@@ -149,25 +148,25 @@ struct StyleEngineHome {
     arena: usize,
     /// The document whose render state's arena links the engine, whose render owner owns the engine.
     document: crate::render_owner::DocumentId,
-    /// What crosses between the main thread and whoever reaches the engine, which may run beside it.
+    /// All that crosses between the main thread and whoever reaches the engine, which may run beside it.
     exchange: Mutex<Exchange>,
-    /// The [`PendingFacts`] whoever last reached the engine left, with what the main thread sent since. Written by the
-    /// main thread, or by whoever reaches the engine while it waits or has lent the engine.
-    pending: AtomicU8,
-    /// What the home answers the main thread with, of what the engine holds. Written by whoever reaches the engine, as
-    /// it is done with it, and by the main thread as it sends the engine a change.
+    /// What the home answers the main thread with, of what the engine holds. The main thread's alone.
     answers: UnsafeCell<HomeAnswers>,
     /// Whether the thread that owns the engine with its render state (a unit test's, or the replay tool's) reached it
     /// through [`OwnedStyleEngine::engine`] since the home last followed it.
     reached_by_owning_thread: Cell<bool>,
 }
 
-/// What the main thread hands whoever reaches its engine.
+/// What the main thread and whoever reaches its engine hand each other.
 #[derive(Default)]
 struct Exchange {
-    /// What the main thread wrote to the engine since it was last reached, in order: the main thread pushes, and
-    /// whoever reaches the engine next takes them.
-    unapplied: Vec<StyleChange>,
+    /// What the main thread wrote to the engine since it was last reached, in order, each with what it may leave: the
+    /// main thread pushes, and whoever reaches the engine next takes them.
+    unapplied: Vec<(StyleChange, PendingFacts)>,
+    /// What the engine held as whoever reached it last was done, which the main thread has not adopted yet. Whoever
+    /// reaches the engine takes it back as it begins, and leaves it again with its own as it is done, so the main
+    /// thread never adopts news older than a change it no longer finds unapplied.
+    news: Option<EngineNews>,
 }
 
 impl StyleEngineHome {
@@ -175,33 +174,37 @@ impl StyleEngineHome {
         self.exchange.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Follows what the thread that owns the engine left in `engine`, reaching it directly through
-    /// [`OwnedStyleEngine::engine`], as a reach would as it is done.
-    fn follow_owning_thread(&self, engine: &mut StyleEngine) {
-        if !self.reached_by_owning_thread.take() {
-            return;
-        }
-        self.pending.store(engine.pending_facts().0, Ordering::Relaxed);
-        // SAFETY: The owning thread is done with the engine, and nothing else reaches it.
-        let answers = unsafe { &mut *self.answers.get() };
-        answers.follow(engine);
-        answers.trade_with(engine);
+    /// Takes back the news the main thread has not adopted yet, for a reach of the engine that begins.
+    fn take_news(&self) -> EngineNews {
+        self.exchange().news.take().unwrap_or_default()
     }
 
-    /// Applies to `engine` what the main thread wrote to it since it was last reached, by whoever reaches it now, and
-    /// answers whether it wrote anything.
-    ///
-    /// # Safety
-    ///
-    /// Nothing else reaches the engine meanwhile.
-    unsafe fn apply_unapplied(&self, engine: &mut StyleEngine) -> bool {
+    /// Leaves the main thread `news`, with what `engine` holds now, as a reach of it is done.
+    fn leave_news(&self, mut news: EngineNews, engine: &mut StyleEngine) {
+        news.gather(engine);
+        self.exchange().news = Some(news);
+    }
+
+    /// Applies to `engine` what the main thread wrote to it since it was last reached, by whoever reaches it now.
+    fn apply_unapplied(&self, engine: &mut StyleEngine) {
         // Taken whole, as applying a change may reach the engine's handle again, and the main thread sends on meanwhile.
         let changes = std::mem::take(&mut self.exchange().unapplied);
-        let wrote = !changes.is_empty();
-        for change in changes {
-            change.apply(engine);
+        for (change, leaves) in changes {
+            change.apply(engine, leaves);
         }
-        wrote
+    }
+
+    /// Applies what the main thread wrote to `engine`, and leaves it the news, for an entrance with no end the home
+    /// sees.
+    fn catch_up(&self, engine: &mut StyleEngine) {
+        let mut exchange = self.exchange();
+        if exchange.unapplied.is_empty() {
+            return;
+        }
+        let news = exchange.news.take().unwrap_or_default();
+        drop(exchange);
+        self.apply_unapplied(engine);
+        self.leave_news(news, engine);
     }
 }
 
@@ -262,29 +265,35 @@ unsafe fn reach_on_this_thread<T>(home: usize, engine: *mut StyleEngine, run: im
             LENT_TO_THIS_THREAD.set(self.0);
         }
     }
+    /// Leaves the main thread the news of the outermost reach as it ends, or unwinds.
+    struct LeaveNews<'a> {
+        home: &'a StyleEngineHome,
+        engine: *mut StyleEngine,
+        news: Option<EngineNews>,
+    }
+    impl Drop for LeaveNews<'_> {
+        fn drop(&mut self) {
+            if let Some(news) = self.news.take() {
+                // SAFETY: The reach has ended: nothing else borrows the engine.
+                self.home.leave_news(news, unsafe { &mut *self.engine });
+            }
+        }
+    }
     let outer = LENT_TO_THIS_THREAD.replace(home);
     // A reach within one of the same engine finds it as the outer one left it.
     let outermost = outer != home;
     let _restore = Restore(outer);
-    // SAFETY: Guaranteed by the caller; off the main thread, only the home's changes, facts and answers are touched,
-    // which the main thread leaves alone while the engine is reached.
-    let (engine, home) = unsafe { (&mut *engine, &*(home as *const StyleEngineHome)) };
-    if outermost {
-        home.follow_owning_thread(engine);
-        // SAFETY: As above.
-        unsafe { &mut *home.answers.get() }.trade_with(engine);
-    }
-    // SAFETY: As above.
-    unsafe { home.apply_unapplied(engine) };
-    let result = run(engine);
-    home.pending.store(engine.pending_facts().0, Ordering::Relaxed);
-    // SAFETY: As above.
-    let answers = unsafe { &mut *home.answers.get() };
-    answers.follow(engine);
-    if outermost {
-        answers.trade_with(engine);
-    }
-    result
+    // SAFETY: Guaranteed by the caller. Of the home, only the engine and the exchange are touched off the main thread.
+    let home = unsafe { &*(home as *const StyleEngineHome) };
+    let _leave_news = LeaveNews {
+        home,
+        engine,
+        news: outermost.then(|| home.take_news()),
+    };
+    // SAFETY: Guaranteed by the caller.
+    let engine = unsafe { &mut *engine };
+    home.apply_unapplied(engine);
+    run(engine)
 }
 
 impl StyleEngineLoan {
@@ -452,7 +461,6 @@ impl StyleEngineHandle {
             arena: arena.addr(),
             document,
             exchange: Mutex::default(),
-            pending: AtomicU8::new(0),
             answers: UnsafeCell::default(),
             reached_by_owning_thread: Cell::new(false),
         });
@@ -515,27 +523,35 @@ impl StyleEngineHandle {
     /// What the engine holds for its next style transaction, as whoever last reached it left it, with what the main
     /// thread sent it since. On the main thread.
     pub(crate) fn pending_facts(self) -> PendingFacts {
-        self.follow_owning_thread();
-        PendingFacts(self.home().pending.load(Ordering::Relaxed))
+        // SAFETY: On the main thread, which borrows its answers only here.
+        unsafe { self.answers() }.pending
     }
 
-    /// Follows what the thread that owns the engine left in it, reaching it directly, as a reach would as it is done.
-    fn follow_owning_thread(self) {
-        let home = self.home();
-        // SAFETY: The owning thread reaches the engine only through `OwnedStyleEngine::engine`, whose borrow has ended.
-        home.follow_owning_thread(unsafe { &mut *home.engine.as_ptr() });
-    }
-
-    /// What the home answers the main thread with, of what the engine holds.
+    /// What the home answers the main thread with, of what the engine holds, which adopts the news whoever reached the
+    /// engine left since.
     ///
     /// # Safety
     ///
-    /// On the main thread, with no stage holding the engine, and no other borrow of it live.
+    /// On the main thread, with no other borrow of the answers live.
     #[allow(clippy::mut_from_ref)]
     pub(crate) unsafe fn answers<'a>(self) -> &'a mut HomeAnswers {
-        self.follow_owning_thread();
-        // SAFETY: Guaranteed by the caller: nothing else writes the home's answers meanwhile.
-        unsafe { &mut *self.home().answers.get() }
+        let home = self.home();
+        if home.reached_by_owning_thread.take() {
+            // SAFETY: The owning thread reaches the engine only through `OwnedStyleEngine::engine`, whose borrow has
+            // ended.
+            home.leave_news(home.take_news(), unsafe { &mut *home.engine.as_ptr() });
+        }
+        // SAFETY: Guaranteed by the caller.
+        let answers = unsafe { &mut *home.answers.get() };
+        let mut exchange = home.exchange();
+        if let Some(news) = exchange.news.take() {
+            // What the main thread sent since the news was left, it follows again over it.
+            answers.adopt(news);
+            for (change, leaves) in &exchange.unapplied {
+                answers.follow_sent(change, *leaves);
+            }
+        }
+        answers
     }
 
     /// The document whose render state's arena links the engine, whose render owner owns it.
@@ -617,12 +633,8 @@ impl StyleEngineHandle {
         // SAFETY: The engine is home, or the stage that holds it is done with it, and the main thread
         // reaches it or waits; guaranteed by the caller.
         let engine = unsafe { &mut *engine };
-        let home = self.home();
         // What the main thread wrote to the engine goes in before anything reaches it.
-        // SAFETY: As above.
-        if unsafe { home.apply_unapplied(engine) } {
-            home.pending.store(engine.pending_facts().0, Ordering::Relaxed);
-        }
+        self.home().catch_up(engine);
         engine
     }
 
@@ -651,11 +663,7 @@ impl StyleEngineHandle {
         }
         // A unit the main thread waits for reaches the engine as the main thread would, which brought the engine home
         // before it waited; what the main thread wrote to it goes in first.
-        let home = self.home();
-        // SAFETY: As above.
-        if unsafe { home.apply_unapplied(engine) } {
-            home.pending.store(engine.pending_facts().0, Ordering::Relaxed);
-        }
+        self.home().catch_up(engine);
         engine
     }
 
@@ -724,16 +732,12 @@ impl OwnedStyleEngine {
         StyleEngineInputHandle(self.handle)
     }
 
-    /// The engine, once its owner has applied every change the thread sent it.
+    /// The engine, once its owner has applied every change the thread sent it. The home follows what the thread
+    /// leaves in it before it next answers.
     pub fn engine(&mut self) -> &mut StyleEngine {
-        let home = self.handle.home();
+        self.handle.home().reached_by_owning_thread.set(true);
         // SAFETY: The engine is live while this is, and the borrow of this keeps any other out.
-        let engine = unsafe { self.handle.enter("owned style engine") };
-        if !home.reached_by_owning_thread.replace(true) {
-            // SAFETY: As above.
-            unsafe { &mut *home.answers.get() }.trade_with(engine);
-        }
-        engine
+        unsafe { self.handle.enter("owned style engine") }
     }
 }
 

@@ -59,6 +59,12 @@ impl<K: Eq + Hash, V> DrainTable<K, V> {
         self.entries.clear();
     }
 
+    pub(crate) fn retain(&mut self, keep: impl FnMut(&K, &mut V) -> bool) {
+        let before = self.entries.len();
+        self.entries.retain(keep);
+        self.moved |= self.entries.len() != before;
+    }
+
     /// Takes the entry the host took from its copy already.
     pub(crate) fn take_taken_by_host(&mut self, key: &K) -> Option<V> {
         self.entries.remove(key)

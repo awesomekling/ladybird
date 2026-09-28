@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 200ms linear infinite alternate;
+    }
+    @keyframes grow {
+        from {
+            height: 20px;
+        }
+        to {
+            height: 220px;
+        }
+    }
+    .marked {
+        background-color: var(--shade);
+    }
+    .marked > span {
+        outline-color: var(--shade);
+    }
+</style>
+<div id="box"></div>
+<div id="other"><span>text</span></div>
+<script src="../../include.js"></script>
+<script>
+    // A task that changes the style inputs of another element in a loop, and reads the style it changed, runs beside the
+    // render clock's ticks of an animation: the ticks go on moving what the render side presents, and the task reads
+    // its own changes. (Its reads are style reads: a geometry read reaches the layout arena the ticks lay out.)
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const other = document.getElementById("other");
+        const enabled = internals.clockFramesEnabled();
+        const presentedHeight = () => internals.presentedBorderBox(box)?.height ?? 0;
+
+        // Until the page's animation has a clock (it never gets one without clock frames).
+        for (let frames = 0; enabled && frames < 600 && !internals.renderClockTicks(document); ++frames)
+            await new Promise(resolve => requestAnimationFrame(resolve));
+
+        // The task: on for ~300 ms, and on until the presented height has moved twice, however slowly the display
+        // ticks (at most 5 s). It changes the style inputs and reads what they compute to between stretches of plain JS.
+        const start = performance.now();
+        const heights = new Set();
+        let lastRead = start;
+        let lastChange = start;
+        let step = 0;
+        let readsSeeChanges = true;
+        let sink = 0;
+        for (let now = start; now - start < 5000 && (now - start < 300 || heights.size < 3); now = performance.now()) {
+            for (let i = 0; i < 100; ++i)
+                sink = (sink + Math.sqrt(i + sink)) % 1000;
+            if (now - lastRead >= 20) {
+                lastRead = now;
+                heights.add(presentedHeight());
+            }
+            // A change every 2 ms or so, up to 150 of them.
+            if (step >= 150 || now - lastChange < 2)
+                continue;
+            lastChange = now;
+            ++step;
+            other.classList.toggle("marked", step % 2 === 0);
+            other.style.setProperty("--shade", `rgb(${step % 13}, 0, 0)`);
+            other.style.color = step % 3 ? "red" : "blue";
+            const style = getComputedStyle(other);
+            readsSeeChanges &&= style.color === (step % 3 ? "rgb(255, 0, 0)" : "rgb(0, 0, 255)");
+            readsSeeChanges &&= style.backgroundColor === (step % 2 ? "rgba(0, 0, 0, 0)" : `rgb(${step % 13}, 0, 0)`);
+        }
+        other.classList.add("marked");
+        other.style.setProperty("--shade", "rgb(42, 0, 0)");
+        println(`the task reads its own changes: ${readsSeeChanges}`);
+        println(`the final background: ${getComputedStyle(other).backgroundColor}`);
+        println(`the presented height moves while the task runs: ${!enabled || heights.size >= 3}`);
+        done();
+    });
+</script>

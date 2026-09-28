@@ -983,10 +983,11 @@ pub struct RetainedState {
     /// The transitions each element holds, which a row's transition step decides over.
     element_transitions: transition_step::ElementTransitions,
     /// The transition steps the pass decided, which the host applies where it installs the rows.
-    transition_steps_decided_in_pass: HashMap<StyleNodeID, transition_step::TransitionStepForHost>,
+    transition_steps_decided_in_pass: drain_table::DrainTable<StyleNodeID, transition_step::SharedTransitionStep>,
     /// The transition steps the engine decided for the pseudo-elements it settled, which the host
     /// applies where it installs their records.
-    pseudo_element_transition_steps_decided_in_pass: HashMap<(StyleNodeID, u8), transition_step::TransitionStepForHost>,
+    pseudo_element_transition_steps_decided_in_pass:
+        drain_table::DrainTable<(StyleNodeID, u8), transition_step::SharedTransitionStep>,
     /// What each tree scope's registered counter styles are, as one identity per scope. A record
     /// whose `content` or `list-style-type` names an overridable counter style is only the answer
     /// while the registry it named is the one in place, so the record carries the identity and a
