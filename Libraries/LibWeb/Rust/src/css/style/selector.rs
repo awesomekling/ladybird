@@ -39,12 +39,10 @@ use super::index::FeatureKey;
 use super::index::StyleAtomID;
 use super::index::StyleNodeFacts;
 use super::index::dispatch_bloom_bit;
-use super::instrumentation::Counter;
 use super::instrumentation::Counters;
 use super::shared_vector::{SharedVector, SharedVectorPool};
 use super::weak_pool::WeakPool;
 use smallvec::SmallVec;
-use std::cell::Cell;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::num::NonZeroU32;
@@ -72,13 +70,19 @@ use super::relative_selector::RelativeQuery;
 use super::relative_selector::RelativeQueryID;
 use super::relative_selector::WitnessEffect;
 use super::relative_selector::candidate_witnesses;
-use super::relative_selector::traversal_anchor;
+use super::selector_evaluation::RememberedPrefix;
+use super::selector_evaluation::SelectorBindings;
+use super::selector_evaluation::SelectorEvaluator;
+use super::selector_evaluation::SelectorSubject;
+use super::selector_evaluation::SelectorTree;
 use super::transaction::StateFact;
 use super::tree::PseudoElementTarget;
 use super::tree::StyleNodeID;
 use super::tree::StyleNodeTree;
 use super::tree::TreeScopeID;
+use crate::css::css_tokenizer::TokenizerInput;
 pub use crate::css::selector::Specificity;
+use std::borrow::Cow;
 
 #[cfg(feature = "style-recording")]
 pub mod replay;
@@ -1980,7 +1984,7 @@ impl SelectorProgram {
     /// reaches the parts of its own tree as well - those are the ones an inner tree forwarded out
     /// through `exportparts`. Which of the two a rule asks for is what its compound says.
     #[must_use]
-    fn mentions_the_host(&self, id: SelectorNodeID) -> bool {
+    pub(super) fn mentions_the_host(&self, id: SelectorNodeID) -> bool {
         match self.node(id) {
             SelectorOp::Host(_) => true,
             SelectorOp::And { first, count } | SelectorOp::Or { first, count } => self
@@ -4807,7 +4811,7 @@ impl Iterator for SiblingChildren<'_> {
 
 /// Evaluates match programs against the live tree and a batch of local facts.
 #[derive(Clone, Copy)]
-pub(super) struct MatchFactRow<'a> {
+pub struct MatchFactRow<'a> {
     pub(super) facts: &'a StyleNodeFacts,
     pub(super) row: u32,
 }
@@ -4826,32 +4830,24 @@ pub(super) enum PositionalIndexPolicy {
     SteppedOnly,
 }
 
-pub struct MatchEvaluator<'a> {
+/// The style engine's elements, as a selector program is evaluated against them: its tree, its fact
+/// rows, and the workspace its accelerations keep their answers in.
+pub struct EngineSubject<'a> {
     tree: &'a StyleNodeTree,
     facts: &'a StyleNodeFacts,
     transaction_fact_view: Option<(&'a TransactionFactView, TransactionFactSide)>,
-    /// The shadow root of the tree whose rules are being evaluated, when it is one. `:host` names
-    /// the host of the tree its rule is in, so a rule from the document scope names no host at all.
-    scope_shadow_root: Option<StyleNodeID>,
     /// The outer tree scope asking about a part exposed from a shadow tree.
     part_exposure_scope: Option<TreeScopeID>,
-    /// The scoping root a `<scope-end>` is currently being checked against. Bound only while the
-    /// limit walk runs, because that is the only place one scope instance is distinguishable from
-    /// another. Interior mutability so that evaluation stays a shared borrow.
-    scope_root_instance: Cell<Option<StyleNodeID>>,
-    /// Whether evaluation is inside the argument of `:host()`. A nested `:host` does not describe
-    /// a feature of the host and must not match there.
-    matching_host_argument: Cell<bool>,
-    /// The anchor of the relational query currently being evaluated. Bound only while the witness
-    /// walk runs, and restored after, so that a nested `:has()` names its own anchor.
-    relative_anchor: Cell<Option<StyleNodeID>>,
     match_workspace: Option<(&'a mut MatchScratch, MatchEvaluationSide)>,
     positional_index_policy: PositionalIndexPolicy,
-    transitive_relation_program: Cell<Option<SelectorProgramID>>,
+    transitive_relation_program: Option<SelectorProgramID>,
     /// Where a completed simple relational evaluation records its outcome, when the caller is
     /// evaluating the live tree and current facts. See `MatchEvaluator::observing_witnesses`.
     witnesses: Option<&'a mut Vec<WitnessEffect>>,
 }
+
+/// Evaluates match programs against the style engine's tree and a batch of local facts.
+pub type MatchEvaluator<'a> = SelectorEvaluator<EngineSubject<'a>>;
 
 /// Transaction-local answers for repeated match-program relations.
 ///
@@ -4887,13 +4883,9 @@ struct PrecedingSiblingPrefixes {
     columns: ProgramRelationColumns<PrecedingSiblingPrefixColumn>,
 }
 
-define_id! { struct PrecedingSiblingParentID(); }
+define_id! { pub struct PrecedingSiblingParentID(); }
 
-#[derive(Clone, Copy, Default)]
-struct PrecedingSiblingPrefix {
-    next: Option<StyleNodeID>,
-    answer: bool,
-}
+type PrecedingSiblingPrefix = super::selector_evaluation::PrecedingSiblingPrefix<StyleNodeID>;
 
 struct ProgramRelationColumns<C> {
     programs: Column<Option<Box<ProgramColumns<C>>>>,
@@ -5456,39 +5448,38 @@ impl MatchScratch {
 impl<'a> MatchEvaluator<'a> {
     #[must_use]
     pub fn new(tree: &'a StyleNodeTree, facts: &'a StyleNodeFacts) -> Self {
-        Self {
-            tree,
-            facts,
-            transaction_fact_view: None,
-            scope_shadow_root: None,
-            part_exposure_scope: None,
-            scope_root_instance: Cell::new(None),
-            matching_host_argument: Cell::new(false),
-            relative_anchor: Cell::new(None),
-            match_workspace: None,
-            positional_index_policy: PositionalIndexPolicy::All,
-            transitive_relation_program: Cell::new(None),
-            witnesses: None,
+        SelectorEvaluator {
+            subject: EngineSubject {
+                tree,
+                facts,
+                transaction_fact_view: None,
+                part_exposure_scope: None,
+                match_workspace: None,
+                positional_index_policy: PositionalIndexPolicy::All,
+                transitive_relation_program: None,
+                witnesses: None,
+            },
+            bindings: SelectorBindings::default(),
         }
     }
 
     /// The same, evaluating rules attached to one shadow tree rather than to the document.
     #[must_use]
     pub fn in_shadow_tree(mut self, shadow_root: StyleNodeID) -> Self {
-        self.scope_shadow_root = Some(shadow_root);
+        self.bindings.scope_shadow_root = Some(shadow_root);
         self
     }
 
     /// Evaluate a part through the tree scope it is exposed to.
     #[must_use]
     pub fn for_a_part_exposed_in(mut self, scope: TreeScopeID) -> Self {
-        self.part_exposure_scope = Some(scope);
+        self.subject.part_exposure_scope = Some(scope);
         self
     }
 
     #[must_use]
-    pub fn with_scope_root(self, scope_root: StyleNodeID) -> Self {
-        self.scope_root_instance.set(Some(scope_root));
+    pub fn with_scope_root(mut self, scope_root: StyleNodeID) -> Self {
+        self.bindings.scope_root_instance = Some(scope_root);
         self
     }
 
@@ -5498,13 +5489,13 @@ impl<'a> MatchEvaluator<'a> {
         view: &'a TransactionFactView,
         side: TransactionFactSide,
     ) -> Self {
-        self.transaction_fact_view = Some((view, side));
+        self.subject.transaction_fact_view = Some((view, side));
         self
     }
 
     #[must_use]
     pub(super) fn with_match_workspace(mut self, workspace: &'a mut MatchScratch, side: MatchEvaluationSide) -> Self {
-        self.match_workspace = Some((workspace, side));
+        self.subject.match_workspace = Some((workspace, side));
         self
     }
 
@@ -5512,7 +5503,7 @@ impl<'a> MatchEvaluator<'a> {
     /// positional answer. See [`PositionalIndexPolicy::SteppedOnly`].
     #[must_use]
     pub(super) fn indexing_stepped_positions_only(mut self) -> Self {
-        self.positional_index_policy = PositionalIndexPolicy::SteppedOnly;
+        self.subject.positional_index_policy = PositionalIndexPolicy::SteppedOnly;
         self
     }
 
@@ -5524,71 +5515,22 @@ impl<'a> MatchEvaluator<'a> {
     /// call this.
     #[must_use]
     pub(super) fn observing_witnesses(mut self, witnesses: &'a mut Vec<WitnessEffect>) -> Self {
-        debug_assert!(self.transaction_fact_view.is_none());
+        debug_assert!(self.subject.transaction_fact_view.is_none());
         debug_assert!(
-            self.match_workspace
+            self.subject
+                .match_workspace
                 .as_ref()
                 .is_none_or(|(_, side)| matches!(side, MatchEvaluationSide::Current))
         );
-        self.witnesses = Some(witnesses);
+        self.subject.witnesses = Some(witnesses);
         self
     }
 
     pub(super) fn match_scratch_capacity_bytes(&self) -> u64 {
-        self.match_workspace
+        self.subject
+            .match_workspace
             .as_ref()
             .map_or(0, |(scratch, _)| scratch.capacity_bytes())
-    }
-
-    fn parent_of(&self, node: StyleNodeID) -> Option<StyleNodeID> {
-        self.transaction_fact_view.map_or_else(
-            || self.tree.parent(node),
-            |(view, side)| view.parent_of(self.tree, side, node),
-        )
-    }
-
-    fn previous_sibling_of(&self, node: StyleNodeID) -> Option<StyleNodeID> {
-        self.transaction_fact_view.map_or_else(
-            || self.tree.previous_element_sibling(node),
-            |(view, side)| view.previous_sibling_of(self.tree, side, node),
-        )
-    }
-
-    fn next_sibling_of(&self, node: StyleNodeID) -> Option<StyleNodeID> {
-        self.transaction_fact_view.map_or_else(
-            || self.tree.next_element_sibling(node),
-            |(view, side)| view.next_sibling_of(self.tree, side, node),
-        )
-    }
-
-    fn children_of(&self, parent: StyleNodeID) -> SiblingChildren<'a> {
-        match self.transaction_fact_view {
-            Some((view, side)) => view.children_of(self.tree, side, parent),
-            None => SiblingChildren::Live(self.tree.children(parent)),
-        }
-    }
-
-    /// Whether the node is the host of the tree whose rules are being evaluated.
-    #[must_use]
-    fn node_hosts_the_scope(&self, node: StyleNodeID) -> bool {
-        match self.scope_shadow_root {
-            Some(shadow_root) => self.tree.shadow_root_of(node) == Some(shadow_root),
-            // A rule in the document scope is in no shadow tree, so it names no host.
-            None => false,
-        }
-    }
-
-    fn matches_host_argument(
-        &mut self,
-        program: &SelectorProgram,
-        inner: SelectorNodeID,
-        host: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<bool, Incomplete> {
-        let was_matching_host_argument = self.matching_host_argument.replace(true);
-        let result = self.matches_node(program, inner, host, counters);
-        self.matching_host_argument.set(was_matching_host_argument);
-        result
     }
 
     /// How far the subject is from the scoping root its `@scope` resolved through.
@@ -5614,7 +5556,7 @@ impl<'a> MatchEvaluator<'a> {
                 return Ok(proximity);
             }
             proximity += 1;
-            candidate = self.tree.parent(current);
+            candidate = self.subject.tree.parent(current);
         }
         Ok(u32::MAX)
     }
@@ -5640,36 +5582,6 @@ impl<'a> MatchEvaluator<'a> {
             }
         }
         Ok(best)
-    }
-
-    /// Whether the subject satisfies one scope instance: not excluded by its limit, and matching
-    /// what the rule writes inside it.
-    ///
-    /// The limit is checked from the subject up to the root, which is the specification's
-    /// "descendant of the scoping root and not of any scoping limit". The binding is already in
-    /// place, so `:scope` in either the limit or the selector names this root.
-    fn subject_is_in_scope(
-        &mut self,
-        program: &SelectorProgram,
-        limit: Option<SelectorNodeID>,
-        inner: SelectorNodeID,
-        node: StyleNodeID,
-        root: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<bool, Incomplete> {
-        if let Some(limit) = limit {
-            let mut walked = Some(node);
-            while let Some(current) = walked {
-                if self.matches_node(program, limit, current, counters)? {
-                    return Ok(false);
-                }
-                if current == root {
-                    break;
-                }
-                walked = self.tree.parent(current);
-            }
-        }
-        self.matches_node(program, inner, node, counters)
     }
 
     /// Whether `node` matches one entry.
@@ -5728,9 +5640,9 @@ impl<'a> MatchEvaluator<'a> {
         node: StyleNodeID,
         counters: &mut Counters,
     ) -> Result<bool, Incomplete> {
-        let previous = self.transitive_relation_program.replace(Some(program_id));
+        let previous = self.subject.transitive_relation_program.replace(program_id);
         let result = self.matches_node(program, entry.root, node, counters);
-        self.transitive_relation_program.set(previous);
+        self.subject.transitive_relation_program = previous;
         result
     }
 
@@ -5768,24 +5680,22 @@ impl<'a> MatchEvaluator<'a> {
         node: StyleNodeID,
         counters: &mut Counters,
     ) -> Result<bool, Incomplete> {
-        let previous = self.transitive_relation_program.replace(Some(program_id));
-        let SelectorOp::And { first, count } = program.node(local.root) else {
-            let result = self.matches_node(program, local.root, node, counters);
-            self.transitive_relation_program.set(previous);
-            return result;
+        let previous = self.subject.transitive_relation_program.replace(program_id);
+        let result = match program.node(local.root) {
+            SelectorOp::And { first, count } => (|| {
+                for &operand in program.operands(first, count) {
+                    if Some(operand) == local.relation {
+                        continue;
+                    }
+                    if !self.matches_node(program, operand, node, counters)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            })(),
+            _ => self.matches_node(program, local.root, node, counters),
         };
-        let result = (|| {
-            for &operand in program.operands(first, count) {
-                if Some(operand) == local.relation {
-                    continue;
-                }
-                if !self.matches_node(program, operand, node, counters)? {
-                    return Ok(false);
-                }
-            }
-            Ok(true)
-        })();
-        self.transitive_relation_program.set(previous);
+        self.subject.transitive_relation_program = previous;
         result
     }
 
@@ -5796,936 +5706,40 @@ impl<'a> MatchEvaluator<'a> {
     /// as one would abandon the whole document over `.wrap > .child` inside any shadow tree.
     #[must_use]
     pub fn node_cannot_carry_dispatch_key(&self, key: DispatchKey, node: StyleNodeID) -> bool {
-        self.node_carries_dispatch_key(key, node).is_ok_and(|carries| !carries)
-    }
-
-    fn node_carries_dispatch_key(&self, key: DispatchKey, node: StyleNodeID) -> Result<bool, Incomplete> {
-        let row = self.row_of(node)?;
-        Ok(row
-            .facts
-            .carries_dispatch_key(row.row, key, self.tree.parent(node).is_none()))
-    }
-
-    #[inline]
-    fn matches_compound(
-        &mut self,
-        program: &SelectorProgram,
-        first: u32,
-        count: u32,
-        node: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<bool, Incomplete> {
-        for &operand in program.operands(first, count) {
-            let matches = match program.node(operand) {
-                SelectorOp::Feature(test) => self.matches_feature_node(program, test, node, counters)?,
-                _ => self.matches_node(program, operand, node, counters)?,
-            };
-            if !matches {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
-
-    // https://drafts.csswg.org/css-shadow-1/#host-element-in-tree
-    // When considered within its own shadow trees, the shadow host is featureless. Only the
-    // :host, :host(), and :host-context() pseudo-classes are allowed to match it. Selector-list
-    // pseudos preserve that restriction: only an alternative that reaches :host can match.
-    fn matches_featureless_host(
-        &mut self,
-        program: &SelectorProgram,
-        id: SelectorNodeID,
-        host: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<bool, Incomplete> {
-        match program.node(id) {
-            SelectorOp::Host(inner) => self.matches_host_argument(program, inner, host, counters),
-            SelectorOp::And { first, count } => {
-                if !program.mentions_the_host(id) {
-                    return Ok(false);
-                }
-                for &operand in program.operands(first, count) {
-                    let operand_matches = match program.node(operand) {
-                        SelectorOp::RelativeExists(_) => self.matches_node(program, operand, host, counters)?,
-                        SelectorOp::IsNode(named) => host == named,
-                        SelectorOp::ScopeRootInstance => self.scope_root_instance.get() == Some(host),
-                        _ => self.matches_featureless_host(program, operand, host, counters)?,
-                    };
-                    if !operand_matches {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            }
-            SelectorOp::Or { first, count } => {
-                for &operand in program.operands(first, count) {
-                    if self.matches_featureless_host(program, operand, host, counters)? {
-                        return Ok(true);
-                    }
-                }
-                Ok(false)
-            }
-            SelectorOp::Where(inner) => self.matches_featureless_host(program, inner, host, counters),
-            SelectorOp::IsNode(named) => Ok(host == named),
-            SelectorOp::ScopeRootInstance => Ok(self.scope_root_instance.get() == Some(host)),
-            _ => Ok(false),
-        }
-    }
-
-    /// Whether the dispatch bloom leaves `node` any chance of matching the compound at `inner`.
-    /// A row facts cannot answer for yet is never prejudged.
-    #[inline]
-    fn relation_target_may_match(&self, program: &SelectorProgram, inner: SelectorNodeID, node: StyleNodeID) -> bool {
-        let required = program.relation_target_bloom(inner);
-        if required == 0 {
-            return true;
-        }
-        // The shadow scope root matches featurelessly — so its facts prove nothing about it.
-        if Some(node) == self.scope_shadow_root {
-            return true;
-        }
-        match self.row_of(node) {
-            Ok(row) => row.facts.dispatch_bloom_of(row.row, false) & required == required,
-            Err(_) => true,
-        }
-    }
-
-    #[inline]
-    fn matches_relation_target(
-        &mut self,
-        program: &SelectorProgram,
-        id: SelectorNodeID,
-        node: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<bool, Incomplete> {
-        if Some(node) != self.scope_shadow_root
-            && let SelectorOp::And { first, count } = program.node(id)
-        {
-            return self.matches_compound(program, first, count, node, counters);
-        }
-        self.matches_node(program, id, node, counters)
-    }
-
-    fn matches_descendant_relation(
-        &mut self,
-        program: &SelectorProgram,
-        relation: SelectorNodeID,
-        inner: SelectorNodeID,
-        node: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<bool, Incomplete> {
-        let side = self.match_workspace.as_ref().unwrap().1;
-        let program_id = self.transitive_relation_program.get().unwrap();
-        match self
-            .match_workspace
-            .as_ref()
-            .unwrap()
-            .0
-            .relations(side)
-            .lookup(program_id, relation, node)
-        {
-            Lookup::Known(()) => return Ok(true),
-            Lookup::KnownAbsent => return Ok(false),
-            Lookup::Missing(_) => {}
-        }
-
-        let mut current = node;
-        let mut traversed: SmallVec<[StyleNodeID; 8]> = SmallVec::new();
-        let mut incomplete = None;
-        let answer = loop {
-            traversed.push(current);
-            let Some(adjacent) = self.parent_of(current) else {
-                break false;
-            };
-            counters.bump(Counter::CombinatorSteps);
-            match self.matches_relation_target(program, inner, adjacent, counters) {
-                Ok(true) => break true,
-                Ok(false) => {}
-                Err(error) => {
-                    incomplete.get_or_insert(error);
-                }
-            }
-            match self
-                .match_workspace
-                .as_ref()
-                .unwrap()
-                .0
-                .relations(side)
-                .lookup(program_id, relation, adjacent)
-            {
-                Lookup::Known(()) => break true,
-                Lookup::KnownAbsent => break false,
-                Lookup::Missing(_) => {}
-            }
-            current = adjacent;
-        };
-        if !answer && let Some(incomplete) = incomplete {
-            return Err(incomplete);
-        }
-        // The relation is transitive: every node crossed before reaching the same positive witness
-        // or the same negative boundary has the same answer. Publishing the whole traversed prefix
-        // turns a later sparse candidate into one lookup even when the immediately adjacent node
-        // was not itself a selector candidate.
-        for traversed_node in traversed {
-            self.match_workspace.as_mut().unwrap().0.relations_by_evaluation_side[side as usize].insert(
-                program_id,
-                relation,
-                traversed_node,
-                answer,
-            );
-        }
-        Ok(answer)
-    }
-
-    fn matches_preceding_sibling_prefix(
-        &mut self,
-        program: &SelectorProgram,
-        relation: SelectorNodeID,
-        inner: SelectorNodeID,
-        node: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<bool, Incomplete> {
-        let side = self.match_workspace.as_ref().unwrap().1;
-        let program_id = self.transitive_relation_program.get().unwrap();
-        let Some(parent) = self.parent_of(node) else {
-            return Ok(false);
-        };
-        let (parent_id, cached_prefix) = self.match_workspace.as_mut().unwrap().0.relations_by_evaluation_side
-            [side as usize]
-            .preceding_sibling_prefix(program_id, relation, parent);
-        if let Some(prefix) = cached_prefix
-            && prefix.next == Some(node)
-        {
-            return Ok(prefix.answer);
-        }
-        let mut prefix = cached_prefix.unwrap_or_else(|| PrecedingSiblingPrefix {
-            next: self.children_of(parent).next(),
-            answer: false,
-        });
-        let mut retried_from_start = false;
-        let mut incomplete = None;
-        loop {
-            if prefix.next == Some(node) {
-                if !prefix.answer
-                    && let Some(incomplete) = incomplete
-                {
-                    return Err(incomplete);
-                }
-                self.match_workspace.as_mut().unwrap().0.relations_by_evaluation_side[side as usize]
-                    .insert_preceding_sibling_prefix(program_id, relation, parent_id, prefix);
-                return Ok(prefix.answer);
-            }
-            let Some(current) = prefix.next else {
-                // Candidates normally arrive in tree order. If a caller asks out of order, restart
-                // this one prefix from the sequence head rather than treating ordering as a
-                // correctness requirement.
-                if retried_from_start {
-                    return Ok(false);
-                }
-                prefix = PrecedingSiblingPrefix {
-                    next: self.children_of(parent).next(),
-                    answer: false,
-                };
-                incomplete = None;
-                retried_from_start = true;
-                continue;
-            };
-            counters.bump(Counter::CombinatorSteps);
-            if !prefix.answer {
-                match self.matches_relation_target(program, inner, current, counters) {
-                    Ok(true) => prefix.answer = true,
-                    Ok(false) => {}
-                    Err(error) => {
-                        incomplete.get_or_insert(error);
-                    }
-                }
-            }
-            prefix.next = self.next_sibling_of(current);
-        }
-    }
-
-    /// The distinct hosts a `::part()` rule can address this element from, nearest first.
-    ///
-    /// One per level of `exportparts` forwarding. An element that carries a part name and is
-    /// forwarded nowhere has no recorded pairing at all, so the host of the tree it stands in is the
-    /// only level it has - which is every part in a document using no `exportparts`.
-    fn part_exposure_hosts(&self, node: StyleNodeID) -> SmallVec<[StyleNodeID; 1]> {
-        let pairs = self.tree.part_hosts_of(node);
-        if pairs.is_empty() {
-            return self.tree.shadow_host_of(node).into_iter().collect();
-        }
-        let mut hosts = SmallVec::new();
-        for &(_, host) in pairs {
-            if !hosts.contains(&host) {
-                hosts.push(host);
-            }
-        }
-        hosts
-    }
-
-    /// Whether every part name the rule writes is one this element is exposed to `host` under.
-    fn part_names_reach_host(
-        &self,
-        program: &SelectorProgram,
-        parts: SelectorNodeID,
-        node: StyleNodeID,
-        host: StyleNodeID,
-    ) -> Result<bool, Incomplete> {
-        let pairs = self.tree.part_hosts_of(node);
-        let row = self.row_of(node)?;
-        let reaches = |name: StyleAtomID| match pairs.is_empty() {
-            // With no pairing recorded the element is addressable only under the names it carries,
-            // and all of them reach the host of the tree it stands in.
-            true => row.facts.parts_of(row.row).contains(&name),
-            false => pairs
-                .iter()
-                .any(|&(exposed, exposed_to)| exposed == name && exposed_to == host),
-        };
-        let name_of = |id: SelectorNodeID| match program.node(id) {
-            SelectorOp::Part(name) => Some(name),
-            _ => None,
-        };
-        Ok(match program.node(parts) {
-            SelectorOp::And { first, count } => program
-                .operands(first, count)
-                .iter()
-                .filter_map(|&operand| name_of(operand))
-                .all(reaches),
-            other => match other {
-                SelectorOp::Part(name) => reaches(name),
-                _ => true,
-            },
+        self.subject.row_of(node).is_ok_and(|row| {
+            !row.facts
+                .carries_dispatch_key(row.row, key, self.subject.tree.parent(node).is_none())
         })
     }
 
-    fn matches_node(
+    pub(super) fn indexed_sibling_position(
         &mut self,
-        program: &SelectorProgram,
-        id: SelectorNodeID,
-        node: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<bool, Incomplete> {
-        // A shadow root is a node of the style tree, which is what makes a combinator walking up out
-        // of the tree stop at it rather than continue into the document. It is not an element,
-        // though: it publishes no facts, and nothing matches it - not even `*`. The one exception is
-        // `:host`, which names the host standing outside the tree, so a walk that reaches the root
-        // crosses there and nowhere else.
-        //
-        // The only shadow root a walk from inside the tree can reach is the scope's own, so this
-        // costs one comparison rather than a lookup.
-        if Some(node) == self.scope_shadow_root {
-            return match program.node(id) {
-                SelectorOp::Host(inner) => match self.tree.host_of(node) {
-                    Some(host) => self.matches_host_argument(program, inner, host, counters),
-                    None => Ok(false),
-                },
-                // A scoping root outside the tree is the host, and a combinator reaching up out of
-                // the tree lands here rather than on it. `:scope > .a` inside a scope rooted at the
-                // host is the same walk as `:host > .a`, so it crosses the same way.
-                SelectorOp::ScopeRootInstance => {
-                    let host = self.tree.host_of(node);
-                    Ok(host.is_some() && self.scope_root_instance.get() == host)
-                }
-                SelectorOp::IsNode(named) => Ok(self.tree.host_of(node) == Some(named)),
-                // An in-shadow-tree query walks its axis from the shadow root and binds its anchor to
-                // it, so a chain tying itself back to that anchor - the leftmost step of
-                // `:host:has(> .child > .grand_child)` asks for the `.child`'s parent - compares
-                // against the root itself. It does not cross to the host the way a scoping root does,
-                // because the root is where the walk started.
-                SelectorOp::RelativeAnchorInstance => {
-                    counters.bump(Counter::StructuralTests);
-                    Ok(self.relative_anchor.get() == Some(node))
-                }
-                // A compound with `:host` crosses to the host, but the host is featureless inside
-                // its own shadow tree: only `:host` itself decides against the host's features,
-                // through its argument, and `:has()` rides along as the one attached exception.
-                // Any other simple selector in the compound - `div:host`, `:host.x`, `*:host`,
-                // `:host:hover` - fails the whole compound rather than testing the host's facts.
-                // https://drafts.csswg.org/css-shadow-1/#host-element-in-tree
-                SelectorOp::And { .. } | SelectorOp::Or { .. } | SelectorOp::Where(_)
-                    if program.mentions_the_host(id) =>
-                {
-                    self.tree.host_of(node).map_or(Ok(false), |host| {
-                        self.matches_featureless_host(program, id, host, counters)
-                    })
-                }
-                _ => Ok(false),
-            };
-        }
-        match program.node(id) {
-            SelectorOp::Feature(test) => self.matches_feature_node(program, test, node, counters),
-            SelectorOp::Language { first, count } => {
-                counters.bump(Counter::StateTests);
-                let row = self.row_of(node)?;
-                let tag = row.facts.language_tag_of(row.row);
-                // An element with no resolved language matches no range at all, not even `*`.
-                Ok(!tag.is_empty()
-                    && program
-                        .language_ranges(first, count)
-                        .any(|range| crate::css::selector::language_range_matches_tag(range, tag)))
-            }
-            SelectorOp::State(fact) => {
-                counters.bump(Counter::StateTests);
-                let row = self.row_of(node)?;
-                Ok(row.facts.states_of(row.row).contains(fact))
-            }
-            SelectorOp::And { first, count } => self.matches_compound(program, first, count, node, counters),
-            SelectorOp::Or { first, count } => {
-                if self.node_hosts_the_scope(node) && program.mentions_the_host(id) {
-                    return self.matches_featureless_host(program, id, node, counters);
-                }
-                for &operand in program.operands(first, count) {
-                    if self.matches_node(program, operand, node, counters)? {
-                        return Ok(true);
-                    }
-                }
-                Ok(false)
-            }
-            SelectorOp::Where(inner) => self.matches_node(program, inner, node, counters),
-            SelectorOp::Not(inner) => Ok(!self.matches_node(program, inner, node, counters)?),
-            SelectorOp::Parent(inner) => {
-                counters.bump(Counter::CombinatorSteps);
-                match self.parent_of(node) {
-                    Some(parent) => self.matches_relation_target(program, inner, parent, counters),
-                    None => Ok(false),
-                }
-            }
-            SelectorOp::Ancestor(inner) => {
-                if self.match_workspace.is_some()
-                    && self.transitive_relation_program.get().is_some()
-                    && self.scope_root_instance.get().is_none()
-                    && self.relative_anchor.get().is_none()
-                    && self.scope_shadow_root.is_none()
-                {
-                    return self.matches_descendant_relation(program, id, inner, node, counters);
-                }
-                let mut ancestor = self.parent_of(node);
-                while let Some(current) = ancestor {
-                    counters.bump(Counter::CombinatorSteps);
-                    if self.relation_target_may_match(program, inner, current)
-                        && self.matches_relation_target(program, inner, current, counters)?
-                    {
-                        return Ok(true);
-                    }
-                    ancestor = self.parent_of(current);
-                }
-                Ok(false)
-            }
-            SelectorOp::PreviousSibling(inner) => {
-                counters.bump(Counter::CombinatorSteps);
-                match self.previous_sibling_of(node) {
-                    Some(previous) => self.matches_relation_target(program, inner, previous, counters),
-                    None => Ok(false),
-                }
-            }
-            SelectorOp::PrecedingSibling(inner) => {
-                if self.match_workspace.is_some()
-                    && self.transitive_relation_program.get().is_some()
-                    && self.scope_root_instance.get().is_none()
-                    && self.relative_anchor.get().is_none()
-                    && self.scope_shadow_root.is_none()
-                {
-                    return self.matches_preceding_sibling_prefix(program, id, inner, node, counters);
-                }
-                let Some(parent) = self.parent_of(node) else {
-                    return Ok(false);
-                };
-                for sibling in self.children_of(parent) {
-                    if sibling == node {
-                        return Ok(false);
-                    }
-                    counters.bump(Counter::CombinatorSteps);
-                    match self.matches_relation_target(program, inner, sibling, counters) {
-                        Ok(true) => return Ok(true),
-                        Ok(false) => {}
-                        Err(Incomplete::MissingFacts(missing)) if missing == sibling => {
-                            return Err(Incomplete::MissingSiblingFacts {
-                                first: sibling,
-                                last_exclusive: Some(node),
-                            });
-                        }
-                        Err(incomplete) => return Err(incomplete),
-                    }
-                }
-                Ok(false)
-            }
-            SelectorOp::NthPosition(position) => {
-                let memoizes_answers = self.positional_index_policy == PositionalIndexPolicy::All;
-                if memoizes_answers
-                    && position.of_selector.is_none()
-                    && let Some((workspace, side)) = self.match_workspace.as_mut()
-                    && let Some(answer) = workspace.positional_answer(position, node, *side)
-                {
-                    return Ok(answer);
-                }
-                counters.bump(Counter::StructuralTests);
-                let result = self.matches_nth(program, position, node, counters);
-                if memoizes_answers
-                    && position.of_selector.is_none()
-                    && let Some((workspace, side)) = self.match_workspace.as_mut()
-                    && let Ok(answer) = result
-                {
-                    workspace.insert_positional_answer(position, node, *side, answer);
-                }
-                result
-            }
-            // Each shadow operator consumes the relation it names. A generic descendant walk does
-            // not pierce a shadow root, and a slot's assignment is not its DOM parent, so these
-            // cannot be expressed as ordinary combinators.
-            SelectorOp::Host(inner) => match self.node_hosts_the_scope(node) && !self.matching_host_argument.get() {
-                true => self.matches_host_argument(program, inner, node, counters),
-                false => Ok(false),
-            },
-            SelectorOp::Slotted(inner) => match self.tree.assigned_slot_of(node) {
-                Some(_) => self.matches_node(program, inner, node, counters),
-                None => Ok(false),
-            },
-            SelectorOp::AssignedSlot(inner) => {
-                // The chain can pass through several trees; the slot this compound describes is the
-                // one in the tree whose rules are being asked.
-                const MAX_REASSIGNMENTS: usize = 32;
-                let mut current = node;
-                for _ in 0..MAX_REASSIGNMENTS {
-                    let Some(slot) = self.tree.assigned_slot_of(current) else {
-                        return Ok(false);
-                    };
-                    // The slot this compound describes is the one in the tree being asked. A shadow
-                    // root's own tree scope is the outer one, so which tree a node is in is answered
-                    // by walking to the root rather than by comparing scopes.
-                    let in_this_tree = self.scope_shadow_root.is_none_or(|root| {
-                        std::iter::successors(Some(slot), |&node| self.tree.parent(node)).any(|node| node == root)
-                    });
-                    if in_this_tree && self.matches_node(program, inner, slot, counters)? {
-                        return Ok(true);
-                    }
-                    current = slot;
-                }
-                Ok(false)
-            }
-            SelectorOp::Part(part) => {
-                let row = self.row_of(node)?;
-                Ok(row.facts.parts_of(row.row).contains(&part))
-            }
-            // The host the part is exposed to, which is what the rule's outer compound describes.
-            //
-            // `exportparts` forwards a name outwards one host at a time, and each level exposes the
-            // names it chose to its own host. A level therefore answers this op only when it exposes
-            // every name the rule writes and its host is the element the outer compound describes:
-            // taking the name from one level and the host from another would name an element that no
-            // rule addresses, and taking only the outermost level would miss the rules of every tree
-            // the name passed through on its way out.
-            SelectorOp::ExposedToHost {
-                host: host_compound,
-                parts,
-            } => {
-                // https://drafts.csswg.org/css-shadow-parts-1/#part
-                // `::part()` reaches one level down: into a tree hosted by an element of the tree
-                // the rule itself is in. Without that bound a rule reached every part in the
-                // document, including the ones in its own tree. A compound naming `:host` reaches
-                // the rule's own tree as well, which is where a part forwarded out of it stands.
-                let scope_host = self.scope_shadow_root.and_then(|root| self.tree.host_of(root));
-                let mentions_the_host = program.mentions_the_host(host_compound);
-                for level_host in self.part_exposure_hosts(node) {
-                    let reaches_a_hosted_tree = self.tree.shadow_host_of(level_host) == scope_host;
-                    let reaches_its_own_tree = Some(level_host) == scope_host && mentions_the_host;
-                    if !reaches_a_hosted_tree && !reaches_its_own_tree {
-                        continue;
-                    }
-                    if !self.part_names_reach_host(program, parts, node, level_host)? {
-                        continue;
-                    }
-                    if self.matches_node(program, host_compound, level_host, counters)? {
-                        return Ok(true);
-                    }
-                }
-                Ok(false)
-            }
-            SelectorOp::Root => {
-                counters.bump(Counter::StructuralTests);
-                Ok(self.parent_of(node).is_none())
-            }
-            SelectorOp::InScope {
-                root,
-                limit,
-                inner,
-                names_the_scope,
-            } => {
-                counters.bump(Counter::StructuralTests);
-                // One scope per element the `<scope-start>` matches, and the rule is relative to one
-                // of them. A scoped selector carries an implied `:scope ` prefix unless it names
-                // `:scope`, so the subject is normally a strict descendant of the root.
-                //
-                // An enclosing scope, when there is one, has already bound its own root; this
-                // scope's root has to be inside it, so the walk stops there. The `<scope-start>` is
-                // asked before the binding moves, because `:scope` written in one names the scope it
-                // is nested in rather than the scope it opens.
-                let enclosing_root = self.scope_root_instance.get();
-
-                // A part stands inside a shadow tree, but an outer scope reaches it through the
-                // host exposing it. Scope membership is therefore measured from that host rather
-                // than from the part's DOM parent chain, which stops at the shadow root.
-                if let Some(part_exposure_scope) = self.part_exposure_scope
-                    && program.subject_is_a_part(inner)
-                {
-                    for level_host in self.part_exposure_hosts(node) {
-                        if self.tree.tree_scope(level_host) != part_exposure_scope {
-                            continue;
-                        }
-                        let mut candidate = match names_the_scope {
-                            true => Some(level_host),
-                            false => self.tree.parent(level_host),
-                        };
-                        while let Some(root_candidate) = candidate {
-                            if self.matches_node(program, root, root_candidate, counters)? {
-                                let outer = self.scope_root_instance.replace(Some(root_candidate));
-                                let answer =
-                                    self.subject_is_in_scope(program, limit, inner, node, root_candidate, counters);
-                                self.scope_root_instance.set(outer);
-                                if answer? {
-                                    return Ok(true);
-                                }
-                            }
-                            if Some(root_candidate) == enclosing_root {
-                                break;
-                            }
-                            candidate = self.tree.parent(root_candidate);
-                        }
-                    }
-                    return Ok(false);
-                }
-
-                let mut candidate = match names_the_scope {
-                    true => Some(node),
-                    false => self.tree.parent(node),
-                };
-                // A shadow root is not an element and roots nothing. The host standing outside the
-                // tree can be the scoping root, though - `@scope (:host)` says so, and an `@scope`
-                // with no `<scope-start>` whose `<style>` is a direct child of the shadow root roots
-                // there too - so the walk crosses at the root and stops.
-                if candidate == self.scope_shadow_root {
-                    candidate = candidate.and_then(|root| self.tree.host_of(root));
-                }
-                while let Some(root_candidate) = candidate {
-                    if self.matches_node(program, root, root_candidate, counters)? {
-                        let outer = self.scope_root_instance.replace(Some(root_candidate));
-                        let answer = self.subject_is_in_scope(program, limit, inner, node, root_candidate, counters);
-                        self.scope_root_instance.set(outer);
-                        if answer? {
-                            return Ok(true);
-                        }
-                    }
-                    if Some(root_candidate) == enclosing_root {
-                        break;
-                    }
-                    candidate = self.tree.parent(root_candidate);
-                    if candidate == self.scope_shadow_root {
-                        candidate = candidate.and_then(|root| self.tree.host_of(root));
-                    }
-                }
-                Ok(false)
-            }
-            SelectorOp::Empty => {
-                counters.bump(Counter::StructuralTests);
-                // Element children are style nodes and the tree answers for them. A text or comment
-                // child is not, so the element publishes whether it holds one.
-                let row = self.row_of(node)?;
-                Ok(self.tree.first_element_child(node).is_none() && !row.facts.has_text_content_of(row.row))
-            }
-            SelectorOp::IsNode(named) => {
-                counters.bump(Counter::StructuralTests);
-                Ok(node == named)
-            }
-            SelectorOp::ScopeRootInstance => {
-                counters.bump(Counter::StructuralTests);
-                Ok(self.scope_root_instance.get() == Some(node))
-            }
-            SelectorOp::RelativeAnchorInstance => {
-                counters.bump(Counter::StructuralTests);
-                Ok(self.relative_anchor.get() == Some(node))
-            }
-            // Without an enclosing `@scope`, the scoping root is the root of the tree.
-            SelectorOp::Scope => {
-                counters.bump(Counter::StructuralTests);
-                Ok(self.tree.parent(node).is_none())
-            }
-            SelectorOp::ValueState { kind, value } => {
-                counters.bump(Counter::StateTests);
-                let row = self.row_of(node)?;
-                Ok(match kind {
-                    ValueStateTestKind::Directionality => row.facts.directionality_of(row.row) == value,
-                    ValueStateTestKind::CustomState => row.facts.custom_states_of(row.row).contains(&value),
-                })
-            }
-            SelectorOp::Heading(levels) => {
-                counters.bump(Counter::StructuralTests);
-                let row = self.row_of(node)?;
-                let level = row.facts.heading_level_of(row.row);
-                Ok((1..=9).contains(&level) && levels & (1 << (level - 1)) != 0)
-            }
-            // The existential answer: does any candidate on the query's axis satisfy its compound.
-            // Only the Boolean matters, so the walk stops at the first witness it finds.
-            SelectorOp::RelativeExists(query_id) => {
-                counters.bump(Counter::RelationalTests);
-                let query = program.relative_query(query_id);
-                // An in-shadow-tree query is anchored on the host and walked from the tree the host
-                // opens. Binding the anchor to the shadow root as well as walking from it is what
-                // ties a multi-compound chain back to the right place: the leftmost step of
-                // `:host:has(> .child > .grand_child)` asks for the `.child`'s parent, and that is
-                // the root, not the host.
-                let Some(anchor) = traversal_anchor(node, query.match_in_shadow_tree, self.tree) else {
-                    return Ok(false);
-                };
-                let mut matched = Ok(false);
-                let mut found = None;
-                let enclosing_anchor = self.relative_anchor.replace(Some(anchor));
-                candidate_witnesses(
-                    query.axis,
-                    query.witness_is_below_the_axis,
-                    anchor,
-                    self.tree,
-                    |candidate| match self.matches_node(program, query.compound, candidate, counters) {
-                        Ok(true) => {
-                            matched = Ok(true);
-                            found = Some(candidate);
-                            false
-                        }
-                        Ok(false) => true,
-                        Err(incomplete) => {
-                            matched = Err(match (query.axis, incomplete) {
-                                (RelativeAxis::Descendant, Incomplete::MissingFacts(missing))
-                                    if missing == candidate =>
-                                {
-                                    Incomplete::MissingDescendantFacts {
-                                        root: anchor,
-                                        first: candidate,
-                                    }
-                                }
-                                (RelativeAxis::FollowingSibling, Incomplete::MissingFacts(missing))
-                                    if missing == candidate =>
-                                {
-                                    Incomplete::MissingSiblingFacts {
-                                        first: candidate,
-                                        last_exclusive: None,
-                                    }
-                                }
-                                (_, incomplete) => incomplete,
-                            });
-                            false
-                        }
-                    },
-                );
-                self.relative_anchor.set(enclosing_anchor);
-                // A completed walk of the live tree is what a retained witness is: proof that the
-                // query's Boolean on this element is true right now. Both outcomes are recorded -
-                // the entry doubles as "the last completed evaluation answered true", which is the
-                // half a routing-time re-verification cannot re-establish on its own. A walk that
-                // ended incomplete proved neither and leaves the entry alone.
-                if let Some(witnesses) = self.witnesses.as_deref_mut()
-                    && let Some(program_id) = self.transitive_relation_program.get()
-                    && program.retainable_relative_query(query_id).is_some()
-                {
-                    let key = RelationalWitnessKey {
-                        program: program_id,
-                        query: query_id,
-                        anchor: node,
-                    };
-                    match (&matched, found) {
-                        (Ok(true), Some(witness)) => {
-                            witnesses.push(WitnessEffect::Retain(key, witness));
-                        }
-                        (Ok(false), _) => witnesses.push(WitnessEffect::Clear(key)),
-                        _ => {}
-                    }
-                }
-                matched
-            }
-        }
-    }
-
-    fn matches_feature(
-        &self,
-        program: &SelectorProgram,
-        test: FeatureTest,
-        node: StyleNodeID,
-    ) -> Result<bool, Incomplete> {
-        if test == FeatureTest::AnyElement {
-            return Ok(true);
-        }
-        let row = self.row_of(node)?;
-        Ok(match test {
-            FeatureTest::AnyElement => true,
-            FeatureTest::Namespace(NamespaceTest::None) => row.facts.namespace_of(row.row) == StyleAtomID::NONE,
-            FeatureTest::Namespace(NamespaceTest::Named(namespace)) => row.facts.namespace_of(row.row) == namespace,
-            FeatureTest::TagName(tag) => tag.matches(row.facts.tag_of(row.row), row.facts.namespace_of(row.row)),
-            FeatureTest::Id(id) => row.facts.id_of(row.row) == id,
-            FeatureTest::Class(class) => row.facts.classes_of(row.row).contains(&class),
-            FeatureTest::Attribute(test) => {
-                let insensitive = match test.case {
-                    AttributeCase::Sensitive => false,
-                    AttributeCase::Insensitive => true,
-                    AttributeCase::InsensitiveForNamespace(namespace) => row.facts.namespace_of(row.row) == namespace,
-                };
-                // `[*|x]` names one attribute per namespace the element carries `x` in, and the
-                // test holds when any of them satisfies it.
-                self.attributes_named_by(row, test)
-                    .any(|attribute| self.matches_attribute_value(program, test, row.facts, attribute, insensitive))
-            }
-        })
-    }
-
-    fn matches_feature_node(
-        &self,
-        program: &SelectorProgram,
-        test: FeatureTest,
-        node: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<bool, Incomplete> {
-        counters.bump(Counter::LocalFeatureTests);
-        self.matches_feature(program, test, node)
-    }
-
-    /// Every attribute a test names.
-    ///
-    /// There can be more than one: `[*|x]` names the attribute called `x` in each namespace the
-    /// element carries it in, and they publish the same any-namespace atom.
-    fn attributes_named_by(
-        &self,
-        row: MatchFactRow<'a>,
-        test: AttributeTest,
-    ) -> impl Iterator<Item = super::index::AttributeFact> {
-        // Whether this subject folds attribute names at all, which is one namespace comparison for
-        // the whole test rather than one per attribute.
-        let folds = !test.fold_in_namespace.is_none() && row.facts.namespace_of(row.row) == test.fold_in_namespace;
-        row.facts
-            .attributes_of(row.row)
-            .iter()
-            .copied()
-            .filter(move |attribute| {
-                if !test.any_namespace {
-                    if attribute.name == test.name {
-                        return true;
-                    }
-                    if !folds {
-                        return false;
-                    }
-                }
-                let forms = row.facts.attribute_name_forms(attribute.name);
-                let (written, folded) = match test.any_namespace {
-                    true => (forms.local, forms.folded_local),
-                    false => (attribute.name, forms.folded_name),
-                };
-                written == test.name || (folds && folded == test.folded)
-            })
-    }
-
-    fn matches_attribute_value(
-        &self,
-        program: &SelectorProgram,
-        test: AttributeTest,
-        facts: &StyleNodeFacts,
-        attribute: super::index::AttributeFact,
-        insensitive: bool,
-    ) -> bool {
-        if test.operator == AttributeOperator::Presence {
-            return true;
-        }
-        // An exact test on two interned values is an integer comparison, which is why the batch
-        // carries no text for attributes only tested this way.
-        if test.operator == AttributeOperator::Exact
-            && !insensitive
-            && !test.value_atom.is_none()
-            && !attribute.value.is_none()
-        {
-            return test.value_atom == attribute.value;
-        }
-
-        let literal = program.literal(test.value_offset, test.value_length);
-        let Some(value) = facts.text_of(attribute) else {
-            return false;
-        };
-        attribute_value_matches(test.operator, value, literal, insensitive)
-    }
-
-    pub(super) fn matches_nth(
-        &mut self,
-        program: &SelectorProgram,
         position: NthPosition,
         node: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<bool, Incomplete> {
-        if position.of_selector.is_none()
-            && (position.step != 0 || self.positional_index_policy == PositionalIndexPolicy::All)
-            && let Some(index) = self.indexed_sibling_position(position, node)?
-        {
-            return Ok(matches_an_plus_b(position.step, position.offset, index));
-        }
-
-        // https://drafts.csswg.org/selectors/#child-index
-        // A positional test counts the subject among its inclusive siblings, and the root of a tree
-        // has none - which makes it the one and only element of its sequence rather than absent from
-        // one. `:first-child`, `:last-child` and `:only-child` all name it.
-        // https://drafts.csswg.org/selectors/#typedef-type-selector
-        // An element's type is its qualified name, so two `p` elements in different namespaces are
-        // different types and are counted in different sequences.
-        let subject_type = match position.of_type {
-            true => {
-                let row = self.row_of(node)?;
-                Some((row.facts.tag_of(row.row), row.facts.namespace_of(row.row)))
-            }
-            false => None,
-        };
-
-        // https://drafts.csswg.org/selectors/#child-index
-        // A positional test counts the subject among its inclusive siblings, and the root of a tree
-        // has none - which makes it the one and only element of its sequence rather than absent from
-        // one. `:first-child`, `:last-child` and `:only-child` all name it.
-        let Some(parent) = self.parent_of(node) else {
-            if !self.counts_in_sequence(program, position, subject_type, node, counters)? {
-                return Ok(false);
-            }
-            return Ok(matches_an_plus_b(position.step, position.offset, 1));
-        };
-        // The subject has to be one of the counted siblings, or it has no position in the sequence.
-        if !self.counts_in_sequence(program, position, subject_type, node, counters)? {
-            return Ok(false);
-        }
-
-        // Count towards the near end only. The whole sequence is never needed, and a sequence of
-        // thousands of siblings is what a long list or a table is, so materializing one per test
-        // made `:first-child` cost the length of its parent's child list.
-        let mut index: i64 = 1;
-        let bounded = position.step == 0;
-        let mut current = match position.from_end {
-            true => self.next_sibling_of(node),
-            false => self.children_of(parent).next(),
-        };
-        while let Some(sibling) = current {
-            if !position.from_end && sibling == node {
-                break;
-            }
-            match self.counts_in_sequence(program, position, subject_type, sibling, counters) {
-                Ok(true) => {
-                    index += 1;
-                    // A test with no step names one position, so once the count is past it no further
-                    // sibling can bring it back. `:first-child` stops at the first counted neighbour.
-                    if bounded && index > i64::from(position.offset) {
-                        return Ok(false);
-                    }
-                }
-                Ok(false) => {}
-                Err(Incomplete::MissingFacts(missing)) if missing == sibling => {
-                    return Err(Incomplete::MissingSiblingFacts {
-                        first: sibling,
-                        last_exclusive: (!position.from_end).then_some(node),
-                    });
-                }
-                Err(incomplete) => return Err(incomplete),
-            }
-            current = self.next_sibling_of(sibling);
-        }
-        Ok(matches_an_plus_b(position.step, position.offset, index))
+    ) -> Result<Option<i64>, Incomplete> {
+        self.subject.indexed_sibling_position(position, node)
     }
 
+    pub(super) fn row_of(&self, node: StyleNodeID) -> Result<MatchFactRow<'a>, Incomplete> {
+        self.subject.row_of(node)
+    }
+
+    pub(super) fn serves_only_resident_rows(&self) -> bool {
+        self.subject.serves_only_resident_rows()
+    }
+}
+
+impl<'a> EngineSubject<'a> {
+    fn parent_of(&self, node: StyleNodeID) -> Option<StyleNodeID> {
+        self.tree().parent(node)
+    }
+
+    fn children_of(&self, parent: StyleNodeID) -> SiblingChildren<'a> {
+        match self.transaction_fact_view {
+            Some((view, side)) => view.children_of(self.tree, side, parent),
+            None => SiblingChildren::Live(self.tree.children(parent)),
+        }
+    }
     /// Return a sibling position from private scratch, building that sequence on its first ask.
     ///
     /// A broad matching or exact-planning batch asks many positional selectors about the same
@@ -6859,25 +5873,6 @@ impl<'a> MatchEvaluator<'a> {
         })))
     }
 
-    /// Whether one sibling is counted by this positional test's sequence.
-    fn counts_in_sequence(
-        &mut self,
-        program: &SelectorProgram,
-        position: NthPosition,
-        subject_type: Option<(StyleAtomID, StyleAtomID)>,
-        sibling: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<bool, Incomplete> {
-        match (subject_type, position.of_selector) {
-            (Some((tag, namespace)), _) => {
-                let row = self.row_of(sibling)?;
-                Ok(row.facts.tag_of(row.row) == tag && row.facts.namespace_of(row.row) == namespace)
-            }
-            (None, Some(selector)) => self.matches_node(program, selector, sibling, counters),
-            (None, None) => Ok(true),
-        }
-    }
-
     pub(super) fn row_of(&self, node: StyleNodeID) -> Result<MatchFactRow<'a>, Incomplete> {
         let row = match self.transaction_fact_view {
             Some((view, side)) => view.row_of(side, self.facts, node),
@@ -6895,11 +5890,374 @@ impl<'a> MatchEvaluator<'a> {
             _ => true,
         }
     }
+
+    /// The distinct hosts a `::part()` rule can address this element from, nearest first.
+    ///
+    /// One per level of `exportparts` forwarding. An element that carries a part name and is
+    /// forwarded nowhere has no recorded pairing at all, so the host of the tree it stands in is the
+    /// only level it has - which is every part in a document using no `exportparts`.
+    fn part_exposure_hosts_of(&self, node: StyleNodeID) -> SmallVec<[StyleNodeID; 1]> {
+        let pairs = self.tree.part_hosts_of(node);
+        if pairs.is_empty() {
+            return self.tree.shadow_host_of(node).into_iter().collect();
+        }
+        let mut hosts = SmallVec::new();
+        for &(_, host) in pairs {
+            if !hosts.contains(&host) {
+                hosts.push(host);
+            }
+        }
+        hosts
+    }
+}
+
+/// The style engine's tree, as a transaction view shows it where there is one.
+#[derive(Clone, Copy)]
+pub struct EngineTree<'a> {
+    tree: &'a StyleNodeTree,
+    transaction_fact_view: Option<(&'a TransactionFactView, TransactionFactSide)>,
+}
+
+impl SelectorTree for EngineTree<'_> {
+    type Node = StyleNodeID;
+
+    fn parent(self, node: StyleNodeID) -> Option<StyleNodeID> {
+        self.transaction_fact_view.map_or_else(
+            || self.tree.parent(node),
+            |(view, side)| view.parent_of(self.tree, side, node),
+        )
+    }
+
+    fn previous_sibling(self, node: StyleNodeID) -> Option<StyleNodeID> {
+        self.transaction_fact_view.map_or_else(
+            || self.tree.previous_element_sibling(node),
+            |(view, side)| view.previous_sibling_of(self.tree, side, node),
+        )
+    }
+
+    fn next_sibling(self, node: StyleNodeID) -> Option<StyleNodeID> {
+        self.transaction_fact_view.map_or_else(
+            || self.tree.next_element_sibling(node),
+            |(view, side)| view.next_sibling_of(self.tree, side, node),
+        )
+    }
+
+    fn first_child(self, parent: StyleNodeID) -> Option<StyleNodeID> {
+        match self.transaction_fact_view {
+            Some((view, side)) => view.children_of(self.tree, side, parent).next(),
+            None => self.tree.first_element_child(parent),
+        }
+    }
+
+    fn live_parent(self, node: StyleNodeID) -> Option<StyleNodeID> {
+        self.tree.parent(node)
+    }
+
+    fn shadow_root_of(self, host: StyleNodeID) -> Option<StyleNodeID> {
+        self.tree.shadow_root_of(host)
+    }
+
+    fn host_of(self, shadow_root: StyleNodeID) -> Option<StyleNodeID> {
+        self.tree.host_of(shadow_root)
+    }
+
+    fn for_each_on_axis(
+        self,
+        axis: RelativeAxis,
+        below_the_axis: bool,
+        anchor: StyleNodeID,
+        visit: impl FnMut(StyleNodeID) -> bool,
+    ) {
+        candidate_witnesses(axis, below_the_axis, anchor, self.tree, visit);
+    }
+
+    fn assigned_slot_of(self, node: StyleNodeID) -> Option<StyleNodeID> {
+        self.tree.assigned_slot_of(node)
+    }
+
+    fn shadow_host_of(self, node: StyleNodeID) -> Option<StyleNodeID> {
+        self.tree.shadow_host_of(node)
+    }
+}
+
+impl<'a> SelectorSubject for EngineSubject<'a> {
+    type Node = StyleNodeID;
+    type Tree = EngineTree<'a>;
+    type Row = MatchFactRow<'a>;
+    type Attribute = (&'a StyleNodeFacts, super::index::AttributeFact);
+    type Incomplete = Incomplete;
+    type Counters = Counters;
+    type PrefixSlot = PrecedingSiblingParentID;
+
+    fn tree(&self) -> EngineTree<'a> {
+        EngineTree {
+            tree: self.tree,
+            transaction_fact_view: self.transaction_fact_view,
+        }
+    }
+
+    fn row(&mut self, node: StyleNodeID) -> Result<MatchFactRow<'a>, Incomplete> {
+        self.row_of(node)
+    }
+
+    fn local_name_is(&self, row: MatchFactRow<'a>, name: StyleAtomID) -> bool {
+        row.facts.tag_of(row.row) == name
+    }
+
+    fn namespace_is(&self, row: MatchFactRow<'a>, namespace: StyleAtomID) -> bool {
+        row.facts.namespace_of(row.row) == namespace
+    }
+
+    fn has_id(&self, row: MatchFactRow<'a>, id: StyleAtomID) -> bool {
+        row.facts.id_of(row.row) == id
+    }
+
+    fn has_class(&self, row: MatchFactRow<'a>, class: StyleAtomID) -> bool {
+        row.facts.classes_of(row.row).contains(&class)
+    }
+
+    fn same_type(&self, row: MatchFactRow<'a>, other: MatchFactRow<'a>) -> bool {
+        row.facts.tag_of(row.row) == other.facts.tag_of(other.row)
+            && row.facts.namespace_of(row.row) == other.facts.namespace_of(other.row)
+    }
+
+    /// Every attribute a test names.
+    ///
+    /// There can be more than one: `[*|x]` names the attribute called `x` in each namespace the
+    /// element carries it in, and they publish the same any-namespace atom.
+    fn attributes(
+        &self,
+        row: MatchFactRow<'a>,
+        test: AttributeTest,
+    ) -> impl Iterator<Item = (&'a StyleNodeFacts, super::index::AttributeFact)> + '_ {
+        // Whether this subject folds attribute names at all, which is one namespace comparison for
+        // the whole test rather than one per attribute.
+        let folds = !test.fold_in_namespace.is_none() && row.facts.namespace_of(row.row) == test.fold_in_namespace;
+        row.facts
+            .attributes_of(row.row)
+            .iter()
+            .copied()
+            .filter(move |attribute| {
+                if !test.any_namespace {
+                    if attribute.name == test.name {
+                        return true;
+                    }
+                    if !folds {
+                        return false;
+                    }
+                }
+                let forms = row.facts.attribute_name_forms(attribute.name);
+                let (written, folded) = match test.any_namespace {
+                    true => (forms.local, forms.folded_local),
+                    false => (attribute.name, forms.folded_name),
+                };
+                written == test.name || (folds && folded == test.folded)
+            })
+            .map(move |attribute| (row.facts, attribute))
+    }
+
+    fn attribute_value_atom(&self, (_, attribute): (&'a StyleNodeFacts, super::index::AttributeFact)) -> StyleAtomID {
+        attribute.value
+    }
+
+    fn attribute_value_text(
+        &self,
+        (facts, attribute): (&'a StyleNodeFacts, super::index::AttributeFact),
+    ) -> Option<TokenizerInput<'_>> {
+        facts.text_of(attribute).map(TokenizerInput::Utf16)
+    }
+
+    fn has_state(&self, row: MatchFactRow<'a>, fact: StateFact) -> bool {
+        row.facts.states_of(row.row).contains(fact)
+    }
+
+    fn language_tag(&self, row: MatchFactRow<'a>) -> Cow<'_, [u16]> {
+        Cow::Borrowed(row.facts.language_tag_of(row.row))
+    }
+
+    fn directionality_is(&self, row: MatchFactRow<'a>, direction: StyleAtomID) -> bool {
+        row.facts.directionality_of(row.row) == direction
+    }
+
+    fn has_custom_state(&self, row: MatchFactRow<'a>, state: StyleAtomID) -> bool {
+        row.facts.custom_states_of(row.row).contains(&state)
+    }
+
+    fn heading_level(&self, row: MatchFactRow<'a>) -> u8 {
+        row.facts.heading_level_of(row.row)
+    }
+
+    fn is_empty(&mut self, node: StyleNodeID) -> Result<bool, Incomplete> {
+        // Element children are style nodes and the tree answers for them. A text or comment child is
+        // not, so the element publishes whether it holds one.
+        let row = self.row_of(node)?;
+        Ok(self.tree.first_element_child(node).is_none() && !row.facts.has_text_content_of(row.row))
+    }
+
+    fn is_node(&self, node: StyleNodeID, named: StyleNodeID) -> bool {
+        node == named
+    }
+
+    fn has_part(&self, row: MatchFactRow<'a>, part: StyleAtomID) -> bool {
+        row.facts.parts_of(row.row).contains(&part)
+    }
+
+    fn part_exposure_hosts(&self, node: StyleNodeID) -> SmallVec<[StyleNodeID; 1]> {
+        self.part_exposure_hosts_of(node)
+    }
+
+    fn part_hosts_in_exposure_scope(&self, node: StyleNodeID) -> Option<SmallVec<[StyleNodeID; 1]>> {
+        let scope = self.part_exposure_scope?;
+        let mut hosts = self.part_exposure_hosts_of(node);
+        hosts.retain(|host| self.tree.tree_scope(*host) == scope);
+        Some(hosts)
+    }
+
+    fn exposes_part_to(&mut self, node: StyleNodeID, part: StyleAtomID, host: StyleNodeID) -> Result<bool, Incomplete> {
+        let row = self.row_of(node)?;
+        let pairs = self.tree.part_hosts_of(node);
+        Ok(match pairs.is_empty() {
+            // With no pairing recorded the element is addressable only under the names it carries,
+            // and all of them reach the host of the tree it stands in.
+            true => row.facts.parts_of(row.row).contains(&part),
+            false => pairs
+                .iter()
+                .any(|&(exposed, exposed_to)| exposed == part && exposed_to == host),
+        })
+    }
+
+    /// A row facts cannot answer for yet is never prejudged.
+    fn may_match(&self, program: &SelectorProgram, compound: SelectorNodeID, node: StyleNodeID) -> bool {
+        let required = program.relation_target_bloom(compound);
+        if required == 0 {
+            return true;
+        }
+        match self.row_of(node) {
+            Ok(row) => row.facts.dispatch_bloom_of(row.row, false) & required == required,
+            Err(_) => true,
+        }
+    }
+
+    /// Answers are kept per compiled program, so only an evaluation that names its program and binds
+    /// no scope, anchor or shadow root may share them.
+    fn remembers_relations(&self, bindings: &SelectorBindings<StyleNodeID>) -> bool {
+        self.match_workspace.is_some()
+            && self.transitive_relation_program.is_some()
+            && bindings.scope_root_instance.is_none()
+            && bindings.relative_anchor.is_none()
+            && bindings.scope_shadow_root.is_none()
+    }
+
+    fn relation_answer(&self, _program: &SelectorProgram, relation: SelectorNodeID, node: StyleNodeID) -> Option<bool> {
+        let (workspace, side) = self.match_workspace.as_ref()?;
+        match workspace
+            .relations(*side)
+            .lookup(self.transitive_relation_program?, relation, node)
+        {
+            Lookup::Known(()) => Some(true),
+            Lookup::KnownAbsent => Some(false),
+            Lookup::Missing(_) => None,
+        }
+    }
+
+    fn record_relation_answer(
+        &mut self,
+        _program: &SelectorProgram,
+        relation: SelectorNodeID,
+        node: StyleNodeID,
+        answer: bool,
+    ) {
+        if let Some((workspace, side)) = self.match_workspace.as_mut()
+            && let Some(program_id) = self.transitive_relation_program
+        {
+            workspace.relations_by_evaluation_side[*side as usize].insert(program_id, relation, node, answer);
+        }
+    }
+
+    fn preceding_sibling_prefix(
+        &mut self,
+        _program: &SelectorProgram,
+        relation: SelectorNodeID,
+        parent: StyleNodeID,
+    ) -> Option<RememberedPrefix<PrecedingSiblingParentID, StyleNodeID>> {
+        let program_id = self.transitive_relation_program?;
+        let (workspace, side) = self.match_workspace.as_mut()?;
+        let (slot, prefix) = workspace.relations_by_evaluation_side[*side as usize]
+            .preceding_sibling_prefix(program_id, relation, parent);
+        Some(RememberedPrefix { slot, prefix })
+    }
+
+    fn record_preceding_sibling_prefix(
+        &mut self,
+        _program: &SelectorProgram,
+        relation: SelectorNodeID,
+        parent: PrecedingSiblingParentID,
+        prefix: PrecedingSiblingPrefix,
+    ) {
+        if let Some((workspace, side)) = self.match_workspace.as_mut()
+            && let Some(program_id) = self.transitive_relation_program
+        {
+            workspace.relations_by_evaluation_side[*side as usize]
+                .insert_preceding_sibling_prefix(program_id, relation, parent, prefix);
+        }
+    }
+
+    fn positional_answer(&self, position: NthPosition, node: StyleNodeID) -> Option<bool> {
+        if self.positional_index_policy != PositionalIndexPolicy::All {
+            return None;
+        }
+        let (workspace, side) = self.match_workspace.as_ref()?;
+        workspace.positional_answer(position, node, *side)
+    }
+
+    fn record_positional_answer(&mut self, position: NthPosition, node: StyleNodeID, answer: bool) {
+        if self.positional_index_policy == PositionalIndexPolicy::All
+            && let Some((workspace, side)) = self.match_workspace.as_mut()
+        {
+            workspace.insert_positional_answer(position, node, *side, answer);
+        }
+    }
+
+    fn sibling_index(&mut self, position: NthPosition, node: StyleNodeID) -> Result<Option<i64>, Incomplete> {
+        if position.step == 0 && self.positional_index_policy != PositionalIndexPolicy::All {
+            return Ok(None);
+        }
+        self.indexed_sibling_position(position, node)
+    }
+
+    /// A completed walk of the live tree is what a retained witness is: proof that the query's
+    /// Boolean on this element is true right now. Both outcomes are recorded - the entry doubles as
+    /// "the last completed evaluation answered true", which is the half a routing-time
+    /// re-verification cannot re-establish on its own.
+    fn record_relative_answer(
+        &mut self,
+        program: &SelectorProgram,
+        query: RelativeQueryID,
+        anchor: StyleNodeID,
+        answer: bool,
+        witness: Option<StyleNodeID>,
+    ) {
+        if let Some(witnesses) = self.witnesses.as_deref_mut()
+            && let Some(program_id) = self.transitive_relation_program
+            && program.retainable_relative_query(query).is_some()
+        {
+            let key = RelationalWitnessKey {
+                program: program_id,
+                query,
+                anchor,
+            };
+            match (answer, witness) {
+                (true, Some(witness)) => witnesses.push(WitnessEffect::Retain(key, witness)),
+                (false, _) => witnesses.push(WitnessEffect::Clear(key)),
+                (true, None) => {}
+            }
+        }
+    }
 }
 
 /// `index` is a 1-based position; the test is whether it equals `step * n + offset` for some
 /// non-negative integer `n`.
-fn matches_an_plus_b(step: i32, offset: i32, index: i64) -> bool {
+pub(super) fn matches_an_plus_b(step: i32, offset: i32, index: i64) -> bool {
     let step = i64::from(step);
     let offset = i64::from(offset);
     if step == 0 {
@@ -6972,6 +6330,7 @@ mod tests {
     use super::super::index::AttributeFact;
     use super::super::index::LocalFeatureKey;
     use super::super::index::StateSet;
+    use super::super::instrumentation::Counter;
     use super::super::memory::DeviceClass;
     use super::super::memory::MemoryController;
     use super::super::relative_selector::RelativeAxis;
