@@ -8,6 +8,7 @@
 
 #include <AK/Array.h>
 #include <AK/Function.h>
+#include <AK/Noncopyable.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/PublishedStyleRecord.h>
@@ -29,7 +30,13 @@ namespace Web::CSS {
 // the CSS animation objects and their bookkeeping. The render half applies before the main half,
 // each in row order, and nothing in the render half reads the main half.
 class StyleEffectDrain {
+    AK_MAKE_NONCOPYABLE(StyleEffectDrain);
+    AK_MAKE_NONMOVABLE(StyleEffectDrain);
+
 public:
+    StyleEffectDrain();
+    ~StyleEffectDrain();
+
     // -- The render half ----------------------------------------------------------------------
 
     static constexpr size_t synthetic_pseudo_element_count = to_underlying(last_synthetic_pseudo_element) - to_underlying(first_synthetic_pseudo_element) + 1;
