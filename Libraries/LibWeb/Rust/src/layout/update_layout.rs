@@ -725,11 +725,10 @@ enum FrameJobAnswer {
 }
 
 /// A job of a layout frame the document thread waits for, which the render owner runs with the document's render
-/// state. The frame stays on the document thread's stack meanwhile.
+/// state, apart from where it answers. The frame stays with the document thread meanwhile.
 pub(crate) struct OwnerFrameJob {
     frame: crate::stage_thread::CallerWaits<*mut LayoutFrame>,
     job: FrameJob,
-    reply: crate::stage_thread::OwnerReplyTo<OwnerFrameJobAnswer>,
     /// How the owner runs it. The owner reaches the layout pipeline only through the jobs it is sent, so what reaches
     /// the owner without reaching the pipeline (the unit tests' stage threads) links without it.
     run: unsafe fn(*mut LayoutFrame, FrameJob) -> FrameJobAnswer,
@@ -773,30 +772,32 @@ unsafe fn run_job(
 pub(crate) struct OwnerFrameJobAnswer(crate::stage_thread::CallerWaits<FrameJobAnswer>);
 
 impl OwnerFrameJob {
-    /// Runs the job on the owner, with the arena of the render state it holds for the job's document, and answers the
-    /// waiting document thread. Where the owner holds none (a bug of the sender's), the job runs with the arena its
+    /// Runs the job on the owner, for the document thread that waits for it, with the arena of the render state it
+    /// holds for the job's document. Where the owner holds none (a bug of the sender's), the job runs with the arena its
     /// frame names.
-    pub(crate) fn run(self, owner: &crate::render_owner::Owner, arena: impl FnOnce() -> Option<*mut ArenaHandle>) {
-        let Self { frame, job, reply, run } = self;
+    pub(crate) fn run(
+        self,
+        owner: &crate::render_owner::Owner,
+        arena: impl FnOnce() -> Option<*mut ArenaHandle>,
+    ) -> OwnerFrameJobAnswer {
+        let Self { frame, job, run } = self;
         let frame = frame.into_inner();
-        reply.answer(|| {
-            // SAFETY: The document thread waits for the job, and reaches neither the frame nor the arena meanwhile.
-            let frame_arena = unsafe { (*frame).inputs.arena_handle };
-            let state = arena();
-            debug_assert_eq!(
-                Some(frame_arena),
-                state.map(<*mut ArenaHandle>::cast::<c_void>),
-                "a job runs with its document's arena"
-            );
-            // SAFETY: As above.
-            let state = state.unwrap_or_else(|| unsafe { ArenaHandle::held_by_waiting_thread(owner, frame_arena) });
-            // The faces the rounds want are their document's, for that document's layout end to request.
-            let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
-            // SAFETY: As above.
-            let answer = unsafe { run_job(owner, run, frame, job, state) };
-            // SAFETY: The answer goes back to the document thread, which waits for it.
-            OwnerFrameJobAnswer(unsafe { crate::stage_thread::CallerWaits::new(answer) })
-        });
+        // SAFETY: The document thread waits for the job, and reaches neither the frame nor the arena meanwhile.
+        let frame_arena = unsafe { (*frame).inputs.arena_handle };
+        let state = arena();
+        debug_assert_eq!(
+            Some(frame_arena),
+            state.map(<*mut ArenaHandle>::cast::<c_void>),
+            "a job runs with its document's arena"
+        );
+        // SAFETY: As above.
+        let state = state.unwrap_or_else(|| unsafe { ArenaHandle::held_by_waiting_thread(owner, frame_arena) });
+        // The faces the rounds want are their document's, for that document's layout end to request.
+        let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
+        // SAFETY: As above.
+        let answer = unsafe { run_job(owner, run, frame, job, state) };
+        // SAFETY: The answer goes back to the document thread, which waits for it.
+        OwnerFrameJobAnswer(unsafe { crate::stage_thread::CallerWaits::new(answer) })
     }
 }
 
@@ -1264,9 +1265,9 @@ impl LayoutFrame {
                     // SAFETY: This thread waits for the job, and reaches the frame only once it has the answer.
                     frame: unsafe { crate::stage_thread::CallerWaits::new(frame) },
                     job: job.take().expect("a job is sent once"),
-                    reply,
                     run: Self::run_job_in_state,
                 }),
+                reply,
             },
             |owner| {
                 // SAFETY: The frame runs for the update the arena is in, on the document thread, which waits for
