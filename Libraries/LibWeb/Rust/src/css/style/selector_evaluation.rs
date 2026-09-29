@@ -24,6 +24,7 @@ use super::instrumentation::Counter;
 use super::instrumentation::Counters;
 use super::relative_selector::RelativeAxis;
 use super::relative_selector::RelativeQueryID;
+use super::selector::AtomSpace;
 use super::selector::AttributeCase;
 use super::selector::AttributeOperator;
 use super::selector::AttributeTest;
@@ -129,6 +130,21 @@ pub trait SelectorTree: Copy {
     fn shadow_root_of(self, host: Self::Node) -> Option<Self::Node>;
     fn host_of(self, shadow_root: Self::Node) -> Option<Self::Node>;
 
+    /// The element after `node` in tree order that is a descendant of `root`, where `node` is `root` itself to start.
+    fn next_in_subtree(self, node: Self::Node, root: Self::Node) -> Option<Self::Node> {
+        if let Some(child) = self.first_child(node) {
+            return Some(child);
+        }
+        let mut current = node;
+        while current != root {
+            if let Some(sibling) = self.next_sibling(current) {
+                return Some(sibling);
+            }
+            current = self.parent(current)?;
+        }
+        None
+    }
+
     /// Visit the candidate witnesses of a relative selector along `axis` from `anchor`, in tree
     /// order, until `visit` returns false.
     fn for_each_on_axis(
@@ -136,8 +152,53 @@ pub trait SelectorTree: Copy {
         axis: RelativeAxis,
         below_the_axis: bool,
         anchor: Self::Node,
-        visit: impl FnMut(Self::Node) -> bool,
-    );
+        mut visit: impl FnMut(Self::Node) -> bool,
+    ) {
+        // Visit the subtree of `root`, `root` itself included when `inclusive`, until `visit` returns false.
+        fn visit_subtree<T: SelectorTree>(
+            tree: T,
+            root: T::Node,
+            inclusive: bool,
+            visit: &mut impl FnMut(T::Node) -> bool,
+        ) -> bool {
+            if inclusive && !visit(root) {
+                return false;
+            }
+            let mut descendant = tree.next_in_subtree(root, root);
+            while let Some(candidate) = descendant {
+                if !visit(candidate) {
+                    return false;
+                }
+                descendant = tree.next_in_subtree(candidate, root);
+            }
+            true
+        }
+
+        let (first, every_sibling, subtree) = match axis {
+            RelativeAxis::Descendant => {
+                visit_subtree(self, anchor, false, &mut visit);
+                return;
+            }
+            RelativeAxis::Child => (self.first_child(anchor), true, false),
+            RelativeAxis::NextSibling => (self.next_sibling(anchor), false, false),
+            RelativeAxis::FollowingSibling => (self.next_sibling(anchor), true, false),
+            // The witness lies under the sibling rather than being it, so the sibling's whole subtree is the
+            // candidate range.
+            RelativeAxis::NextSiblingSubtree => (self.next_sibling(anchor), false, true),
+            RelativeAxis::FollowingSiblingSubtree => (self.next_sibling(anchor), true, true),
+        };
+        let mut sibling = first;
+        while let Some(candidate) = sibling {
+            let proceed = match subtree {
+                true => visit_subtree(self, candidate, !below_the_axis, &mut visit),
+                false => visit(candidate),
+            };
+            if !proceed || !every_sibling {
+                return;
+            }
+            sibling = self.next_sibling(candidate);
+        }
+    }
 
     /// The slot an element is assigned to.
     fn assigned_slot_of(self, _node: Self::Node) -> Option<Self::Node> {
@@ -219,6 +280,8 @@ pub fn matches_feature<E: ElementFeatures>(
 /// asks every test of. Names are atoms of the program's own atom space. A subject answers what its
 /// storage holds, and nothing else: which name, case or namespace a test compares is decided here.
 pub trait SelectorSubject {
+    /// The atoms the subject's names are keyed by, which are the only ones a program it evaluates can hold.
+    type Atoms: AtomSpace;
     type Node: Copy + Eq;
     type Tree: SelectorTree<Node = Self::Node>;
     type Row: Copy;
@@ -285,7 +348,7 @@ pub trait SelectorSubject {
     // Accelerations. Each default is what the evaluation does without one.
 
     /// Whether `node` can possibly match the compound at `compound`.
-    fn may_match(&self, _program: &SelectorProgram, _compound: SelectorNodeID, _node: Self::Node) -> bool {
+    fn may_match(&self, _program: &SelectorProgram<Self::Atoms>, _compound: SelectorNodeID, _node: Self::Node) -> bool {
         true
     }
 
@@ -297,7 +360,7 @@ pub trait SelectorSubject {
     /// A remembered answer of the relation at `relation` for `node`.
     fn relation_answer(
         &self,
-        _program: &SelectorProgram,
+        _program: &SelectorProgram<Self::Atoms>,
         _relation: SelectorNodeID,
         _node: Self::Node,
     ) -> Option<bool> {
@@ -306,7 +369,7 @@ pub trait SelectorSubject {
 
     fn record_relation_answer(
         &mut self,
-        _program: &SelectorProgram,
+        _program: &SelectorProgram<Self::Atoms>,
         _relation: SelectorNodeID,
         _node: Self::Node,
         _answer: bool,
@@ -317,14 +380,14 @@ pub trait SelectorSubject {
     /// children, or none when the subject remembers none.
     fn preceding_sibling_prefix(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<Self::Atoms>,
         relation: SelectorNodeID,
         parent: Self::Node,
     ) -> Option<RememberedPrefix<Self::PrefixSlot, Self::Node>>;
 
     fn record_preceding_sibling_prefix(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<Self::Atoms>,
         relation: SelectorNodeID,
         slot: Self::PrefixSlot,
         prefix: PrecedingSiblingPrefix<Self::Node>,
@@ -344,7 +407,7 @@ pub trait SelectorSubject {
     /// A remembered answer of the relative query for `anchor`.
     fn relative_answer(
         &self,
-        _program: &SelectorProgram,
+        _program: &SelectorProgram<Self::Atoms>,
         _query: RelativeQueryID,
         _anchor: Self::Node,
     ) -> Option<bool> {
@@ -354,7 +417,7 @@ pub trait SelectorSubject {
     /// Record the completed answer of a relative query, and the witness that made it true.
     fn record_relative_answer(
         &mut self,
-        _program: &SelectorProgram,
+        _program: &SelectorProgram<Self::Atoms>,
         _query: RelativeQueryID,
         _anchor: Self::Node,
         _answer: bool,
@@ -363,7 +426,13 @@ pub trait SelectorSubject {
     }
 
     /// The evaluation is about to test the compound at `compound` against `node`.
-    fn enter_compound(&mut self, _program: &SelectorProgram, _compound: SelectorNodeID, _node: Self::Node) {}
+    fn enter_compound(
+        &mut self,
+        _program: &SelectorProgram<Self::Atoms>,
+        _compound: SelectorNodeID,
+        _node: Self::Node,
+    ) {
+    }
 }
 
 /// How far a preceding-sibling relation has been answered through one sibling sequence: every
@@ -437,7 +506,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
 
     fn matches_host_argument(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         inner: SelectorNodeID,
         host: S::Node,
         counters: &mut S::Counters,
@@ -456,7 +525,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
     /// place, so `:scope` in either the limit or the selector names this root.
     fn subject_is_in_scope(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         limit: Option<SelectorNodeID>,
         inner: SelectorNodeID,
         node: S::Node,
@@ -483,7 +552,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
     #[allow(clippy::too_many_arguments)]
     fn matches_in_scope_rooted_at(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         root: SelectorNodeID,
         limit: Option<SelectorNodeID>,
         inner: SelectorNodeID,
@@ -503,7 +572,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
     #[inline]
     fn matches_compound(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         id: SelectorNodeID,
         first: u32,
         count: u32,
@@ -532,7 +601,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
     // pseudos preserve that restriction: only an alternative that reaches :host can match.
     fn matches_featureless_host(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         id: SelectorNodeID,
         host: S::Node,
         counters: &mut S::Counters,
@@ -574,14 +643,19 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
     /// Whether `node` can possibly match the compound at `inner`. The shadow scope root matches
     /// featurelessly, so its facts prove nothing about it.
     #[inline]
-    fn relation_target_may_match(&self, program: &SelectorProgram, inner: SelectorNodeID, node: S::Node) -> bool {
+    fn relation_target_may_match(
+        &self,
+        program: &SelectorProgram<S::Atoms>,
+        inner: SelectorNodeID,
+        node: S::Node,
+    ) -> bool {
         Some(node) == self.bindings.scope_shadow_root || self.subject.may_match(program, inner, node)
     }
 
     #[inline]
     fn matches_relation_target(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         id: SelectorNodeID,
         node: S::Node,
         counters: &mut S::Counters,
@@ -596,7 +670,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
 
     fn matches_descendant_relation(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         relation: SelectorNodeID,
         inner: SelectorNodeID,
         node: S::Node,
@@ -644,7 +718,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
 
     fn matches_preceding_sibling(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         relation: SelectorNodeID,
         inner: SelectorNodeID,
         node: S::Node,
@@ -732,7 +806,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
     /// Whether every part name the rule writes is one this element is exposed to `host` under.
     fn part_names_reach_host(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         parts: SelectorNodeID,
         node: S::Node,
         host: S::Node,
@@ -755,7 +829,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
 
     pub fn matches_node(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         id: SelectorNodeID,
         node: S::Node,
         counters: &mut S::Counters,
@@ -1127,7 +1201,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
         }
     }
 
-    fn matches_feature(&mut self, program: &SelectorProgram, test: FeatureTest, node: S::Node) -> Answer<S> {
+    fn matches_feature(&mut self, program: &SelectorProgram<S::Atoms>, test: FeatureTest, node: S::Node) -> Answer<S> {
         if test == FeatureTest::AnyElement {
             return Ok(true);
         }
@@ -1141,7 +1215,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
 
     fn matches_attribute_value(
         &self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         test: AttributeTest,
         attribute: S::Attribute,
         insensitive: bool,
@@ -1168,7 +1242,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
 
     pub fn matches_nth(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         position: NthPosition,
         node: S::Node,
         counters: &mut S::Counters,
@@ -1234,7 +1308,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
     /// Whether one sibling is counted by this positional test's sequence.
     fn counts_in_sequence(
         &mut self,
-        program: &SelectorProgram,
+        program: &SelectorProgram<S::Atoms>,
         position: NthPosition,
         subject_type: Option<S::Row>,
         sibling: S::Node,

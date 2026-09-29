@@ -7,26 +7,43 @@
 //! Selector matching for the DOM query APIs (`querySelector()`, `querySelectorAll()`, `matches()` and `closest()`),
 //! against the DOM itself.
 //!
-//! The DOM is main-thread state with one writer, so a query reads it where it stands: nothing is mirrored for it, and
-//! nothing a style pass owns is read. Every fact a selector tests is asked of the DOM through the callbacks the host
-//! passes in.
+//! A query's selectors compile into a selector program whose atoms are the query's own names, and the one selector
+//! evaluator runs it with the live DOM as its subject. The DOM is main-thread state with one writer, so a query reads
+//! it where it stands: nothing is mirrored for it, and nothing a style pass owns is read. Every fact a selector tests
+//! is asked of the DOM through the callbacks the host passes in.
 
-use std::collections::{HashMap, HashSet};
+use std::borrow::Cow;
+use std::convert::Infallible;
 use std::ffi::c_void;
 
 use smallvec::SmallVec;
 
 use super::css_tokenizer::TokenizerInput;
 use super::ffi_support::FfiUtf16View;
-use super::selector::{
-    AttributeCaseType, AttributeSelector, Combinator, CompiledSelector, Direction, NamespaceType, PseudoClassSelector,
-    PseudoClassType, QualifiedName, RustSelector, SimpleSelector, language_range_matches_tag,
-};
-use super::style::selector::{AttributeOperator, attribute_value_matches};
+use super::selector::RustSelector;
+use super::style::compiler::SelectorCompiler;
+use super::style::fast_hash::FastMap as HashMap;
+use super::style::index::StyleAtomID;
+use super::style::relative_selector::RelativeQueryID;
+use super::style::selector::FeatureTest;
+use super::style::selector::NthPosition;
+use super::style::selector::QueryAtoms;
+use super::style::selector::SelectorNodeID;
+use super::style::selector::SelectorOp;
+use super::style::selector::SelectorProgram;
+use super::style::selector_evaluation::ElementFeatures;
+use super::style::selector_evaluation::PrecedingSiblingPrefix;
+use super::style::selector_evaluation::RememberedPrefix;
+use super::style::selector_evaluation::SelectorBindings;
+use super::style::selector_evaluation::SelectorEvaluator;
+use super::style::selector_evaluation::SelectorSubject;
+use super::style::selector_evaluation::SelectorTree;
+use super::style::transaction::StateFact;
 
 /// What a selector compares of one element: its names, as interned string identities, and how many of its attributes
 /// have a local name the matcher asked for.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct FfiDomElement {
     pub local_name: usize,
     /// Zero for the null namespace.
@@ -36,7 +53,6 @@ pub struct FfiDomElement {
     pub classes: *const usize,
     pub class_count: usize,
     pub attribute_count: usize,
-    pub is_html_element: bool,
 }
 
 /// One attribute of an element, borrowed from the DOM until it next changes.
@@ -61,8 +77,8 @@ pub enum FfiSiblingCount {
     AfterOfSameType,
 }
 
-/// What the matcher asks of the DOM. Every element pointer is a live element for the duration of the query, and every
-/// element a callback returns is one too, or null for none.
+/// What the matcher asks of the DOM. Every node pointer is a live node for the duration of the query, and every node a
+/// callback returns is one too, or null for none.
 #[repr(C)]
 pub struct FfiDomSelectorCallbacks {
     /// The element, with the first `capacity` of its attributes whose local name is one of the `name_count` in `names`
@@ -74,12 +90,14 @@ pub struct FfiDomSelectorCallbacks {
         attributes: *mut FfiDomAttribute,
         capacity: usize,
     ) -> FfiDomElement,
-    pub parent_element: unsafe extern "C" fn(element: *const c_void) -> *const c_void,
-    /// The host of the shadow root that is the element's parent, or null when its parent is not a shadow root.
-    pub host_of_parent_shadow_root: unsafe extern "C" fn(element: *const c_void) -> *const c_void,
-    pub previous_element_sibling: unsafe extern "C" fn(element: *const c_void) -> *const c_void,
-    pub next_element_sibling: unsafe extern "C" fn(element: *const c_void) -> *const c_void,
-    pub first_element_child: unsafe extern "C" fn(element: *const c_void) -> *const c_void,
+    /// The node's parent as selectors see it: its parent element, or the shadow root it is a child of. Null for a
+    /// shadow root, and for a child of a document or a fragment.
+    pub parent: unsafe extern "C" fn(node: *const c_void) -> *const c_void,
+    pub previous_element_sibling: unsafe extern "C" fn(node: *const c_void) -> *const c_void,
+    pub next_element_sibling: unsafe extern "C" fn(node: *const c_void) -> *const c_void,
+    pub first_element_child: unsafe extern "C" fn(node: *const c_void) -> *const c_void,
+    /// The first element child of the node's parent, whatever node that is, or the node itself when it has none.
+    pub first_element_sibling: unsafe extern "C" fn(node: *const c_void) -> *const c_void,
     pub count_element_siblings: unsafe extern "C" fn(element: *const c_void, which: FfiSiblingCount) -> u32,
     /// The first element after `node` in tree order that is a descendant of `root`, skipping the subtrees whose
     /// attribute name filter lacks one of the bits of `attribute_names`. `node` is `root` itself to start. Both may be
@@ -88,15 +106,20 @@ pub struct FfiDomSelectorCallbacks {
         unsafe extern "C" fn(node: *const c_void, root: *const c_void, attribute_names: u64) -> *const c_void,
     /// The bit of the DOM's attribute name filter for a local name.
     pub attribute_name_filter_bit: unsafe extern "C" fn(local_name: usize) -> u64,
+    /// The shadow root the element hosts, or null.
+    pub shadow_root: unsafe extern "C" fn(element: *const c_void) -> *const c_void,
+    /// The host of a shadow root.
+    pub host: unsafe extern "C" fn(shadow_root: *const c_void) -> *const c_void,
     /// Whether the element's id (or one of its classes, when `is_class` is set) is `name`, compared ASCII
     /// case-insensitively.
     pub id_or_class_equals_ignoring_ascii_case:
         unsafe extern "C" fn(element: *const c_void, is_class: bool, name: usize) -> bool,
-    /// Whether the element is in the state a boolean pseudo-class names, by its FFI value.
-    pub matches_state: unsafe extern "C" fn(element: *const c_void, pseudo_class: u8) -> bool,
+    /// Whether the element is in a state, by the state's `StateFact` value.
+    pub matches_state: unsafe extern "C" fn(element: *const c_void, state: u8) -> bool,
     /// The element's resolved language tag, or an empty view when it has none. Only valid until the next callback.
     pub language: unsafe extern "C" fn(element: *const c_void) -> FfiUtf16View,
-    pub is_right_to_left: unsafe extern "C" fn(element: *const c_void) -> bool,
+    /// The interned identity of the element's directionality: `ltr` or `rtl`.
+    pub directionality: unsafe extern "C" fn(element: *const c_void) -> usize,
     /// The element's heading level, or zero when it is not a heading.
     pub heading_level: unsafe extern "C" fn(element: *const c_void) -> u32,
     pub has_custom_state: unsafe extern "C" fn(element: *const c_void, state: usize) -> bool,
@@ -104,817 +127,641 @@ pub struct FfiDomSelectorCallbacks {
     pub is_empty: unsafe extern "C" fn(element: *const c_void) -> bool,
 }
 
-/// One selector query: the selector list, and the context `:scope` and `:host` are resolved in.
+/// One selector query: the compiled selectors, and the context `:scope` and `:host` are resolved in.
 #[repr(C)]
 pub struct FfiDomSelectorQuery {
-    pub selectors: *const *const RustSelector,
-    pub selector_count: usize,
+    pub program: *const DomSelectorProgram,
     pub callbacks: *const FfiDomSelectorCallbacks,
-    /// The element `:scope` names, or null when the query is rooted at a document, a shadow root or a fragment.
+    /// The element `:scope` names: the element the query is scoped to, or the document element for a query scoped to
+    /// a document, a shadow root or a fragment. Null for none.
     pub scope: *const c_void,
-    /// The host of the shadow tree the query is made in, or null outside one.
-    pub shadow_host: *const c_void,
+    /// The shadow root of the tree the query is made in, or null outside one.
+    pub shadow_root: *const c_void,
     /// The document element of the document every element the query reads is in, or null for none.
     pub document_element: *const c_void,
-    pub in_html_document: bool,
     /// Whether ids and classes compare ASCII case-insensitively, as they do in a quirks-mode document.
     pub ids_and_classes_ignore_case: bool,
 }
 
-type Element = *const c_void;
+type DomNode = *const c_void;
 
-/// One element as a compound reads it: its names, and those of its attributes the compound's attribute selectors name,
-/// asked of the DOM in one call.
-struct ElementView<'a> {
-    element: Element,
-    facts: FfiDomElement,
-    attributes: &'a [FfiDomAttribute],
+fn optional_node(node: *const c_void) -> Option<DomNode> {
+    (!node.is_null()).then_some(node)
 }
 
-/// Where a compound reads an element's attributes. It names few enough that they fit without allocating.
-type AttributeBuffer = SmallVec<[FfiDomAttribute; 4]>;
+/// The names a query's program holds as atoms, which are the raw identities of the interned strings its selectors
+/// hold. Atom `n` is entry `n - 1`, so no name is `StyleAtomID::NONE`.
+#[derive(Default)]
+struct QueryNames(Vec<(usize, Option<StyleAtomID>)>);
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SelectorKind {
-    Normal,
-    /// A `:has()` argument, whose leftmost compound is the implied anchor.
-    Relative,
+impl QueryNames {
+    fn intern(&mut self, raw: usize, namespace: Option<StyleAtomID>) -> StyleAtomID {
+        let index = match self.0.iter().position(|&name| name == (raw, namespace)) {
+            Some(index) => index,
+            None => {
+                self.0.push((raw, namespace));
+                self.0.len() - 1
+            }
+        };
+        StyleAtomID(u32::try_from(index + 1).unwrap_or(u32::MAX))
+    }
+
+    /// The raw identity of an atom's name, or zero for `NONE`.
+    #[inline]
+    fn raw(&self, atom: StyleAtomID) -> usize {
+        atom.0
+            .checked_sub(1)
+            .and_then(|index| self.0.get(index as usize))
+            .map_or(0, |&(raw, _)| raw)
+    }
 }
 
+/// A selector query compiled for one kind of document, as the host caches it with the query.
+pub struct DomSelectorProgram {
+    program: SelectorProgram<QueryAtoms>,
+    names: QueryNames,
+    /// Every attribute name the program's selectors compare, in either case: an element's row is read with them.
+    attribute_names: Box<[usize]>,
+    /// The roots of the entries that name elements. A query names elements, and a pseudo-element is not one.
+    subjects: Box<[SelectorNodeID]>,
+}
+
+impl DomSelectorProgram {
+    /// The attribute names an element must carry to match any selector of the query, as bits of the DOM's attribute
+    /// name filter. Each selector's subject names its own, so only those every one of them names are required.
+    fn subject_attribute_names(&self, dom: &FfiDomSelectorCallbacks) -> u64 {
+        let program = &self.program;
+        self.subjects
+            .iter()
+            .map(|root| {
+                let subject = match program.node(*root) {
+                    SelectorOp::And { first, count } => program.operands(first, count),
+                    _ => std::slice::from_ref(root),
+                };
+                subject
+                    .iter()
+                    .filter_map(|&operand| match program.node(operand) {
+                        // A name with an uppercase letter compares in one case or the other depending on the element.
+                        SelectorOp::Feature(FeatureTest::Attribute(test)) if test.fold_in_namespace.is_none() => {
+                            Some(self.names.raw(test.name))
+                        }
+                        _ => None,
+                    })
+                    .fold(0, |names, name| {
+                        names | unsafe { (dom.attribute_name_filter_bit)(name) }
+                    })
+            })
+            .fold(u64::MAX, |common, names| common & names)
+    }
+}
+
+/// Compile a selector list for the DOM query APIs, in a document whose HTML elements are in `html_namespace`, which
+/// is zero for a document that is not an HTML document.
+///
+/// # Safety
+/// `selectors` must point to `count` live selectors, which must outlive the program.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_dom_selector_program_create(
+    selectors: *const *const RustSelector,
+    count: usize,
+    html_namespace: usize,
+) -> *mut DomSelectorProgram {
+    let selectors = match count {
+        0 => &[][..],
+        _ => unsafe { std::slice::from_raw_parts(selectors, count) },
+    };
+    let mut names = QueryNames::default();
+    let program = {
+        let mut intern = |raw, namespace| names.intern(raw, namespace);
+        let html_element_namespace = match html_namespace {
+            0 => StyleAtomID::NONE,
+            namespace => intern(namespace, None),
+        };
+        let mut compiler = SelectorCompiler::for_query(&mut intern, html_element_namespace);
+        for &selector in selectors {
+            compiler.compile(unsafe { (*selector).compiled() });
+        }
+        compiler.finish()
+    };
+    let mut attribute_names = Vec::new();
+    for index in 0..program.node_count() {
+        let Ok(index) = u32::try_from(index) else {
+            break;
+        };
+        if let SelectorOp::Feature(FeatureTest::Attribute(test)) = program.node(SelectorNodeID(index)) {
+            for name in [names.raw(test.name), names.raw(test.folded)] {
+                if !attribute_names.contains(&name) {
+                    attribute_names.push(name);
+                }
+            }
+        }
+    }
+    let subjects = program
+        .entries()
+        .iter()
+        .filter(|entry| entry.pseudo_element.is_none())
+        .map(|entry| entry.root)
+        .collect();
+    Box::into_raw(Box::new(DomSelectorProgram {
+        program,
+        names,
+        attribute_names: attribute_names.into_boxed_slice(),
+        subjects,
+    }))
+}
+
+/// # Safety
+/// `program` must be null or a program `rust_dom_selector_program_create` returned, which is not used again.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_dom_selector_program_destroy(program: *mut DomSelectorProgram) {
+    if !program.is_null() {
+        drop(unsafe { Box::from_raw(program) });
+    }
+}
+
+/// The DOM, as the callbacks show it.
 #[derive(Clone, Copy)]
-struct MatchState {
-    shadow_host: Option<Element>,
-    selector_kind: SelectorKind,
-    /// The `:has()` subject. Right-to-left traversal must not cross or match this element.
-    anchor: Option<Element>,
+struct DomTree<'q> {
+    dom: &'q FfiDomSelectorCallbacks,
 }
 
-struct DomMatcher<'a> {
-    dom: &'a FfiDomSelectorCallbacks,
-    scope: Option<Element>,
-    shadow_host: Option<Element>,
-    document_element: Option<Element>,
-    in_html_document: bool,
-    ids_and_classes_ignore_case: bool,
-    /// Answers of `:has()` arguments, by selector identity and anchor.
-    has_answers: HashMap<(u64, usize), bool>,
-    /// The compounds of a selector, by address and index, found not to match through their combinator at an element.
-    /// A descendant or subsequent-sibling combinator tries the compounds before it at every ancestor or earlier
-    /// sibling, and whether they match there does not depend on the element the walk came from: remembering none of
-    /// it, `p div div div span` beside no `p` tries every combination of ancestors for its `div`s.
-    relation_failures: HashSet<(usize, usize, usize)>,
-    /// The number of siblings a child-indexed pseudo-class counts through each element, by element and counter. A
-    /// count walks only to the nearest sibling it knows, so matching every child of a parent walks its siblings once
-    /// rather than once per child.
-    nth_counts: HashMap<(usize, NthCounter), u32>,
-    /// The siblings a count walks past before it reaches one it knows, kept from count to count.
-    nth_walk: Vec<Element>,
-    /// Whether a child index has been asked for yet. Until then, nothing is remembered.
-    nth_asked: bool,
+impl SelectorTree for DomTree<'_> {
+    type Node = DomNode;
+
+    #[inline]
+    fn parent(self, node: DomNode) -> Option<DomNode> {
+        optional_node(unsafe { (self.dom.parent)(node) })
+    }
+
+    #[inline]
+    fn previous_sibling(self, node: DomNode) -> Option<DomNode> {
+        optional_node(unsafe { (self.dom.previous_element_sibling)(node) })
+    }
+
+    #[inline]
+    fn next_sibling(self, node: DomNode) -> Option<DomNode> {
+        optional_node(unsafe { (self.dom.next_element_sibling)(node) })
+    }
+
+    #[inline]
+    fn first_child(self, parent: DomNode) -> Option<DomNode> {
+        optional_node(unsafe { (self.dom.first_element_child)(parent) })
+    }
+
+    #[inline]
+    fn first_sibling(self, node: DomNode) -> DomNode {
+        unsafe { (self.dom.first_element_sibling)(node) }
+    }
+
+    #[inline]
+    fn shadow_root_of(self, host: DomNode) -> Option<DomNode> {
+        optional_node(unsafe { (self.dom.shadow_root)(host) })
+    }
+
+    #[inline]
+    fn host_of(self, shadow_root: DomNode) -> Option<DomNode> {
+        optional_node(unsafe { (self.dom.host)(shadow_root) })
+    }
+
+    #[inline]
+    fn next_in_subtree(self, node: DomNode, root: DomNode) -> Option<DomNode> {
+        optional_node(unsafe { (self.dom.next_element_in_subtree)(node, root, 0) })
+    }
+}
+
+/// One element's row: the facts one host call reads of it.
+#[derive(Clone, Copy)]
+struct DomRow {
+    node: DomNode,
+    element: FfiDomElement,
 }
 
 /// What a child-indexed pseudo-class counts among an element's siblings, and from which end.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct NthCounter {
+struct SiblingCounter {
     from_end: bool,
-    counted: NthCounted,
+    /// The local name and namespace of the elements counted, or none to count every element.
+    of_type: Option<(usize, usize)>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum NthCounted {
-    Every,
-    OfType {
-        local_name: usize,
-        namespace_uri: usize,
-    },
-    /// Those an `of S` argument matches, by the argument's address and the shadow host it is matched in.
-    Of {
-        selectors: usize,
-        shadow_host: usize,
-    },
+/// The live DOM as a subject of one query.
+struct DomSubject<'q> {
+    dom: &'q FfiDomSelectorCallbacks,
+    query: &'q DomSelectorProgram,
+    document_element: Option<DomNode>,
+    ids_and_classes_ignore_case: bool,
+    /// The element whose row was read last, whose attributes the program names are in `attributes`.
+    current: Option<DomRow>,
+    attributes: SmallVec<[FfiDomAttribute; 4]>,
+    relation_answers: HashMap<(SelectorNodeID, DomNode), bool>,
+    preceding_sibling_prefixes: HashMap<(SelectorNodeID, DomNode), PrecedingSiblingPrefix<DomNode>>,
+    relative_answers: HashMap<(RelativeQueryID, DomNode), bool>,
+    /// The number of siblings a child-indexed pseudo-class counts through each element, by element and counter. A
+    /// count walks only to the nearest sibling it knows, so matching every child of a parent walks its siblings once
+    /// rather than once per child.
+    sibling_counts: HashMap<(DomNode, SiblingCounter), u32>,
+    /// The siblings a count walks past before it reaches one it knows, kept from count to count.
+    sibling_walk: Vec<DomNode>,
+    /// Whether a child index has been asked for yet. Until then, nothing is remembered.
+    sibling_index_asked: bool,
 }
 
-fn optional_element(element: *const c_void) -> Option<Element> {
-    (!element.is_null()).then_some(element)
-}
-
-// A query resolves no namespace prefix: a default namespace does not exist there, and a named one does not parse.
-fn matches_namespace(facts: &FfiDomElement, name: &QualifiedName) -> bool {
-    match name.namespace_type {
-        NamespaceType::Default | NamespaceType::Any => true,
-        NamespaceType::None => facts.namespace_uri == 0,
-        NamespaceType::Named => false,
-    }
-}
-
-impl<'a> DomMatcher<'a> {
-    /// # Safety
-    /// `query` must describe live callbacks.
-    unsafe fn new(query: &'a FfiDomSelectorQuery) -> Self {
-        Self {
-            dom: unsafe { &*query.callbacks },
-            scope: optional_element(query.scope),
-            shadow_host: optional_element(query.shadow_host),
-            document_element: optional_element(query.document_element),
-            in_html_document: query.in_html_document,
-            ids_and_classes_ignore_case: query.ids_and_classes_ignore_case,
-            has_answers: HashMap::new(),
-            relation_failures: HashSet::new(),
-            nth_counts: HashMap::new(),
-            nth_walk: Vec::new(),
-            nth_asked: false,
-        }
+impl<'q> DomSubject<'q> {
+    #[inline]
+    fn names(&self) -> &'q QueryNames {
+        &self.query.names
     }
 
-    fn top_level_state(&self) -> MatchState {
-        MatchState {
-            shadow_host: self.shadow_host,
-            selector_kind: SelectorKind::Normal,
-            anchor: None,
-        }
-    }
-
-    // The callbacks, each called on live elements only.
-
-    fn facts(&self, element: Element) -> FfiDomElement {
-        unsafe { (self.dom.element)(element, std::ptr::null(), 0, std::ptr::null_mut(), 0) }
-    }
-
-    /// The element as a compound reads it, with its attributes named `names` in `buffer`.
-    fn view<'b>(&self, element: Element, names: &[usize], buffer: &'b mut AttributeBuffer) -> ElementView<'b> {
-        if names.is_empty() {
-            return ElementView {
-                element,
-                facts: self.facts(element),
-                attributes: &[],
-            };
-        }
-        let read = |buffer: &mut AttributeBuffer| unsafe {
-            (self.dom.element)(
-                element,
+    /// The element, with the attributes the program names read into `attributes`.
+    #[inline(never)]
+    fn read_element_with_attributes(&mut self, node: DomNode) -> FfiDomElement {
+        let dom = self.dom;
+        let names = &self.query.attribute_names;
+        let read = |attributes: &mut SmallVec<[FfiDomAttribute; 4]>| unsafe {
+            (dom.element)(
+                node,
                 names.as_ptr(),
                 names.len(),
-                buffer.as_mut_ptr(),
-                buffer.capacity(),
+                attributes.as_mut_ptr(),
+                attributes.capacity(),
             )
         };
-        let mut facts = read(buffer);
-        if facts.attribute_count > buffer.capacity() {
-            buffer.reserve_exact(facts.attribute_count);
-            facts = read(buffer);
+        self.attributes.clear();
+        let mut element = read(&mut self.attributes);
+        if element.attribute_count > self.attributes.capacity() {
+            self.attributes.reserve_exact(element.attribute_count);
+            element = read(&mut self.attributes);
         }
         // SAFETY: The host writes as many attributes as it has, up to the capacity it is given.
-        unsafe { buffer.set_len(facts.attribute_count.min(buffer.capacity())) };
-        ElementView {
-            element,
-            facts,
-            attributes: buffer,
-        }
-    }
-
-    fn parent_element(&self, element: Element, shadow_host: Option<Element>) -> Option<Element> {
-        // The walk up out of a shadow tree ends at its host.
-        if Some(element) == shadow_host {
-            return None;
-        }
-        if let Some(parent) = optional_element(unsafe { (self.dom.parent_element)(element) }) {
-            return Some(parent);
-        }
-        // Within a shadow tree, the walk up leaves the tree for its host, which is featureless there.
-        shadow_host?;
-        optional_element(unsafe { (self.dom.host_of_parent_shadow_root)(element) })
-            .filter(|&host| Some(host) == shadow_host)
-    }
-
-    fn previous_element_sibling(&self, element: Element) -> Option<Element> {
-        optional_element(unsafe { (self.dom.previous_element_sibling)(element) })
-    }
-
-    fn next_element_sibling(&self, element: Element) -> Option<Element> {
-        optional_element(unsafe { (self.dom.next_element_sibling)(element) })
-    }
-
-    fn count_element_siblings(&self, element: Element, which: FfiSiblingCount) -> u32 {
-        unsafe { (self.dom.count_element_siblings)(element, which) }
-    }
-
-    fn first_element_child(&self, element: Element) -> Option<Element> {
-        optional_element(unsafe { (self.dom.first_element_child)(element) })
-    }
-
-    fn next_element_in_subtree(&self, node: Element, root: Element) -> Option<Element> {
-        optional_element(unsafe { (self.dom.next_element_in_subtree)(node, root, 0) })
-    }
-
-    fn matches_selector(&mut self, selector: &CompiledSelector, element: Element, state: MatchState) -> bool {
-        // A query names elements, and a pseudo-element is not one.
-        if selector.target_pseudo_element.is_some() {
-            return false;
-        }
-        let Some(last) = selector.compound_selectors.len().checked_sub(1) else {
-            return false;
+        unsafe {
+            self.attributes
+                .set_len(element.attribute_count.min(self.attributes.capacity()));
         };
-        self.matches_compound(selector, last, element, state)
+        element
     }
 
-    // https://drafts.csswg.org/selectors-4/#match-a-selector-against-an-element
-    fn matches_compound(
-        &mut self,
-        selector: &CompiledSelector,
-        index: usize,
-        element: Element,
-        state: MatchState,
-    ) -> bool {
-        let compound = &selector.compound_selectors[index];
-        let is_has = |simple: &&SimpleSelector| matches!(simple, SimpleSelector::PseudoClass(pseudo_class) if pseudo_class.pseudo_class == PseudoClassType::Has);
-        let is_attribute = |simple: &&SimpleSelector| matches!(simple, SimpleSelector::Attribute(_));
-        // The local names the attribute selectors may compare, in either case: which one they do depends on the element.
-        let mut attribute_names = SmallVec::<[usize; 4]>::new();
-        for simple in compound.simple_selectors.iter().filter(is_attribute) {
-            let SimpleSelector::Attribute(attribute) = simple else {
-                continue;
+    /// The number of siblings the counter counts from the start (or the end) through `sibling`.
+    fn count_through(&mut self, sibling: DomNode, counter: SiblingCounter) -> u32 {
+        let tree = self.tree();
+        let mut walk = std::mem::take(&mut self.sibling_walk);
+        let mut count = 0;
+        let mut cursor = Some(sibling);
+        while let Some(current) = cursor {
+            if let Some(&known) = self.sibling_counts.get(&(current, counter)) {
+                count = known;
+                break;
+            }
+            walk.push(current);
+            cursor = match counter.from_end {
+                true => tree.next_sibling(current),
+                false => tree.previous_sibling(current),
             };
-            let name = &attribute.qualified_name;
-            attribute_names.extend(name.interned_name_identity());
-            attribute_names.extend(
-                name.interned_lowercase_name_identity()
-                    .filter(|&lowercase| Some(lowercase) != name.interned_name_identity()),
-            );
         }
-        // OPTIMIZATION: Read the attributes only once the other simple selectors matched, and with the names when
-        //               there are no others. Evaluate :has() last: its subtree traversal is substantially more expensive
-        //               than the other simple selectors and cannot affect their result.
-        let is_other = |simple: &&SimpleSelector| !is_attribute(simple) && !is_has(simple);
-        let tests_others = compound.simple_selectors.iter().any(|simple| is_other(&simple));
-        let mut attributes = AttributeBuffer::new();
-        let mut view = self.view(
-            element,
-            if tests_others { &[] } else { &attribute_names },
-            &mut attributes,
-        );
-        for simple in compound.simple_selectors.iter().filter(is_other) {
-            if !self.matches_simple(simple, &view, state) {
-                return false;
-            }
+        for &current in walk.iter().rev() {
+            let counted = counter.of_type.is_none_or(|of_type| {
+                let Ok(row) = self.row(current);
+                (row.element.local_name, row.element.namespace_uri) == of_type
+            });
+            count += u32::from(counted);
+            self.sibling_counts.insert((current, counter), count);
         }
-        if tests_others && !attribute_names.is_empty() {
-            view = self.view(element, &attribute_names, &mut attributes);
-        }
-        for simple in compound.simple_selectors.iter().filter(is_attribute) {
-            if !self.matches_simple(simple, &view, state) {
-                return false;
-            }
-        }
-        for simple in compound.simple_selectors.iter().filter(is_has) {
-            if !self.matches_simple(simple, &view, state) {
-                return false;
-            }
-        }
+        walk.clear();
+        self.sibling_walk = walk;
+        count
+    }
+}
 
-        if state.selector_kind == SelectorKind::Relative && index == 0 {
-            return Some(element) != state.anchor;
-        }
+/// An element's row, with the subject whose names its atoms are and whose buffer holds its attributes.
+struct DomFeatures<'s> {
+    subject: &'s DomSubject<'s>,
+    row: DomRow,
+}
 
-        match compound.combinator {
-            Combinator::None => state.selector_kind != SelectorKind::Relative,
-            Combinator::ImmediateChild => {
-                let Some(parent) = self.parent_element(element, state.shadow_host) else {
-                    return false;
-                };
-                Some(parent) != state.anchor && self.matches_compound(selector, index - 1, parent, state)
-            }
-            Combinator::NextSibling => {
-                let Some(sibling) = self.previous_element_sibling(element) else {
-                    return false;
-                };
-                self.matches_compound(selector, index - 1, sibling, state)
-            }
-            Combinator::Descendant | Combinator::SubsequentSibling => {
-                let remembers_failures = state.anchor.is_none()
-                    && state.selector_kind == SelectorKind::Normal
-                    && state.shadow_host == self.shadow_host;
-                let failure_key = (std::ptr::from_ref(selector) as usize, index, element as usize);
-                if remembers_failures && self.relation_failures.contains(&failure_key) {
-                    return false;
-                }
-                let matched = if compound.combinator == Combinator::Descendant {
-                    let mut ancestor = self.parent_element(element, state.shadow_host);
-                    loop {
-                        let Some(candidate) = ancestor else {
-                            break false;
-                        };
-                        if Some(candidate) == state.anchor {
-                            break false;
-                        }
-                        if self.matches_compound(selector, index - 1, candidate, state) {
-                            break true;
-                        }
-                        ancestor = self.parent_element(candidate, state.shadow_host);
-                    }
-                } else {
-                    let mut sibling = self.previous_element_sibling(element);
-                    loop {
-                        let Some(candidate) = sibling else {
-                            break false;
-                        };
-                        if self.matches_compound(selector, index - 1, candidate, state) {
-                            break true;
-                        }
-                        sibling = self.previous_element_sibling(candidate);
-                    }
-                };
-                if !matched && remembers_failures {
-                    self.relation_failures.insert(failure_key);
-                }
-                matched
-            }
-            // A pseudo-element is never what a query names, and nothing matches across a column combinator.
-            Combinator::PseudoElement | Combinator::Column => false,
-        }
+impl ElementFeatures for DomFeatures<'_> {
+    type Attribute = FfiDomAttribute;
+
+    #[inline]
+    fn local_name_is(&self, name: StyleAtomID) -> bool {
+        self.row.element.local_name == self.subject.names().raw(name)
     }
 
-    fn matches_simple(&mut self, simple: &SimpleSelector, view: &ElementView<'_>, state: MatchState) -> bool {
-        let element = view.element;
-        // https://drafts.csswg.org/css-scoping-1/#host-element-in-tree
-        // When considered within its own shadow trees, the shadow host is featureless. Only the :host, :host(), and
-        // :host-context() pseudo-classes are allowed to match it.
-        //
-        // NB: :has(), :is() and :where() are admitted here because they may contain :host. Their inner selectors are
-        //     checked independently and cannot make the host non-featureless.
-        if state.shadow_host == Some(element)
-            && !matches!(simple, SimpleSelector::PseudoClass(pseudo_class) if matches!(
-                pseudo_class.pseudo_class,
-                PseudoClassType::Host | PseudoClassType::Has | PseudoClassType::Is | PseudoClassType::Where
-            ))
-        {
+    #[inline]
+    fn namespace_is(&self, namespace: StyleAtomID) -> bool {
+        self.row.element.namespace_uri == self.subject.names().raw(namespace)
+    }
+
+    #[inline]
+    fn has_id(&self, id: StyleAtomID) -> bool {
+        let id = self.subject.names().raw(id);
+        if self.row.element.id == 0 || id == 0 {
             return false;
         }
-
-        match simple {
-            SimpleSelector::Universal(name) => matches_namespace(&view.facts, name),
-            SimpleSelector::TagName(name) => self.matches_tag_name(&view.facts, name),
-            SimpleSelector::Id(id) => {
-                if view.facts.id == 0 {
-                    return false;
-                }
-                if self.ids_and_classes_ignore_case {
-                    return id.interned_name_identity().is_some_and(|id| unsafe {
-                        (self.dom.id_or_class_equals_ignoring_ascii_case)(element, false, id)
-                    });
-                }
-                id.interned_name_identity() == Some(view.facts.id)
-            }
-            SimpleSelector::Class(class_name) => {
-                if view.facts.class_count == 0 {
-                    return false;
-                }
-                let Some(identity) = class_name.interned_name_identity() else {
-                    return false;
-                };
-                if self.ids_and_classes_ignore_case {
-                    return unsafe { (self.dom.id_or_class_equals_ignoring_ascii_case)(element, true, identity) };
-                }
-                unsafe { std::slice::from_raw_parts(view.facts.classes, view.facts.class_count) }.contains(&identity)
-            }
-            SimpleSelector::Attribute(attribute) => self.matches_attribute(view, attribute),
-            SimpleSelector::PseudoClass(pseudo_class) => {
-                self.matches_pseudo_class(pseudo_class, element, &view.facts, state)
-            }
-            // A query names elements, and a pseudo-element is not one.
-            SimpleSelector::PseudoElement(_) => false,
-            // The nesting selector has no parent rule in a query, so it names the scoping root, as `:scope` does.
-            SimpleSelector::Nesting => self.matches_scope(element),
-            SimpleSelector::Invalid(_) => false,
+        match self.subject.ids_and_classes_ignore_case {
+            true => unsafe { (self.subject.dom.id_or_class_equals_ignoring_ascii_case)(self.row.node, false, id) },
+            false => self.row.element.id == id,
         }
     }
 
-    // https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
-    fn matches_tag_name(&self, facts: &FfiDomElement, name: &QualifiedName) -> bool {
-        // When comparing a CSS element type selector to the names of HTML elements in HTML documents, the CSS element
-        // type selector must first be converted to ASCII lowercase. The same selector when compared to other elements
-        // must be compared according to its original case. In both cases, to match, the values must be identical to
-        // each other (and therefore the comparison is case sensitive).
-        let name_matches = if facts.is_html_element && self.in_html_document {
-            name.interned_lowercase_name_identity() == Some(facts.local_name)
-        } else {
-            name.interned_name_identity() == Some(facts.local_name)
-        };
-        name_matches && matches_namespace(facts, name)
-    }
-
-    fn matches_attribute(&self, view: &ElementView<'_>, attribute: &AttributeSelector) -> bool {
-        let qualified_name = &attribute.qualified_name;
-        let any_namespace = match qualified_name.namespace_type {
-            // https://www.w3.org/TR/selectors-4/#attrnmsp
-            // Default namespaces do not apply to attributes, therefore attribute selectors without a namespace
-            // component apply only to attributes that have no namespace (equivalent to "|attr").
-            NamespaceType::Default | NamespaceType::None => false,
-            NamespaceType::Any => true,
-            NamespaceType::Named => return false,
-        };
-        let is_html_element_in_html_document = view.facts.is_html_element && self.in_html_document;
-        let name = if is_html_element_in_html_document {
-            qualified_name.interned_lowercase_name_identity()
-        } else {
-            qualified_name.interned_name_identity()
-        };
-        let Some(name) = name else {
+    #[inline]
+    fn has_class(&self, class: StyleAtomID) -> bool {
+        let class = self.subject.names().raw(class);
+        if self.row.element.class_count == 0 || class == 0 {
             return false;
-        };
-        let insensitive = match attribute.case_type {
-            AttributeCaseType::Insensitive => true,
-            AttributeCaseType::Sensitive => false,
-            AttributeCaseType::Default => {
-                is_html_element_in_html_document && attribute.names_legacy_case_insensitive_attribute
-            }
-        };
-        let operator = AttributeOperator::from(attribute.match_type);
-        let literal = &attribute.value;
-        view.attributes
-            .iter()
-            .filter(|candidate| candidate.local_name == name && (any_namespace || candidate.namespace_uri == 0))
-            .any(|candidate| match unsafe { candidate.value.units() } {
-                Some(TokenizerInput::Ascii(value)) => attribute_value_matches(operator, value, literal, insensitive),
-                Some(TokenizerInput::Utf16(value)) => attribute_value_matches(operator, value, literal, insensitive),
-                None => attribute_value_matches::<u16>(operator, &[], literal, insensitive),
-            })
-    }
-
-    fn matches_scope(&self, element: Element) -> bool {
-        // A query rooted at a document, a shadow root or a fragment has no scoping element for `:scope` to name.
-        self.scope == Some(element)
-    }
-
-    fn matches_pseudo_class(
-        &mut self,
-        pseudo_class: &PseudoClassSelector,
-        element: Element,
-        facts: &FfiDomElement,
-        state: MatchState,
-    ) -> bool {
-        use PseudoClassType::*;
-
-        match pseudo_class.pseudo_class {
-            // https://drafts.csswg.org/selectors/#matches
-            // Both are forgiving, so an argument list whose every selector is invalid parses to an empty one, and an
-            // empty list matches nothing.
-            Is | Where => pseudo_class.argument_selector_list.iter().any(|selector| {
-                self.matches_selector(
-                    selector,
-                    element,
-                    MatchState {
-                        selector_kind: SelectorKind::Normal,
-                        anchor: None,
-                        ..state
-                    },
-                )
-            }),
-            Not => pseudo_class.argument_selector_list.iter().all(|selector| {
-                !self.matches_selector(
-                    selector,
-                    element,
-                    MatchState {
-                        selector_kind: SelectorKind::Normal,
-                        anchor: None,
-                        ..state
-                    },
-                )
-            }),
-            Has => {
-                // https://drafts.csswg.org/selectors-4/#relational
-                // The relational pseudo-class, :has(), is a functional pseudo-class taking a <relative-selector-list>
-                // as an argument. It represents an element if any of the relative selectors would match at least one
-                // element when anchored against this element.
-                if state.selector_kind == SelectorKind::Relative {
-                    return false;
-                }
-                pseudo_class
-                    .argument_selector_list
-                    .iter()
-                    .any(|selector| self.matches_has_argument(selector, element, state.shadow_host))
-            }
-            Host => {
-                // https://drafts.csswg.org/css-scoping-1/#host-selector
-                // When evaluated in the context of a shadow tree, it matches the shadow tree's shadow host if the
-                // shadow host, in its normal context, matches the selector argument. In any other context, it matches
-                // nothing.
-                if state.shadow_host != Some(element) {
-                    return false;
-                }
-                pseudo_class.argument_selector_list.first().is_none_or(|selector| {
-                    self.matches_selector(
-                        selector,
-                        element,
-                        MatchState {
-                            shadow_host: None,
-                            selector_kind: SelectorKind::Normal,
-                            anchor: None,
-                        },
-                    )
-                })
-            }
-            Scope => self.matches_scope(element),
-            Root => self.document_element == Some(element),
-            Empty => unsafe { (self.dom.is_empty)(element) },
-            FirstChild => self.previous_element_sibling(element).is_none(),
-            LastChild => self.next_element_sibling(element).is_none(),
-            OnlyChild => {
-                self.previous_element_sibling(element).is_none() && self.next_element_sibling(element).is_none()
-            }
-            FirstOfType => self.count_element_siblings(element, FfiSiblingCount::BeforeOfSameType) == 0,
-            LastOfType => self.count_element_siblings(element, FfiSiblingCount::AfterOfSameType) == 0,
-            OnlyOfType => {
-                self.count_element_siblings(element, FfiSiblingCount::BeforeOfSameType) == 0
-                    && self.count_element_siblings(element, FfiSiblingCount::AfterOfSameType) == 0
-            }
-            NthChild | NthLastChild | NthOfType | NthLastOfType => {
-                self.matches_nth(pseudo_class, element, facts, state)
-            }
-            Lang => {
-                let language = unsafe { (self.dom.language)(element) };
-                let Some(language) = (unsafe { language.to_utf16() }) else {
-                    return false;
-                };
-                // An element with no resolved language matches no range at all, not even `*`.
-                !language.is_empty()
-                    && pseudo_class
-                        .languages
-                        .iter()
-                        .any(|range| language_range_matches_tag(&range.value, &language))
-            }
-            Dir => match pseudo_class.direction {
-                Some(Direction::LeftToRight) => !unsafe { (self.dom.is_right_to_left)(element) },
-                Some(Direction::RightToLeft) => unsafe { (self.dom.is_right_to_left)(element) },
-                Some(Direction::Other) | None => false,
-            },
-            State => pseudo_class
-                .identifier_identity
-                .optional_raw()
-                .is_some_and(|state| unsafe { (self.dom.has_custom_state)(element, state) }),
-            Heading => {
-                // A written heading is one of six, but its computed level counts the heading offset its ancestors
-                // declare and is clamped at nine. Bare `:heading` is any level an element can have.
-                let level = unsafe { (self.dom.heading_level)(element) };
-                level != 0 && (pseudo_class.levels.is_empty() || pseudo_class.levels.contains(&i64::from(level)))
-            }
-            // Every other pseudo-class is a boolean state the element is in or not.
-            other => unsafe { (self.dom.matches_state)(element, other as u8) },
+        }
+        match self.subject.ids_and_classes_ignore_case {
+            true => unsafe { (self.subject.dom.id_or_class_equals_ignoring_ascii_case)(self.row.node, true, class) },
+            false => unsafe { std::slice::from_raw_parts(self.row.element.classes, self.row.element.class_count) }
+                .contains(&class),
         }
     }
 
-    // https://drafts.csswg.org/selectors-4/#child-index
-    fn matches_nth(
-        &mut self,
-        pseudo_class: &PseudoClassSelector,
-        element: Element,
-        facts: &FfiDomElement,
-        state: MatchState,
-    ) -> bool {
-        let (from_end, of_same_type) = match pseudo_class.pseudo_class {
-            PseudoClassType::NthChild => (false, false),
-            PseudoClassType::NthLastChild => (true, false),
-            PseudoClassType::NthOfType => (false, true),
-            PseudoClassType::NthLastOfType => (true, true),
+    #[inline]
+    fn attributes_named(&self, name: StyleAtomID, any_namespace: bool) -> impl Iterator<Item = FfiDomAttribute> + '_ {
+        let name = self.subject.names().raw(name);
+        // The buffer holds the attributes of the element read last, which is this one: a row is asked of as soon as
+        // it is read.
+        let attributes = match self.subject.current {
+            Some(current) if current.node == self.row.node => &self.subject.attributes[..],
             _ => {
-                debug_assert!(false, "not a child-indexed pseudo-class");
-                return false;
+                debug_assert!(
+                    false,
+                    "the attributes of an element are asked of after another element was read"
+                );
+                &[]
             }
         };
-        // Only :nth-child() and :nth-last-child() take `of S`.
-        let has_argument = !of_same_type && !pseudo_class.argument_selector_list.is_empty();
-        if has_argument && !self.matches_nth_argument(pseudo_class, element, state) {
-            return false;
+        attributes
+            .iter()
+            .copied()
+            .filter(move |attribute| attribute.local_name == name && (any_namespace || attribute.namespace_uri == 0))
+    }
+}
+
+impl<'q> SelectorSubject for DomSubject<'q> {
+    type Atoms = QueryAtoms;
+    type Node = DomNode;
+    type Tree = DomTree<'q>;
+    type Row = DomRow;
+    type Attribute = FfiDomAttribute;
+    type Features<'s>
+        = DomFeatures<'s>
+    where
+        Self: 's;
+    type Incomplete = Infallible;
+    type Counters = ();
+    type PrefixSlot = (SelectorNodeID, DomNode);
+
+    #[inline]
+    fn tree(&self) -> DomTree<'q> {
+        DomTree { dom: self.dom }
+    }
+
+    #[inline]
+    fn row(&mut self, node: DomNode) -> Result<DomRow, Infallible> {
+        if let Some(current) = self.current
+            && current.node == node
+        {
+            return Ok(current);
         }
-        let siblings_before = match self.nth_sibling(element, from_end) {
-            None => 0,
+        let element = match self.query.attribute_names.is_empty() {
+            true => unsafe { (self.dom.element)(node, std::ptr::null(), 0, std::ptr::null_mut(), 0) },
+            false => self.read_element_with_attributes(node),
+        };
+        let row = DomRow { node, element };
+        self.current = Some(row);
+        Ok(row)
+    }
+
+    #[inline]
+    fn features(&self, row: DomRow) -> DomFeatures<'_> {
+        DomFeatures { subject: self, row }
+    }
+
+    #[inline]
+    fn same_type(&self, row: DomRow, other: DomRow) -> bool {
+        row.element.local_name == other.element.local_name && row.element.namespace_uri == other.element.namespace_uri
+    }
+
+    #[inline]
+    fn attribute_value_atom(&self, _attribute: FfiDomAttribute) -> StyleAtomID {
+        StyleAtomID::NONE
+    }
+
+    #[inline]
+    fn attribute_value_text(&self, attribute: FfiDomAttribute) -> Option<TokenizerInput<'_>> {
+        // An empty value crosses as an empty view.
+        Some(unsafe { attribute.value.units() }.unwrap_or(TokenizerInput::Utf16(&[])))
+    }
+
+    #[inline]
+    fn has_state(&self, row: DomRow, fact: StateFact) -> bool {
+        unsafe { (self.dom.matches_state)(row.node, fact as u8) }
+    }
+
+    fn language_tag(&self, row: DomRow) -> Cow<'_, [u16]> {
+        match unsafe { (self.dom.language)(row.node).units() } {
+            Some(TokenizerInput::Utf16(tag)) => Cow::Borrowed(tag),
+            Some(TokenizerInput::Ascii(tag)) => Cow::Owned(tag.iter().copied().map(u16::from).collect()),
+            None => Cow::Borrowed(&[]),
+        }
+    }
+
+    #[inline]
+    fn directionality_is(&self, row: DomRow, direction: StyleAtomID) -> bool {
+        let actual = unsafe { (self.dom.directionality)(row.node) };
+        actual == self.names().raw(direction)
+    }
+
+    #[inline]
+    fn has_custom_state(&self, row: DomRow, state: StyleAtomID) -> bool {
+        let state = self.names().raw(state);
+        state != 0 && unsafe { (self.dom.has_custom_state)(row.node, state) }
+    }
+
+    #[inline]
+    fn heading_level(&self, row: DomRow) -> u8 {
+        u8::try_from(unsafe { (self.dom.heading_level)(row.node) }).unwrap_or(0)
+    }
+
+    #[inline]
+    fn is_empty(&mut self, node: DomNode) -> Result<bool, Infallible> {
+        Ok(unsafe { (self.dom.is_empty)(node) })
+    }
+
+    #[inline]
+    fn is_root(&self, node: DomNode) -> bool {
+        Some(node) == self.document_element
+    }
+
+    /// The scoping root and the shadow root stay bound for the whole query, so only a relative anchor or a `:host()`
+    /// argument makes an answer local to one evaluation.
+    #[inline]
+    fn remembers_relations(&self, bindings: &SelectorBindings<DomNode>) -> bool {
+        bindings.relative_anchor.is_none() && !bindings.matching_host_argument
+    }
+
+    #[inline]
+    fn relation_answer(
+        &self,
+        _program: &SelectorProgram<QueryAtoms>,
+        relation: SelectorNodeID,
+        node: DomNode,
+    ) -> Option<bool> {
+        self.relation_answers.get(&(relation, node)).copied()
+    }
+
+    #[inline]
+    fn record_relation_answer(
+        &mut self,
+        _program: &SelectorProgram<QueryAtoms>,
+        relation: SelectorNodeID,
+        node: DomNode,
+        answer: bool,
+    ) {
+        self.relation_answers.insert((relation, node), answer);
+    }
+
+    #[inline]
+    fn preceding_sibling_prefix(
+        &mut self,
+        _program: &SelectorProgram<QueryAtoms>,
+        relation: SelectorNodeID,
+        parent: DomNode,
+    ) -> Option<RememberedPrefix<(SelectorNodeID, DomNode), DomNode>> {
+        let slot = (relation, parent);
+        Some(RememberedPrefix {
+            slot,
+            prefix: self.preceding_sibling_prefixes.get(&slot).copied(),
+        })
+    }
+
+    #[inline]
+    fn record_preceding_sibling_prefix(
+        &mut self,
+        _program: &SelectorProgram<QueryAtoms>,
+        _relation: SelectorNodeID,
+        slot: (SelectorNodeID, DomNode),
+        prefix: PrecedingSiblingPrefix<DomNode>,
+    ) {
+        self.preceding_sibling_prefixes.insert(slot, prefix);
+    }
+
+    fn sibling_index(&mut self, position: NthPosition, node: DomNode) -> Result<Option<i64>, Infallible> {
+        let tree = self.tree();
+        let nearest = match position.from_end {
+            true => tree.next_sibling(node),
+            false => tree.previous_sibling(node),
+        };
+        let Some(nearest) = nearest else {
+            return Ok(Some(1));
+        };
+        let siblings_before = match self.sibling_index_asked {
             // One element asked alone, as matches() and closest() mostly do, is counted by the host in one call.
-            Some(_) if !self.nth_asked && !has_argument => {
-                self.nth_asked = true;
-                let which = match (from_end, of_same_type) {
+            false => {
+                self.sibling_index_asked = true;
+                let which = match (position.from_end, position.of_type) {
                     (false, false) => FfiSiblingCount::Before,
                     (true, false) => FfiSiblingCount::After,
                     (false, true) => FfiSiblingCount::BeforeOfSameType,
                     (true, true) => FfiSiblingCount::AfterOfSameType,
                 };
-                self.count_element_siblings(element, which)
+                unsafe { (self.dom.count_element_siblings)(node, which) }
             }
-            Some(sibling) => {
-                self.nth_asked = true;
-                let counted = if of_same_type {
-                    NthCounted::OfType {
-                        local_name: facts.local_name,
-                        namespace_uri: facts.namespace_uri,
+            true => {
+                let of_type = match position.of_type {
+                    true => {
+                        let Ok(row) = self.row(node);
+                        Some((row.element.local_name, row.element.namespace_uri))
                     }
-                } else if has_argument {
-                    NthCounted::Of {
-                        selectors: pseudo_class.argument_selector_list.as_ptr() as usize,
-                        shadow_host: state.shadow_host.map_or(0, |host| host as usize),
-                    }
-                } else {
-                    NthCounted::Every
+                    false => None,
                 };
-                self.count_through(sibling, NthCounter { from_end, counted }, pseudo_class, state)
+                let counter = SiblingCounter {
+                    from_end: position.from_end,
+                    of_type,
+                };
+                self.count_through(nearest, counter)
             }
         };
-        let index = i32::try_from(siblings_before).unwrap_or(i32::MAX).saturating_add(1);
-        pseudo_class.an_plus_b_pattern.matches(index)
+        Ok(Some(i64::from(siblings_before) + 1))
     }
 
-    fn nth_sibling(&self, element: Element, from_end: bool) -> Option<Element> {
-        match from_end {
-            true => self.next_element_sibling(element),
-            false => self.previous_element_sibling(element),
-        }
+    #[inline]
+    fn relative_answer(
+        &self,
+        _program: &SelectorProgram<QueryAtoms>,
+        query: RelativeQueryID,
+        anchor: DomNode,
+    ) -> Option<bool> {
+        self.relative_answers.get(&(query, anchor)).copied()
     }
 
-    fn matches_nth_argument(
+    #[inline]
+    fn record_relative_answer(
         &mut self,
-        pseudo_class: &PseudoClassSelector,
-        element: Element,
-        state: MatchState,
-    ) -> bool {
-        let argument_state = MatchState {
-            selector_kind: SelectorKind::Normal,
-            anchor: None,
-            ..state
-        };
-        pseudo_class
-            .argument_selector_list
-            .iter()
-            .any(|selector| self.matches_selector(selector, element, argument_state))
-    }
-
-    /// The number of siblings the counter counts from the start (or the end) through `element`.
-    fn count_through(
-        &mut self,
-        element: Element,
-        counter: NthCounter,
-        pseudo_class: &PseudoClassSelector,
-        state: MatchState,
-    ) -> u32 {
-        let mut walk = std::mem::take(&mut self.nth_walk);
-        let mut count = 0;
-        let mut cursor = Some(element);
-        while let Some(sibling) = cursor {
-            if let Some(&known) = self.nth_counts.get(&(sibling as usize, counter)) {
-                count = known;
-                break;
-            }
-            walk.push(sibling);
-            cursor = self.nth_sibling(sibling, counter.from_end);
-        }
-        for &sibling in walk.iter().rev() {
-            let counted = match counter.counted {
-                NthCounted::Every => true,
-                NthCounted::OfType {
-                    local_name,
-                    namespace_uri,
-                } => {
-                    let facts = self.facts(sibling);
-                    facts.local_name == local_name && facts.namespace_uri == namespace_uri
-                }
-                NthCounted::Of { .. } => self.matches_nth_argument(pseudo_class, sibling, state),
-            };
-            count += u32::from(counted);
-            self.nth_counts.insert((sibling as usize, counter), count);
-        }
-        walk.clear();
-        self.nth_walk = walk;
-        count
-    }
-
-    fn matches_has_argument(
-        &mut self,
-        selector: &CompiledSelector,
-        anchor: Element,
-        shadow_host: Option<Element>,
-    ) -> bool {
-        let key = (selector.id(), anchor as usize);
-        if let Some(&answer) = self.has_answers.get(&key) {
-            return answer;
-        }
-        let answer = self.matches_relative_selector(selector, 0, anchor, anchor, shadow_host);
-        self.has_answers.insert(key, answer);
-        answer
-    }
-
-    // https://drafts.csswg.org/selectors-4/#relative
-    // Relative selectors begin with a combinator, with a selector representing the anchor element implied at the start
-    // of the selector. (If no combinator is present, the descendant combinator is implied.)
-    //
-    // NB: This walks left-to-right from that implied anchor to enumerate candidates. Once a candidate is found,
-    //     matches_compound() verifies the corresponding compound right-to-left, preserving the normal matching
-    //     semantics for the rest of the selector.
-    fn matches_relative_selector(
-        &mut self,
-        selector: &CompiledSelector,
-        index: usize,
-        element: Element,
-        anchor: Element,
-        shadow_host: Option<Element>,
-    ) -> bool {
-        let state = MatchState {
-            shadow_host,
-            selector_kind: SelectorKind::Relative,
-            anchor: Some(anchor),
-        };
-        if index >= selector.compound_selectors.len() {
-            return self.matches_selector(selector, element, state);
-        }
-        let matches_here = |this: &mut Self, candidate: Element| {
-            this.matches_compound(selector, index, candidate, state)
-                && this.matches_relative_selector(selector, index + 1, candidate, anchor, shadow_host)
-        };
-        match selector.compound_selectors[index].combinator {
-            Combinator::Descendant => {
-                let mut descendant = self.next_element_in_subtree(element, element);
-                while let Some(candidate) = descendant {
-                    if self.matches_selector(selector, candidate, state) {
-                        return true;
-                    }
-                    descendant = self.next_element_in_subtree(candidate, element);
-                }
-                false
-            }
-            Combinator::ImmediateChild => {
-                let mut child = self.first_element_child(element);
-                while let Some(candidate) = child {
-                    if matches_here(self, candidate) {
-                        return true;
-                    }
-                    child = self.next_element_sibling(candidate);
-                }
-                false
-            }
-            Combinator::NextSibling => self
-                .next_element_sibling(element)
-                .is_some_and(|sibling| matches_here(self, sibling)),
-            Combinator::SubsequentSibling => {
-                let mut sibling = self.next_element_sibling(element);
-                while let Some(candidate) = sibling {
-                    if matches_here(self, candidate) {
-                        return true;
-                    }
-                    sibling = self.next_element_sibling(candidate);
-                }
-                false
-            }
-            Combinator::None | Combinator::PseudoElement | Combinator::Column => false,
-        }
-    }
-
-    /// The attribute name filter bits of the attributes an element must have to match the selector.
-    fn subject_attribute_names(&self, selector: &CompiledSelector) -> u64 {
-        let Some(subject) = selector.compound_selectors.last() else {
-            return 0;
-        };
-        subject
-            .simple_selectors
-            .iter()
-            .filter_map(|simple| match simple {
-                // A name with an uppercase letter compares in one case or the other depending on the element.
-                SimpleSelector::Attribute(attribute)
-                    if attribute.qualified_name.namespace_type != NamespaceType::Named
-                        && attribute.qualified_name.interned_name_identity()
-                            == attribute.qualified_name.interned_lowercase_name_identity() =>
-                {
-                    attribute.qualified_name.interned_name_identity()
-                }
-                _ => None,
-            })
-            .fold(0, |names, name| {
-                names | unsafe { (self.dom.attribute_name_filter_bit)(name) }
-            })
-    }
-
-    fn matches_any(&mut self, selectors: &[&CompiledSelector], element: Element) -> bool {
-        let state = self.top_level_state();
-        selectors
-            .iter()
-            .any(|selector| self.matches_selector(selector, element, state))
+        _program: &SelectorProgram<QueryAtoms>,
+        query: RelativeQueryID,
+        anchor: DomNode,
+        answer: bool,
+        _witness: Option<DomNode>,
+    ) {
+        self.relative_answers.insert((query, anchor), answer);
     }
 }
 
-unsafe fn query_parts(query: &FfiDomSelectorQuery) -> (Vec<&CompiledSelector>, DomMatcher<'_>) {
-    let selectors = if query.selector_count == 0 {
-        Vec::new()
-    } else {
-        unsafe { std::slice::from_raw_parts(query.selectors, query.selector_count) }
-            .iter()
-            .map(|&selector| unsafe { (*selector).compiled() })
-            .collect()
-    };
-    (selectors, unsafe { DomMatcher::new(query) })
+/// One query as it runs: its program, evaluated against the DOM.
+struct DomQuery<'q> {
+    query: &'q DomSelectorProgram,
+    evaluator: SelectorEvaluator<DomSubject<'q>>,
+}
+
+impl<'q> DomQuery<'q> {
+    /// # Safety
+    /// `query` must describe a live program and callbacks.
+    unsafe fn new(query: &'q FfiDomSelectorQuery) -> Self {
+        let program = unsafe { &*query.program };
+        let shadow_root = optional_node(query.shadow_root);
+        Self {
+            query: program,
+            evaluator: SelectorEvaluator {
+                subject: DomSubject {
+                    dom: unsafe { &*query.callbacks },
+                    query: program,
+                    document_element: optional_node(query.document_element),
+                    ids_and_classes_ignore_case: query.ids_and_classes_ignore_case,
+                    current: None,
+                    attributes: SmallVec::new(),
+                    relation_answers: HashMap::default(),
+                    preceding_sibling_prefixes: HashMap::default(),
+                    relative_answers: HashMap::default(),
+                    sibling_counts: HashMap::default(),
+                    sibling_walk: Vec::new(),
+                    sibling_index_asked: false,
+                },
+                bindings: SelectorBindings {
+                    scope_shadow_root: shadow_root,
+                    scope_root_instance: optional_node(query.scope),
+                    ..SelectorBindings::default()
+                },
+            },
+        }
+    }
+
+    fn matches(&mut self, element: DomNode) -> bool {
+        let query = self.query;
+        query.subjects.iter().any(|&subject| {
+            let Ok(matches) = self.evaluator.matches_node(&query.program, subject, element, &mut ());
+            matches
+        })
+    }
 }
 
 /// Whether an element matches any selector of a query.
 ///
 /// # Safety
-/// `query` must describe live selectors and callbacks, and `element` must be a live element.
+/// `query` must describe a live program and callbacks, and `element` must be a live element.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_dom_selector_query_matches(query: &FfiDomSelectorQuery, element: *const c_void) -> bool {
-    let (selectors, mut matcher) = unsafe { query_parts(query) };
-    matcher.matches_any(&selectors, element)
+    unsafe { DomQuery::new(query) }.matches(element)
 }
 
 /// The nearest inclusive ancestor of an element that matches any selector of a query, or null.
@@ -926,13 +773,18 @@ pub unsafe extern "C" fn rust_dom_selector_query_closest(
     query: &FfiDomSelectorQuery,
     element: *const c_void,
 ) -> *const c_void {
-    let (selectors, mut matcher) = unsafe { query_parts(query) };
+    let mut query_run = unsafe { DomQuery::new(query) };
+    let tree = query_run.evaluator.subject.tree();
+    let shadow_root = query_run.evaluator.bindings.scope_shadow_root;
     let mut candidate = Some(element);
-    while let Some(current) = candidate {
-        if matcher.matches_any(&selectors, current) {
+    // The walk up ends at the root of the element's tree, which is not an element when it is a shadow root.
+    while let Some(current) = candidate
+        && Some(current) != shadow_root
+    {
+        if query_run.matches(current) {
             return current;
         }
-        candidate = matcher.parent_element(current, None);
+        candidate = tree.parent(current);
     }
     std::ptr::null()
 }
@@ -949,16 +801,14 @@ pub unsafe extern "C" fn rust_dom_selector_query_subtree(
     context: *mut c_void,
     found: unsafe extern "C" fn(context: *mut c_void, element: *const c_void) -> bool,
 ) {
-    let (selectors, mut matcher) = unsafe { query_parts(query) };
+    let mut query_run = unsafe { DomQuery::new(query) };
+    let dom = query_run.evaluator.subject.dom;
     // A subtree none of whose elements has every attribute name each selector's subject names holds no match.
-    let attribute_names = selectors
-        .iter()
-        .map(|selector| matcher.subject_attribute_names(selector))
-        .fold(u64::MAX, |common, names| common & names);
-    let next = |node| optional_element(unsafe { (matcher.dom.next_element_in_subtree)(node, root, attribute_names) });
+    let attribute_names = query_run.evaluator.subject.query.subject_attribute_names(dom);
+    let next = |node| optional_node(unsafe { (dom.next_element_in_subtree)(node, root, attribute_names) });
     let mut candidate = next(root);
     while let Some(element) = candidate {
-        if matcher.matches_any(&selectors, element) && unsafe { found(context, element) } {
+        if query_run.matches(element) && unsafe { found(context, element) } {
             return;
         }
         candidate = next(element);
