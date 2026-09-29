@@ -11,7 +11,8 @@
 //! submitted stage that holds its [`StyleEngineLoan`] ([`StyleEngineHandle::lend`]), which sends
 //! word home once it is done with the engine ([`StyleEngineLoan::send_home`], or the loan's drop).
 //! The main thread settles the lend once it has taken the stage back ([`StyleEngineSettlement`]),
-//! which keeps the home until then, even where the engine has gone away first.
+//! which keeps the home, and the engine with it, until then. The arena that links the engine holds
+//! it too ([`StyleEngineLink`]), until the render owner applies the unlink.
 //!
 //! The engine is reached by the render owner, which holds the document's render state
 //! ([`StyleEngineHandle::reach_on_owner`], which only the owner's [`crate::render_owner::Owner`] can call), by a stage
@@ -33,10 +34,9 @@ use super::owner_calls::StyleChange;
 use std::cell::{Cell, UnsafeCell};
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 /// What C++ holds for one document's style engine: a pointer to its home, opaque to C++. It has no
 /// way to the engine but the home's.
@@ -171,6 +171,8 @@ struct StyleEngineHome {
     arena: usize,
     /// The document whose render state's arena links the engine, whose render owner owns the engine.
     document: crate::render_owner::DocumentId,
+    /// The document thread, which alone may free the engine: what the engine retains is released on it.
+    thread: std::thread::ThreadId,
     /// All that crosses between the main thread and whoever reaches the engine, which may run beside it.
     exchange: Mutex<Exchange>,
     /// What the home answers the main thread with, of what the engine holds. The main thread's alone.
@@ -232,6 +234,78 @@ const _: () = {
     const fn assert_send<T: Send>() {}
     assert_send::<Exchange>();
 };
+
+impl Drop for StyleEngineHome {
+    fn drop(&mut self) {
+        // SAFETY: The home owns the engine, which `StyleEngineHandle::create` leaked into it, and nothing holds the home.
+        drop(unsafe { Box::from_raw(self.engine.as_ptr()) });
+    }
+}
+
+/// The layout arena's link to the style engine it mirrors, which holds the engine's home, and the engine with it, for
+/// as long as the arena links it. The render owner reaches the engine only through the arena, so no engine it reaches
+/// goes away before it applies the unlink, however soon after sending it the main thread destroys its handle.
+///
+/// A stage reaches the engine through the arena only while the document thread, which owns both,
+/// waits for the stage: the tree build walks the style mirror and pins the records it stamps, and
+/// layout and recording look up SVG references and published styles by identity. Those are some
+/// thirty-five engine reads and writes, too many to publish into the arena as rows, so the arena
+/// carries the engine along as a `&mut StyleEngine` would be carried: the link is `Send` exactly
+/// when the engine is.
+pub(crate) struct StyleEngineLink(std::mem::ManuallyDrop<Arc<StyleEngineHome>>);
+
+impl StyleEngineLink {
+    pub(crate) fn handle(&self) -> StyleEngineHandle {
+        StyleEngineHandle(Arc::as_ptr(&self.0).cast_mut().cast())
+    }
+}
+
+/// A home whose last hold an arena's link let go of off its document thread, which alone frees the engine: what the
+/// engine retains is released there.
+struct ReturnedHome(StyleEngineHome);
+
+// SAFETY: Nothing holds the home any more: only its document thread reaches it again, to drop it.
+unsafe impl Send for ReturnedHome {}
+
+/// The homes returned to their document threads, which free them as they next send the render owner a message
+/// ([`free_returned_style_engines`]).
+static RETURNED_HOMES: Mutex<Vec<ReturnedHome>> = Mutex::new(Vec::new());
+static HAS_RETURNED_HOMES: AtomicBool = AtomicBool::new(false);
+
+impl Drop for StyleEngineLink {
+    fn drop(&mut self) {
+        // SAFETY: The link is dropped once, here.
+        let home = unsafe { std::mem::ManuallyDrop::take(&mut self.0) };
+        if let Some(home) = Arc::into_inner(home)
+            && home.thread != std::thread::current().id()
+        {
+            RETURNED_HOMES
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(ReturnedHome(home));
+            HAS_RETURNED_HOMES.store(true, Ordering::Release);
+        }
+    }
+}
+
+/// Frees the engines returned to the calling document thread.
+pub(crate) fn free_returned_style_engines() {
+    if !HAS_RETURNED_HOMES.load(Ordering::Acquire) {
+        return;
+    }
+    let thread = std::thread::current().id();
+    let mut returned = RETURNED_HOMES.lock().unwrap_or_else(PoisonError::into_inner);
+    let mine: Vec<ReturnedHome> = returned.extract_if(.., |home| home.0.thread == thread).collect();
+    HAS_RETURNED_HOMES.store(!returned.is_empty(), Ordering::Release);
+    drop(returned);
+    drop(mine);
+}
+
+// SAFETY: The link stands for an exclusive borrow of the engine, which the compiler checks is `Send`. The engine is
+// only reached through it by whoever holds the arena exclusively, while the engine's owning thread waits for that
+// stage, and the handoff orders those accesses. Of the home, only the lock-guarded exchange is shared: dropping the
+// last hold frees the rest once no main-thread hold (the handle, a lend's settlement) is left to reach it.
+unsafe impl Send for StyleEngineLink where StyleEngine: Send {}
 
 impl StyleEngineHome {
     fn exchange(&self) -> MutexGuard<'_, Exchange> {
@@ -295,7 +369,7 @@ impl StyleEngineHome {
 /// back: the lend's settlement, which keeps the home until then. On the main thread.
 #[must_use = "a lend is settled once its stage is taken back"]
 pub(crate) struct StyleEngineSettlement {
-    home: Rc<StyleEngineHome>,
+    home: Arc<StyleEngineHome>,
 }
 
 impl StyleEngineSettlement {
@@ -517,7 +591,9 @@ impl StyleEngineHandle {
     pub(crate) unsafe fn create(engine: Box<StyleEngine>, arena: *mut c_void) -> Self {
         // SAFETY: Guaranteed by the caller.
         let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
-        let home = Rc::new(StyleEngineHome {
+        // Shared with the arena's link, whose own `Send` says what crosses threads of the home.
+        #[allow(clippy::arc_with_non_send_sync)]
+        let home = Arc::new(StyleEngineHome {
             engine: NonNull::from(Box::leak(engine)),
             slot: UnsafeCell::new(Slot {
                 owed: Owed::Nothing,
@@ -526,16 +602,15 @@ impl StyleEngineHandle {
             holder: Cell::new(None),
             arena: arena.addr(),
             document,
+            thread: crate::stage_thread::acting_thread(),
             exchange: Mutex::default(),
             answers: UnsafeCell::default(),
             reached_by_owning_thread: Cell::new(false),
             beside_pass: Cell::new(false),
         });
-        let handle = Self(Rc::into_raw(home).cast_mut().cast());
-        crate::render_owner::send_arena_change(
-            document,
-            crate::render_owner::ArenaChange::LinkStyleEngine(crate::layout::StyleEngineLink::to(handle)),
-        );
+        let link = StyleEngineLink(std::mem::ManuallyDrop::new(Arc::clone(&home)));
+        let handle = Self(Arc::into_raw(home).cast_mut().cast());
+        crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::LinkStyleEngine(link));
         handle
     }
 
@@ -555,21 +630,21 @@ impl StyleEngineHandle {
         unsafe { &*self.0.cast::<StyleEngineHome>() }
     }
 
-    /// Takes the engine out of its home, which goes away once every lend of the engine is settled.
-    /// The main thread brings the engine home first.
+    /// Ends the handle's hold on the engine's home, which goes away with the engine once every lend of the engine is
+    /// settled and the arena no longer links it. The main thread brings the engine home first, and ends its recording.
     ///
     /// # Safety
     ///
     /// The handle must come from [`Self::create`], be used on the document thread, and not be used
     /// again.
-    pub(crate) unsafe fn destroy(self, entry: &'static str) -> Box<StyleEngine> {
+    pub(crate) unsafe fn destroy(self, entry: &'static str) {
         self.bring_home(entry);
         let home = self.home();
         home.settle();
+        // SAFETY: The engine is home.
+        unsafe { &mut *home.engine.as_ptr() }.end_recording();
         // SAFETY: Guaranteed by the caller: this is the handle's hold on the home, from `create`.
-        let home = unsafe { Rc::from_raw(self.0.cast::<StyleEngineHome>().cast_const()) };
-        // SAFETY: The home owned the engine, which `create` leaked into it, and the engine is home.
-        unsafe { Box::from_raw(home.engine.as_ptr()) }
+        drop(unsafe { Arc::from_raw(self.0.cast::<StyleEngineHome>().cast_const()) });
     }
 
     /// As the render `owner`, in a unit it runs with the render state of the engine's document: runs `run` with the
@@ -677,10 +752,10 @@ impl StyleEngineHandle {
         home.beside_pass.set(holder == Holder::StylePass);
         crate::stage_thread::release_handoff();
         let home_pointer = self.0.cast::<StyleEngineHome>().cast_const();
-        // SAFETY: The handle names a live home, which `Rc::into_raw` made; the settlement holds it too.
+        // SAFETY: The handle names a live home, which `Arc::into_raw` made; the settlement holds it too.
         let home = unsafe {
-            Rc::increment_strong_count(home_pointer);
-            Rc::from_raw(home_pointer)
+            Arc::increment_strong_count(home_pointer);
+            Arc::from_raw(home_pointer)
         };
         (
             StyleEngineLoan {
@@ -913,6 +988,67 @@ mod tests {
     }
 
     #[test]
+    fn an_engine_goes_away_only_once_the_owner_has_unlinked_it() {
+        use crate::render_owner::{ArenaChange, TakeIn, create_document, destroy_document, send_arena_change};
+        let wait_until = |done: &dyn Fn() -> bool| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !done() && std::time::Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            done()
+        };
+        let create = |take_in| {
+            let (document, arena) = create_document(take_in);
+            // SAFETY: The owner keeps the arena until the document is destroyed below.
+            let handle = unsafe {
+                StyleEngineHandle::create(
+                    Box::new(StyleEngine::new(super::super::memory::DeviceClass::ForegroundDesktop)),
+                    arena,
+                )
+            };
+            let home_pointer = handle.0.cast::<StyleEngineHome>().cast_const();
+            // SAFETY: The handle names a live home, which `Arc::into_raw` made.
+            let home = unsafe {
+                Arc::increment_strong_count(home_pointer);
+                Arc::downgrade(&Arc::from_raw(home_pointer))
+            };
+            (document, handle, home)
+        };
+
+        // The owner of a document that takes in only what it waits for has not applied the unlink: its arena's link
+        // keeps the engine.
+        let (document, handle, home) = create(TakeIn::WhenWaitedFor);
+        send_arena_change(document, ArenaChange::UnlinkStyleEngine);
+        // SAFETY: The handle came from `StyleEngineHandle::create`, and goes with this.
+        unsafe { super::super::bridge::style_engine_destroy(handle) };
+        assert_eq!(home.strong_count(), 1, "the arena's link holds the engine");
+        destroy_document(document);
+        assert!(wait_until(&|| home.strong_count() == 0));
+
+        // Documents with style come and go while the owner takes in what they send as it idles, reaching each engine
+        // it still links beside the main thread, which destroys the engine right after unlinking it.
+        let (other, _) = create_document(TakeIn::AsTheOwnerIdles);
+        let mut homes = Vec::new();
+        for _ in 0..200 {
+            let (document, handle, home) = create(TakeIn::AsTheOwnerIdles);
+            // The main thread adopts the news of the link, which lets the owner reach the engine as it idles.
+            assert!(wait_until(&|| handle.has_unadopted_news()));
+            // SAFETY: On the main thread, with no other borrow of the answers live.
+            unsafe { handle.answers() };
+            send_arena_change(document, ArenaChange::UnlinkStyleEngine);
+            send_arena_change(other, ArenaChange::BeginLayoutTrace);
+            // SAFETY: As above.
+            unsafe { super::super::bridge::style_engine_destroy(handle) };
+            homes.push((document, home));
+        }
+        assert!(wait_until(&|| homes.iter().all(|(_, home)| home.strong_count() == 0)));
+        for (document, _) in homes {
+            destroy_document(document);
+        }
+        destroy_document(other);
+    }
+
+    #[test]
     fn a_lent_engine_comes_home_with_what_its_stage_sends() {
         let (_engine, handle) = test_engine();
         let (loan, settlement) = handle.lend(Holder::LayoutPass, Owed::Nothing);
@@ -943,8 +1079,12 @@ mod tests {
         let (loan, settlement) = handle.lend(Holder::StylePass, Owed::TakeBack);
         loan.send_home(Owed::TakeBack);
         drop(engine);
-        // The settlement kept the home, which goes away with it.
-        assert_eq!(Rc::strong_count(&settlement.home), 1);
+        // The settlement kept the home, which goes away with it, once the owner has dropped the document's arena.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while Arc::strong_count(&settlement.home) > 1 && std::time::Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert_eq!(Arc::strong_count(&settlement.home), 1);
         settlement.settle();
     }
 

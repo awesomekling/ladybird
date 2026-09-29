@@ -246,8 +246,14 @@ impl ArenaChange {
     }
 
     /// Applies the change to `arena`, with the engine the arena links, or the one the change links it to, where the
-    /// unit reaches one.
-    fn apply(self, arena: &mut LayoutNodeArena, engine: Option<&mut crate::css::style::StyleEngine>) {
+    /// unit reaches one. An unlink returns the arena's link to the engine, which may go away with it: the caller drops
+    /// it once its reach of the engine has ended.
+    #[must_use]
+    fn apply(
+        self,
+        arena: &mut LayoutNodeArena,
+        engine: Option<&mut crate::css::style::StyleEngine>,
+    ) -> Option<crate::layout::StyleEngineLink> {
         match self {
             ArenaChange::DocumentIsDecodedSvg(is_decoded_svg) => arena.set_document_is_decoded_svg(is_decoded_svg),
             ArenaChange::StyleSnapshotScrollStates(states) => arena.publish_style_snapshot_scroll_states(&states),
@@ -279,7 +285,7 @@ impl ArenaChange {
                 Some(engine) => arena.link_style_engine(link, engine),
                 None => debug_assert!(false, "linking the style engine reaches it"),
             },
-            ArenaChange::UnlinkStyleEngine => arena.unlink_style_engine(),
+            ArenaChange::UnlinkStyleEngine => return arena.unlink_style_engine(),
             ArenaChange::PublishAnchorNames => match engine {
                 Some(engine) => engine.publish_anchor_names(arena),
                 None => debug_assert!(false, "publishing anchor names reaches the engine"),
@@ -287,6 +293,7 @@ impl ArenaChange {
             ArenaChange::Paint(change) => change.apply(arena),
             ArenaChange::CounterStyles { tree_scope, scope } => arena.publish_counter_styles(tree_scope, scope),
         }
+        None
     }
 }
 
@@ -403,11 +410,16 @@ impl RenderState {
             .as_ref()
             .is_some_and(crate::clock_frames::DocumentClock::left_samples_to_adopt);
         let arena = self.arena.arena_mut();
+        let mut unlinked = None;
         let apply = |arena: &mut LayoutNodeArena, mut engine: Option<&mut crate::css::style::StyleEngine>| {
             for change in changes {
                 match change {
                     ArenaChange::DropUnadoptedAnimationSamples if keeps_unadopted => {}
-                    change => change.apply(arena, engine.as_deref_mut()),
+                    change => {
+                        if let Some(link) = change.apply(arena, engine.as_deref_mut()) {
+                            unlinked = Some(link);
+                        }
+                    }
                 }
             }
         };
@@ -419,6 +431,8 @@ impl RenderState {
             let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(face_owner);
             reach.reach(engine, |engine| apply(arena, Some(engine)));
         }
+        // The engine the arena no longer links goes away, if the main thread let go of it, once its reach has ended.
+        drop(unlinked);
         arena.note_changes_taken_in(self.changes.received_through);
     }
 

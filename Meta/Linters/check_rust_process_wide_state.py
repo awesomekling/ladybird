@@ -59,6 +59,7 @@ GROW_ONLY = "process-wide behind a lock or atomic, and only grows; growing asks 
 RENDER_OWNER = "the render owner's registry and protocol: state only the owner thread or only a document thread reaches, or shared by design behind a mutex or atomic"
 SUBMITTED_COUNT = "process-wide atomic count of live submitted stages for a document's arena or style engine; a thread counts its own before it asks, so zero means none of its own is in flight"
 STYLE_ENGINE_TOKEN = "the style engine token's handoff: a stage's lend of the token it holds to its own thread, and the main thread's wait for one to come home"
+RETURNED_ENGINES = "style engine homes the render owner let go of last, handed back behind a mutex and atomic for their own document threads to free"
 
 
 def render_stage_entries(reason, entries):
@@ -83,6 +84,10 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(
         STYLE_ENGINE_TOKEN,
         ["css/style/engine_home.rs:LENT_TO_THIS_THREAD", "css/style/engine_home.rs:MAIN_WAITS_FOR_ARRIVAL"],
+    ),
+    **render_stage_entries(
+        RETURNED_ENGINES,
+        ["css/style/engine_home.rs:RETURNED_HOMES", "css/style/engine_home.rs:HAS_RETURNED_HOMES"],
     ),
     **render_stage_entries(
         CLOCK_HANDOFF,

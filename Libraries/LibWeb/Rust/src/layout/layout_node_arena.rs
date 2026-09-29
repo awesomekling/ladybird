@@ -1018,32 +1018,7 @@ pub(crate) struct StaleWalkFacts {
     pub(crate) next_dom_sibling: Option<StyleNodeID>,
 }
 
-/// The arena's link to the style engine it mirrors.
-///
-/// A stage reaches the engine through the arena only while the document thread, which owns both,
-/// waits for the stage: the tree build walks the style mirror and pins the records it stamps, and
-/// layout and recording look up SVG references and published styles by identity. Those are some
-/// thirty-five engine reads and writes, too many to publish into the arena as rows, so the arena
-/// carries the engine along as a `&mut StyleEngine` would be carried: the link is `Send` exactly
-/// when the engine is.
-#[derive(Clone, Copy)]
-pub(crate) struct StyleEngineLink(crate::css::style::StyleEngineHandle);
-
-impl StyleEngineLink {
-    /// The link of an arena to the style engine `engine` names, which the engine's home makes as the engine is born.
-    pub(crate) fn to(engine: crate::css::style::StyleEngineHandle) -> Self {
-        Self(engine)
-    }
-
-    pub(crate) fn handle(self) -> crate::css::style::StyleEngineHandle {
-        self.0
-    }
-}
-
-// SAFETY: The link stands for an exclusive borrow of the engine, which the compiler checks is
-// `Send`. The engine is only reached through it by whoever holds the arena exclusively, while the
-// engine's owning thread waits for that stage, and the handoff orders those accesses.
-unsafe impl Send for StyleEngineLink where StyleEngine: Send {}
+use crate::css::style::engine_home::StyleEngineLink;
 
 const _: () = {
     const fn assert_send<T: Send>() {}
@@ -1158,7 +1133,7 @@ pub(crate) struct LayoutNodeArena {
     may_have_scroll_snap_areas: Cell<bool>,
     /// The style engine whose mirror the arena's rows are built from, or null before the document
     /// registers it.
-    style_engine: Cell<StyleEngineLink>,
+    style_engine: Cell<Option<StyleEngineLink>>,
     /// The document thread's style-record pin table, which the host's pins on rows go into: they
     /// never enter the engine, so they never wait for a style pass in flight.
     host_style_record_pins: Cell<Option<HostPinsHandle>>,
@@ -1351,7 +1326,7 @@ impl LayoutNodeArena {
             document_style_node: Cell::new(None),
             may_have_auto_content_visibility: Cell::new(false),
             may_have_scroll_snap_areas: Cell::new(false),
-            style_engine: Cell::new(StyleEngineLink(crate::css::style::StyleEngineHandle::null())),
+            style_engine: Cell::new(None),
             host_style_record_pins: Cell::new(None),
             host_hears_box_presence: Cell::new(false),
             host_handbacks: RefCell::new(HostHandbacks::default()),
@@ -2846,11 +2821,11 @@ impl LayoutNodeArena {
     pub(crate) fn set_node_style(&self, id: NodeSlotId, style_record: u64) -> bool {
         self.assert_owner_thread();
         // NB: A test may drive an arena that has no engine, whose rows have no style.
-        let published = (!self.style_engine.get().0.is_null())
+        let published = (!self.style_engine_handle().is_null())
             .then(|| self.with_style_store(|engine| engine.publish_style_record(style_record)))
             .flatten();
         debug_assert!(
-            published.is_some() || self.style_engine.get().0.is_null(),
+            published.is_some() || self.style_engine_handle().is_null(),
             "a row is given the style of a live record"
         );
         self.write_shape(id).set_style(published);
@@ -2955,16 +2930,18 @@ impl LayoutNodeArena {
 
     /// Links the arena to the document's style engine `link` names, which is `engine`.
     pub(crate) fn link_style_engine(&self, link: StyleEngineLink, engine: &mut StyleEngine) {
-        self.style_engine.set(link);
+        let unlinked = self.style_engine.replace(Some(link));
+        debug_assert!(unlinked.is_none(), "an arena links one style engine");
         engine.install_layout_style_snapshots(self.layout_style_snapshots.clone());
         self.host_style_record_pins.set(engine.host_style_record_pins());
     }
 
-    /// Drops the arena's link to its style engine, which the host is about to destroy.
-    pub(crate) fn unlink_style_engine(&self) {
-        self.style_engine
-            .set(StyleEngineLink(crate::css::style::StyleEngineHandle::null()));
+    /// Drops the arena's link to its style engine, which the host is about to destroy, returning the link: the engine
+    /// may go away with it, so the caller drops it once its reach of the engine has ended.
+    #[must_use]
+    pub(crate) fn unlink_style_engine(&self) -> Option<StyleEngineLink> {
         self.host_style_record_pins.set(None);
+        self.style_engine.take()
     }
 
     pub(crate) fn set_document_is_decoded_svg(&self, is_decoded_svg: bool) {
@@ -3174,7 +3151,10 @@ impl LayoutNodeArena {
 
     /// The style engine the arena's nodes take their style from, or null before it has one.
     pub(crate) fn style_engine_handle(&self) -> crate::css::style::StyleEngineHandle {
-        self.style_engine.get().0
+        // SAFETY: The link is only ever replaced whole, and reading its handle reaches nothing that could replace it.
+        unsafe { &*self.style_engine.as_ptr() }
+            .as_ref()
+            .map_or(crate::css::style::StyleEngineHandle::null(), StyleEngineLink::handle)
     }
 
     /// The style engine the arena links, for a read or write of it through the arena, which only the
@@ -3184,7 +3164,7 @@ impl LayoutNodeArena {
     ///
     /// No other borrow of the engine may be live while the returned one is used.
     unsafe fn style_engine<'a>(&self) -> &'a mut StyleEngine {
-        let style_engine = self.style_engine.get().0;
+        let style_engine = self.style_engine_handle();
         assert!(!style_engine.is_null(), "layout node arena has no style record host");
         // SAFETY: The engine outlives the arena's live nodes, and the caller guarantees the rest.
         unsafe { style_engine.reach_linked() }

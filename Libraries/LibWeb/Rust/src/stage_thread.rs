@@ -1344,6 +1344,7 @@ pub(crate) fn send_to_owner(message: crate::render_owner::ToOwner) -> Result<(),
     if on_owner_thread() {
         return Err(message);
     }
+    crate::css::style::engine_home::free_returned_style_engines();
     let thread = stage_thread();
     tsan::release(thread);
     if thread.jobs.send(StageMessage::Owner(message)).is_err() {
