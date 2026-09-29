@@ -164,8 +164,9 @@ mod tests {
         use crate::painting::visual_context::{TransformData, TransformDataRole, VisualContextTree};
         use std::sync::Arc;
 
-        let list = |generation| {
-            Some(Arc::new(HitTestList {
+        let mut lists = crate::lent::Lender::default();
+        let mut list = |generation| {
+            Some(lists.lend(HitTestList {
                 generation,
                 ..Default::default()
             }))

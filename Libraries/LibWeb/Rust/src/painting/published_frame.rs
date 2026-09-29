@@ -71,7 +71,7 @@ pub(crate) struct PublishedRows {
     pub(super) visual_context_tree: Option<Arc<VisualContextTree>>,
     /// The hit-test list of the last recording the document took in, with what a query derives from it built: the
     /// rows are what the list is hit tested over, as a scroll, a clip or a transform moves what a point hits.
-    pub(crate) hit_test_list: Option<Arc<HitTestList>>,
+    pub(crate) hit_test_list: Option<Lent<HitTestList>>,
 }
 
 /// What a document published for one recording to read: its rows, its paint damage and the paint state the recording
