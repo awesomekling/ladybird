@@ -611,6 +611,9 @@ private:
     Vector<StyleNodeID> m_granted_text_style_nodes;
     size_t m_style_node_grant_request { 0 };
     size_t m_pending_arrival_count { 0 };
+    // Only a geometry read defers a transaction, so whether one may be waiting is known here, and the mutations that
+    // must flush it first ask the engine only after a read deferred one.
+    mutable bool m_geometry_read_deferred_transaction { false };
     size_t m_text_style_node_grant_request { 0 };
     bool m_css_transitions_may_observe_style_changes { false };
 };
