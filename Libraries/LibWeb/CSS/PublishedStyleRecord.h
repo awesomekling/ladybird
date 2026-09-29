@@ -35,6 +35,8 @@ public:
     StyleRecordDependencyFlag dependency_flags() const { return static_cast<StyleRecordDependencyFlag>(m_read.view.dependency_flags); }
     u64 custom_property_environment() const { return m_read.custom_property_environment; }
     bool is_animation_overlay() const { return m_read.view.animation_overlay_identity != 0; }
+    // Whether the record styles a counter or a quote.
+    bool affects_generated_content_state() const { return StyleEngineFFI::published_style_record_affects_generated_content_state(m_handle); }
 
 private:
     PublishedStyleRecord(void const* handle, StyleEngineFFI::FfiPublishedStyleRecordRead const& read)
