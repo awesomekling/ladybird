@@ -98,8 +98,10 @@ public:
     WebIDL::ExceptionOr<void> replace_sync(Utf16View text);
 
     void for_each_effective_rule_data(TraversalOrder, Function<void(RustRuleView const&, Utf16View)> const&) const;
-    // Returns whether the match state of any media queries changed after evaluation.
+    // Returns whether the match state of any media queries changed after evaluation. An evaluation records the rule
+    // conditions that flipped since the one before it for the document.
     bool evaluate_media_queries(DOM::Document const&);
+    bool has_evaluated_media_queries_for(DOM::Document const&) const;
     bool evaluate_media_queries(DOM::Document const&, Parser::ValueParserFFI::NativeStyleSheetMediaEvaluation&);
     void reload_fonts_after_media_query_change();
     void synchronize_fonts_after_rule_change();
