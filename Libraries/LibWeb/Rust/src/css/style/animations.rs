@@ -2522,8 +2522,8 @@ unsafe fn committed_transform_reference_box_in_arena(
 /// A pass the host blocks on reads them from the document's layout arena, which the host lends it
 /// for the call. A submitted pass runs beside the main thread, which writes the arena as the DOM
 /// changes, so it never reaches the arena: it takes along the boxes of the nodes the engine knows
-/// to be animated, taken as the pass is submitted, and a node it has no box for is one whose sample
-/// or transition step the engine leaves to the host.
+/// to be animated, taken as the pass is submitted, and a node it has no box for is one whose sample,
+/// or transition step that interpolates `transform`, the engine leaves to the host.
 #[derive(Clone, Copy)]
 pub struct CommittedTransformReferenceBoxes(Source);
 
@@ -2566,6 +2566,20 @@ impl CommittedTransformReferenceBoxes {
                 .copied()
                 .ok_or("a node the submitted pass took no transform reference box along for"),
         }
+    }
+
+    /// The committed transform reference box of `node` for interpolating the longhands `properties`, as
+    /// [`Self::transform_reference_box`] answers it. Only `transform` interpolates against the box, so a pass that took
+    /// no box along for the node still interpolates every other longhand.
+    pub(crate) fn transform_reference_box_interpolating(
+        self,
+        node: StyleNodeID,
+        mut properties: impl Iterator<Item = u16>,
+    ) -> Result<Option<(f64, f64)>, &'static str> {
+        if !properties.any(|property| property == crate::css::property_metadata::property_id::TRANSFORM) {
+            return Ok(None);
+        }
+        self.transform_reference_box(node)
     }
 }
 
@@ -3111,5 +3125,24 @@ mod tests {
         publish(&mut keyframes, TreeScopeID::DOCUMENT, &[("tint", 0x5000)]);
         plan.resolve_keyframes_again(&keyframes);
         assert_eq!(sets(&plan), vec![0, 0x5000]);
+    }
+
+    #[test]
+    fn a_pass_with_no_box_for_a_node_interpolates_every_longhand_but_transform() {
+        use crate::css::property_metadata::property_id;
+
+        let snapshot = CommittedTransformReferenceBoxSnapshot::default();
+        // SAFETY: The snapshot outlives the boxes.
+        let boxes = unsafe { CommittedTransformReferenceBoxes::taken_along(&snapshot) };
+        let node = StyleNodeID::from_raw(1).unwrap();
+        assert_eq!(
+            boxes.transform_reference_box_interpolating(node, [property_id::COLOR, property_id::OPACITY].into_iter()),
+            Ok(None)
+        );
+        assert!(
+            boxes
+                .transform_reference_box_interpolating(node, [property_id::COLOR, property_id::TRANSFORM].into_iter())
+                .is_err()
+        );
     }
 }

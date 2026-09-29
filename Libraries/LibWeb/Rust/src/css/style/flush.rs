@@ -3030,9 +3030,13 @@ impl StyleEngineState {
                     .then_some(new_style_record.raw()),
                 };
                 if let Some(installed) = installed {
+                    // The host decides over the record it holds, which is none below an element that
+                    // entered display:none, even where the engine kept one: such an element has no
+                    // before-change style.
+                    let held_old_style_record = self.held_style_record(node).map_or(0, |_| old_style_record.raw());
                     self.decide_settled_row_transition_step(
                         node,
-                        old_style_record.raw(),
+                        held_old_style_record,
                         new_style_record.raw(),
                         installed,
                         committed_boxes,
