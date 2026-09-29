@@ -261,12 +261,18 @@ impl PartialEq for PublishedStyle {
     }
 }
 
+/// How many rows a chunk of a published column holds. A node written after a publication copies
+/// the chunk the publication shares, and a node's style a reference count per row of it, while the
+/// nodes a layout writes lie scattered over the arena: a chunk holds far fewer rows than one of the
+/// arena's own.
+pub(crate) const PUBLISHED_ROWS_PER_CHUNK: usize = 32;
+
 /// The arena's column of what the paint side reads of every node, which it publishes from, and the
 /// slots its publications retire.
 pub(crate) struct TreeShape {
-    nodes: CowColumn<PaintNode, SLOTS_PER_CHUNK>,
+    nodes: CowColumn<PaintNode, PUBLISHED_ROWS_PER_CHUNK>,
     /// Every node's style owner, beside its row in `nodes`.
-    styles: CowColumn<PublishedStyle, SLOTS_PER_CHUNK>,
+    styles: CowColumn<PublishedStyle, PUBLISHED_ROWS_PER_CHUNK>,
     /// The epoch of the latest publication, while one that holds it is alive.
     latest_epoch: Weak<RetireEpoch>,
     /// Where dropped epochs send the slots they retired.
@@ -329,8 +335,8 @@ impl TreeShape {
         chunks: &[Box<Chunk>],
         style_nodes: &[Cell<Option<StyleNodeID>>],
     ) -> (
-        ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
-        ColumnSnapshot<PublishedStyle, SLOTS_PER_CHUNK>,
+        ColumnSnapshot<PaintNode, PUBLISHED_ROWS_PER_CHUNK>,
+        ColumnSnapshot<PublishedStyle, PUBLISHED_ROWS_PER_CHUNK>,
     ) {
         self.update(chunks, style_nodes);
         (self.nodes.publish(), self.styles.publish())
@@ -388,8 +394,8 @@ impl TreeShape {
 /// the slots freed since, which are not reused while it is alive.
 #[cfg(test)]
 pub(crate) struct PublishedShape {
-    pub(crate) nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
-    pub(crate) styles: ColumnSnapshot<PublishedStyle, SLOTS_PER_CHUNK>,
+    pub(crate) nodes: ColumnSnapshot<PaintNode, PUBLISHED_ROWS_PER_CHUNK>,
+    pub(crate) styles: ColumnSnapshot<PublishedStyle, PUBLISHED_ROWS_PER_CHUNK>,
     pub(crate) retired_slots: RetiredSlots,
 }
 
@@ -450,8 +456,8 @@ impl TreeShape {
 mod tests {
     use crate::cow_column::ColumnSnapshot;
     use crate::layout::LayoutNodeArena;
-    use crate::layout::SLOTS_PER_CHUNK;
     use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId, PaintNode};
+    use crate::layout::tree_shape::PUBLISHED_ROWS_PER_CHUNK;
     use crate::layout::tree_shape::PublishedShape;
 
     fn tree(arena: &mut LayoutNodeArena) -> (NodeSlotId, NodeSlotId, NodeSlotId) {
@@ -466,7 +472,7 @@ mod tests {
         (root, first, second)
     }
 
-    fn node(nodes: &ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>, id: NodeSlotId) -> Option<&PaintNode> {
+    fn node(nodes: &ColumnSnapshot<PaintNode, PUBLISHED_ROWS_PER_CHUNK>, id: NodeSlotId) -> Option<&PaintNode> {
         nodes
             .get(id.slot_index() as usize)
             .filter(|node| node.generation != 0 && node.generation == id.generation())

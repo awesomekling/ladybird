@@ -13,12 +13,10 @@
 //! latest one does not reflect yet: then it asks the owner to publish them again first.
 
 use super::layout_changes::LayoutChange;
-use super::layout_node_arena::{
-    BOUND_ROWS_PER_CHUNK, PSEUDO_ELEMENT_ROWS_PER_CHUNK, PseudoElementRows, SLOTS_PER_CHUNK,
-};
+use super::layout_node_arena::{BOUND_ROWS_PER_CHUNK, PSEUDO_ELEMENT_ROWS_PER_CHUNK, PseudoElementRows};
 use super::node_data::{FfiNodeLink, GENERATED_FOR_FIRST_LETTER, NodeKind, NodeSlotId, PaintNode};
 use super::node_facts;
-use super::tree_shape::PublishedStyle;
+use super::tree_shape::{PUBLISHED_ROWS_PER_CHUNK, PublishedStyle};
 use super::{HostTables, LayoutNodeArena};
 use crate::cow_column::ColumnSnapshot;
 use crate::css::computed_value_views::ComputedValuesView;
@@ -38,10 +36,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 /// changing.
 #[derive(Clone, Default)]
 pub(crate) struct RowSnapshot {
-    pub(super) nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
+    pub(super) nodes: ColumnSnapshot<PaintNode, PUBLISHED_ROWS_PER_CHUNK>,
     /// Every row's style, owned: the snapshot holds a reference on every style record's payloads it reads, so what the
     /// document's style engine reclaims meanwhile does not reach it.
-    pub(super) styles: ColumnSnapshot<PublishedStyle, SLOTS_PER_CHUNK>,
+    pub(super) styles: ColumnSnapshot<PublishedStyle, PUBLISHED_ROWS_PER_CHUNK>,
     /// The row each element is bound to, by its element index, and each text node, by its text index.
     pub(super) element_rows: ColumnSnapshot<NodeSlotId, BOUND_ROWS_PER_CHUNK>,
     pub(super) text_rows: ColumnSnapshot<NodeSlotId, BOUND_ROWS_PER_CHUNK>,
