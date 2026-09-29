@@ -1245,7 +1245,7 @@ pub(crate) struct LayoutNodeArena {
     recording_slot: RefCell<crate::painting::recording_slot::RecordingSlot>,
     // The list the last recording produced. Each published generation of the rows pins the list
     // and the visual context tree as they were when it was published.
-    pub(crate) hit_test_list: RefCell<Option<std::sync::Arc<crate::painting::hit_test::HitTestList>>>,
+    pub(crate) hit_test_list: RefCell<Option<crate::lent::Lent<crate::painting::hit_test::HitTestList>>>,
     // Where the recording stage's workspace waits between runs. It is not a column: nothing
     // outside a running recording may reach it, and it is no part of the committed paint state.
     pub(crate) scrollable_overflow: crate::painting::scrollable_overflow::ScrollableOverflowState,

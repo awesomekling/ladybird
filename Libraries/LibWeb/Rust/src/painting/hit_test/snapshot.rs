@@ -552,7 +552,8 @@ mod tests {
         let mut arena = LayoutNodeArena::new();
         let published_tree = tree();
         arena.paint_state().borrow_mut().visual_context.tree = published_tree.clone();
-        *arena.hit_test_list.get_mut() = Some(Arc::new(HitTestList {
+        let mut lists = crate::lent::Lender::default();
+        *arena.hit_test_list.get_mut() = Some(lists.lend(HitTestList {
             generation: 1,
             spatial_indexes_built: true,
             ..Default::default()
@@ -561,7 +562,7 @@ mod tests {
         let rows = arena.published_rows();
         let snapshot = HitTestSnapshot { rows: &rows };
 
-        *arena.hit_test_list.get_mut() = Some(Arc::new(HitTestList {
+        *arena.hit_test_list.get_mut() = Some(lists.lend(HitTestList {
             generation: 2,
             ..Default::default()
         }));

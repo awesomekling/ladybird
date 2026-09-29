@@ -11,6 +11,7 @@ use super::{PaintPhase, PaintRecorder};
 use crate::css::style::fast_hash::FastSet;
 use crate::layout::node_data::{NodeKind, NodeSlotId};
 use crate::layout::node_facts;
+use crate::lent::Lender;
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::display_list::device_pixels::DevicePixelConverter;
 use crate::painting::display_list::recorder::DisplayListRecorder;
@@ -39,6 +40,7 @@ pub(crate) fn record_display_list(
     inputs: &RecordingInputs<'_>,
     source_frame: Option<Arc<RecordingOutput>>,
     source_items: Option<Arc<PublishedHitTestItems>>,
+    hit_test_lists: &mut Lender<HitTestList>,
     plan_from_prepared_inputs: bool,
     trace: bool,
 ) -> RecordingResult {
@@ -54,6 +56,7 @@ pub(crate) fn record_display_list(
                 inputs,
                 source_frame,
                 source_items,
+                hit_test_lists,
                 plan_from_prepared_inputs,
             )
         };
@@ -77,6 +80,7 @@ fn record_display_list_impl<O: Observer>(
     inputs: &RecordingInputs<'_>,
     source_frame: Option<Arc<RecordingOutput>>,
     source_items: Option<Arc<PublishedHitTestItems>>,
+    hit_test_lists: &mut Lender<HitTestList>,
     plan_from_prepared_inputs: bool,
 ) -> RecordingResult {
     debug_assert!(
@@ -183,12 +187,13 @@ fn record_display_list_impl<O: Observer>(
     // so what a query derives from the list is built here, over the rows it was recorded over.
     hit_test_list.build_spatial_indexes_if_needed();
     hit_test_list.build_caret_lines_if_needed(&paintable_rows);
+    hit_test_lists.take_back_let_go();
     let output = RecordingOutput {
         recorded_structural_epoch: structural_epoch,
         frame_inputs,
         root_background_canvas_rect,
         prologue_bytes,
-        hit_test_list,
+        hit_test_list: hit_test_lists.lend(hit_test_list),
         display_list,
         has_blocking_wheel_event_listeners: recorder.blocking_wheel_event_region_count > 0,
         wheel_event_listener_state_generation: inputs.wheel_event_listener_state_generation,

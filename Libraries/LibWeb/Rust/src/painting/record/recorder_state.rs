@@ -6,6 +6,8 @@
 
 use crate::css::css_pixels::CssPixelRect;
 use crate::layout::node_data::NodeSlotId;
+use crate::lent::Lender;
+use crate::painting::hit_test::HitTestList;
 use crate::painting::record::order_tree::PaintOrderTree;
 use crate::painting::record::scratch::RecordingScratch;
 use crate::painting::record::{PublishedHitTestItems, RecordingOutput};
@@ -28,6 +30,9 @@ pub(crate) struct RecorderState {
     /// The absolute rects the recordings computed, which stay valid while the document's geometry
     /// does.
     pub(crate) absolute_rects: RefCell<AbsoluteRectMemo>,
+    /// The hit-test lists the recordings built, which the document and the render owner read and the recordings drop
+    /// once those let go of them.
+    pub(crate) hit_test_lists: Lender<HitTestList>,
 }
 
 /// Each row's absolute rect, with the geometry epoch of the frame it was computed from.

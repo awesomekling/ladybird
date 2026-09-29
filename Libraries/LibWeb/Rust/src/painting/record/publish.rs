@@ -91,12 +91,12 @@ pub(crate) fn publish_to_host(
 /// the document's hit-test list.
 pub(crate) fn take_in_published_output(
     arena: &LayoutNodeArena,
-    mut output: RecordingOutput,
+    output: RecordingOutput,
     publishes_recording: bool,
 ) -> u64 {
     let mut recording = arena.recording();
     let recorder = recording.recorder();
-    let list = std::mem::take(&mut output.hit_test_list);
+    let list = output.hit_test_list.clone();
     let mut hit_test_list = arena.hit_test_list.borrow_mut();
     let previous_list_is_the_source = hit_test_list
         .as_ref()
@@ -114,7 +114,7 @@ pub(crate) fn take_in_published_output(
                     items: list.items.clone(),
                 }));
         }
-        *hit_test_list = Some(std::sync::Arc::new(list));
+        *hit_test_list = Some(list);
     }
     let output = std::sync::Arc::new(output);
     if publishes_recording {
@@ -153,10 +153,10 @@ mod tests {
                 arena.note_publishing_paint_recording_started();
             }
             let output = RecordingOutput {
-                hit_test_list: HitTestList {
+                hit_test_list: crate::lent::Lender::default().lend(HitTestList {
                     generation: hit_test_generation,
                     ..Default::default()
-                },
+                }),
                 ..Default::default()
             };
             assert_eq!(
