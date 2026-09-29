@@ -1207,29 +1207,39 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
         auto const* media_environment = m_style_computer->ensure_media_environment_for_style_update();
         // The media snapshot may update the active @function definitions. Publish the resulting
         // CSSOM registry only after that update, before any custom-property row resolves it.
-        HashTable<StyleScope const*> visited;
-        struct FunctionScope {
-            StyleScope const* scope;
-            u32 tree_scope;
-        };
-        Vector<FunctionScope> scopes;
-        auto append_scope = [&](StyleScope const& scope, u32 tree_scope) {
-            if (visited.set(&scope) == AK::HashSetResult::InsertedNewEntry)
-                scopes.append({ &scope, tree_scope });
-        };
         auto& document = m_style_computer->document();
-        append_scope(document.style_scope(), document.style_scope().style_engine_tree_scope().value());
-        document.for_each_shadow_root([&](DOM::ShadowRoot& shadow_root) {
-            auto& scope = shadow_root.style_scope();
-            append_scope(scope, scope.style_engine_tree_scope().value());
-        });
-        for (size_t index = 0; index < scopes.size(); ++index) {
-            auto const& scope = *scopes[index].scope;
-            auto tree_scope = scopes[index].tree_scope;
-            scope.for_each_visible_function_definition([&](StyleScope::FunctionDefinitionAndScope const& definition) {
-                custom_functions.append({ .function = definition.function.handle(), .caller_scope = bit_cast<FlatPtr>(&scope), .definition_scope = bit_cast<FlatPtr>(&definition.scope), .tree_scope = tree_scope });
-                append_scope(definition.scope, NumericLimits<u32>::max());
+        // A definition is visible only below a scope holding @function rules, and most documents have none.
+        auto has_function_rules = [](StyleScope const& scope) { return !scope.rule_cache().function_rules_by_name.is_empty(); };
+        auto document_has_function_rules = has_function_rules(document.style_scope());
+        if (!document_has_function_rules) {
+            document.for_each_shadow_root([&](DOM::ShadowRoot& shadow_root) {
+                document_has_function_rules = document_has_function_rules || has_function_rules(shadow_root.style_scope());
             });
+        }
+        if (document_has_function_rules) {
+            HashTable<StyleScope const*> visited;
+            struct FunctionScope {
+                StyleScope const* scope;
+                u32 tree_scope;
+            };
+            Vector<FunctionScope> scopes;
+            auto append_scope = [&](StyleScope const& scope, u32 tree_scope) {
+                if (visited.set(&scope) == AK::HashSetResult::InsertedNewEntry)
+                    scopes.append({ &scope, tree_scope });
+            };
+            append_scope(document.style_scope(), document.style_scope().style_engine_tree_scope().value());
+            document.for_each_shadow_root([&](DOM::ShadowRoot& shadow_root) {
+                auto& scope = shadow_root.style_scope();
+                append_scope(scope, scope.style_engine_tree_scope().value());
+            });
+            for (size_t index = 0; index < scopes.size(); ++index) {
+                auto const& scope = *scopes[index].scope;
+                auto tree_scope = scopes[index].tree_scope;
+                scope.for_each_visible_function_definition([&](StyleScope::FunctionDefinitionAndScope const& definition) {
+                    custom_functions.append({ .function = definition.function.handle(), .caller_scope = bit_cast<FlatPtr>(&scope), .definition_scope = bit_cast<FlatPtr>(&definition.scope), .tree_scope = tree_scope });
+                    append_scope(definition.scope, NumericLimits<u32>::max());
+                });
+            }
         }
         auto const& root_font_metrics = m_style_computer->root_element_font_metrics();
         auto const& initial_font = m_style_computer->document().font_computer().initial_font();
