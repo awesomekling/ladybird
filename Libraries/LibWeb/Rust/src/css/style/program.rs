@@ -293,7 +293,8 @@ struct RuleDeclarationData {
     /// Whether a declaration of a non-inherited property is written `inherit`, or was written with
     /// a value the rule arrived without: only such a rule can make a winner state inherit one.
     may_inherit_a_non_inherited_property: bool,
-    /// Whether a declared property may move layout geometry, including custom properties.
+    /// Whether the rule declares a property that may move layout geometry, or a custom property, whose uses are not
+    /// known until it resolves.
     may_affect_layout_geometry: bool,
     /// The custom properties the rule declares, in declaration order, and the values they were
     /// written with, parallel to them: a custom property resolves from its written spelling.
