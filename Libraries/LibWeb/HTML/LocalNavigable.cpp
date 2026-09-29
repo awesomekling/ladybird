@@ -6491,17 +6491,16 @@ void LocalNavigable::clear_parent_compositor_context()
 
 void LocalNavigable::destroy_compositor_context()
 {
+    (void)take_compositor_context();
+}
+
+OwnPtr<Compositor::CompositorContextHandle> LocalNavigable::take_compositor_context()
+{
     // A frame in flight may hand a frame to the context once it is taken in, so the context is retired first.
     if (has_compositor_context())
         Layout::RustFFI::rust_retire_compositor_context(compositor_context().id().value());
     // The retirement took in a frame in flight that presents to the context.
     VERIFY(!m_presenter->is_lent_to_frame_in_flight());
-    clear_parent_compositor_context();
-    m_compositor_context.clear();
-}
-
-OwnPtr<Compositor::CompositorContextHandle> LocalNavigable::take_compositor_context()
-{
     clear_parent_compositor_context();
     return move(m_compositor_context);
 }
