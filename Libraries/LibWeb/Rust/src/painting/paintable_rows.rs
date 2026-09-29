@@ -489,7 +489,6 @@ pub(crate) struct PaintableRowStore {
     published: Option<PublishedRows>,
     side_data: RefCell<Vec<PaintableSideData>>,
     committed_side_data: RefCell<CowColumn<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>>,
-    row_reset_versions: RefCell<CowColumn<u64, PAINTABLE_SLOTS_PER_CHUNK>>,
     pub(crate) row_paint_states: RefCell<Vec<RowPaintState>>,
     pub(crate) damage: DamageSet,
     visual_context_records: RefCell<Vec<Option<PaintableVisualContextRecord>>>,
@@ -635,17 +634,13 @@ where
         CommittedSideDataRef::Live(self.arena.live_committed_side_data(id))
     }
 
-    /// Identifies the version of the physical row slot. Unlike `NodeSlotId::generation()`, this
-    /// changes when the same node's row is recommitted or cleared as well as when it is freed.
     #[cfg(test)]
     pub(crate) fn paintable_row_reset_version(&self, id: NodeSlotId) -> u64 {
-        *self
-            .arena
+        self.arena
             .paintable_rows
-            .row_reset_versions
-            .borrow()
+            .rows
             .get(id.slot_index() as usize)
-            .unwrap()
+            .map_or(0, |row| row.row_reset_version)
     }
 
     pub(crate) fn clear_cached_overflow_data(&self, id: NodeSlotId) {
@@ -745,9 +740,9 @@ where
     }
 
     pub(crate) fn begin_paintable_row_recommit(&mut self, id: NodeSlotId) {
-        self.bump_paintable_row_reset_version(id);
         {
             let mut data = self.paintable_data_mut(id);
+            data.row_reset_version += 1;
             data.offset = used_values::FfiCssPixelPoint::default();
             data.content_size = used_values::FfiCssPixelSize::default();
             data.local_padding_box_union = used_values::FfiCssPixelRect::default();
@@ -1174,7 +1169,6 @@ impl LayoutNodeArena {
                 visual_context_records.push(None);
             }
             stacking_context_entries.grow_to(side_data.len());
-            store.row_reset_versions.get_mut().grow_to(side_data.len());
             let visual_context_node_handles = store.visual_context_node_handles.get_mut();
             visual_context_node_handles.grow_to(side_data.len());
             publish_visual_context_node_handles(visual_context_node_handles, index, None);
@@ -1185,12 +1179,14 @@ impl LayoutNodeArena {
             committed_side_data
                 .set(index, CommittedSideData::default())
                 .expect("the row was just grown");
+            let row_reset_version = store.rows.get(index).map_or(0, |row| row.row_reset_version);
             store
                 .rows
                 .set(
                     index,
                     PaintableData {
                         slot_generation: layout_node.generation(),
+                        row_reset_version,
                         ..PaintableData::default()
                     },
                 )
@@ -1210,7 +1206,6 @@ impl LayoutNodeArena {
 
     fn reset_paintable_row(&mut self, row_is_still_linked: bool, reset: PaintableRowReset) {
         let id = reset.slot;
-        self.bump_paintable_row_reset_version(id);
         if reset.kind == crate::painting::paintable_data::PaintableRowResetKind::Freed {
             self.paintable_rows.scroll_offsets.forget(id);
             self.paintable_rows.unique_node_ids.forget(id);
@@ -1245,9 +1240,16 @@ impl LayoutNodeArena {
         self.clear_absolute_rect_memo();
         let store = &mut self.paintable_rows;
         let index = id.slot_index() as usize;
+        let row_reset_version = store.rows.get(index).map_or(0, |row| row.row_reset_version) + 1;
         store
             .rows
-            .set(index, PaintableData::default())
+            .set(
+                index,
+                PaintableData {
+                    row_reset_version,
+                    ..PaintableData::default()
+                },
+            )
             .expect("invalid paintable arena slot ID");
         store.side_data.borrow_mut()[index] = PaintableSideData::default();
         store
@@ -1260,17 +1262,6 @@ impl LayoutNodeArena {
         publish_visual_context_node_handles(store.visual_context_node_handles.get_mut(), index, None);
         crate::painting::stacking_context::entries::drop_table(store.stacking_context_entries.get_mut(), index);
         self.flush_committed_box_changes();
-    }
-
-    fn bump_paintable_row_reset_version(&mut self, id: NodeSlotId) {
-        let versions = self.paintable_rows.row_reset_versions.get_mut();
-        let index = id.slot_index() as usize;
-        let version = versions
-            .get(index)
-            .expect("invalid paintable arena slot ID")
-            .checked_add(1)
-            .expect("paintable row reset version overflowed");
-        versions.set(index, version).expect("invalid paintable arena slot ID");
     }
 
     pub(crate) fn paintable_visual_context_record(
@@ -1440,14 +1431,12 @@ impl LayoutNodeArena {
         let unique_node_ids = store.unique_node_ids.ids.get_mut();
         let stacking_context_entries = store.stacking_context_entries.get_mut();
         let visual_context_node_handles = store.visual_context_node_handles.get_mut();
-        let row_reset_versions = store.row_reset_versions.get_mut();
         let Some(published) = &mut store.published else {
             let published = PublishedRows {
                 rows: store.rows.publish(),
                 fragment_links: fragment_links.publish(),
                 side_data: side_data.publish(),
                 unique_node_ids: unique_node_ids.publish(),
-                row_reset_versions: row_reset_versions.publish(),
                 stacking_context_entries: stacking_context_entries.publish(),
                 visual_context_node_handles: visual_context_node_handles.publish(),
                 scroll_offsets: store.scroll_offsets.snapshot(),
@@ -1469,9 +1458,6 @@ impl LayoutNodeArena {
         }
         if unique_node_ids.written_since_publish() {
             published.unique_node_ids = unique_node_ids.publish();
-        }
-        if row_reset_versions.written_since_publish() {
-            published.row_reset_versions = row_reset_versions.publish();
         }
         if stacking_context_entries.written_since_publish() {
             published.stacking_context_entries = stacking_context_entries.publish();

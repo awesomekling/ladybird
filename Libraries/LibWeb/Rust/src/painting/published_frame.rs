@@ -62,8 +62,6 @@ pub(crate) struct PublishedRows {
     pub(super) fragment_links: ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) side_data: ColumnSnapshot<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) unique_node_ids: ColumnSnapshot<(NodeSlotId, i64), PAINTABLE_SLOTS_PER_CHUNK>,
-    /// How many times each row was reset, which a reader holding a row notices a reset by.
-    pub(super) row_reset_versions: ColumnSnapshot<u64, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) stacking_context_entries: ColumnSnapshot<Option<Arc<StackingContextEntries>>, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) visual_context_node_handles:
         ColumnSnapshot<Option<Arc<BoxVisualContextNodeHandles>>, PAINTABLE_SLOTS_PER_CHUNK>,
@@ -240,10 +238,9 @@ impl PublishedRows {
 
     /// How many times the row in slot `id` was reset.
     pub(crate) fn row_reset_version(&self, id: NodeSlotId) -> u64 {
-        self.row_reset_versions
+        self.rows
             .get(id.slot_index() as usize)
-            .copied()
-            .unwrap_or_default()
+            .map_or(0, |row| row.row_reset_version)
     }
 
     pub(crate) fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
