@@ -313,7 +313,9 @@ impl RetainedState {
             context.has_length_resolution_context = true;
             context.length_resolution_context = length_resolution_context;
         }
-        if let Some((width, height)) = committed_boxes.transform_reference_box(node)? {
+        let properties = entries.iter().map(|entry| entry.property_id);
+        let properties = properties.chain(transitions.iter().map(|transition| transition.property_id));
+        if let Some((width, height)) = committed_boxes.transform_reference_box_interpolating(node, properties)? {
             context.has_transform_reference_box = true;
             context.transform_reference_box_width = width;
             context.transform_reference_box_height = height;
@@ -460,6 +462,7 @@ impl RetainedState {
             for_host._values.push(retain(start_value));
             for_host._values.push(retain(end_value));
             started.push(StartedTransition {
+                property_id: action.property_id,
                 effect: PublishedEffect::for_css_transition(action.property_id, retain(start_value), retain(end_value)),
                 row: AnimationTimingRow::for_new_css_transition(
                     node,

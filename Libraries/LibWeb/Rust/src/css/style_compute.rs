@@ -3591,6 +3591,7 @@ pub(crate) fn sample_settled_row(
 /// A transition the pass's decision of a row's transition step starts: the effect `CSSTransition`
 /// builds for it and the row it publishes the moment it starts.
 pub(crate) struct StartedTransition {
+    pub(crate) property_id: u16,
     pub(crate) effect: crate::css::style::animations::PublishedEffect,
     pub(crate) row: crate::css::style::animations::AnimationTimingRow,
     pub(crate) easing: crate::css::style::animations::PublishedEasing,
@@ -3622,7 +3623,13 @@ pub(crate) fn sample_transition_step(
     use crate::css::style::animations;
 
     let pseudo_kind = pseudo.unwrap_or(NO_PSEUDO_ELEMENT);
-    let transform_reference_box = committed_boxes.transform_reference_box(node)?;
+    // A step that removes transitions samples every effect of the element again, and one that only starts some samples
+    // those.
+    let transform_reference_box = match removed {
+        Some(_) => committed_boxes.transform_reference_box(node)?,
+        None => committed_boxes
+            .transform_reference_box_interpolating(node, started.iter().map(|started| started.property_id))?,
+    };
     let environments = match pseudo {
         None => engine.settled_row_custom_property_environments(node),
         Some(kind) => engine.settled_pseudo_element_custom_property_environments(node, kind, installed_style_record),
