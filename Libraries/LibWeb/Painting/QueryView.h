@@ -17,7 +17,7 @@
 #include <LibWeb/Forward.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Painting/BoxModelMetrics.h>
-#include <LibWeb/PixelUnits.h>
+#include <LibWebCommon/PixelUnits.h>
 
 namespace Web::Painting {
 

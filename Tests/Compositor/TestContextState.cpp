@@ -615,6 +615,7 @@ struct ClockTickRecordingWebContentClient final : public Compositor::CompositorS
     virtual void async_scroll_updates(Compositing::CompositorContextId, Compositing::PendingAsyncScrollUpdates const&) override { }
     virtual void create_video_edge(Media::VideoSinkHandle) override { }
     virtual void release_video_edge(Media::VideoSinkHandle) override { }
+    virtual void placeholder_canvas_committed(Compositing::CanvasId, Gfx::IntSize, bool) override { }
 
     size_t rendering_opportunities { 0 };
     Vector<i64> clock_tick_times;
