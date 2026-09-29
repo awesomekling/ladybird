@@ -24,7 +24,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::panic::AssertUnwindSafe;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Condvar, Mutex, OnceLock};
 use std::thread::ThreadId;
@@ -654,14 +654,21 @@ struct StageHold {
     holding_thread: Option<ThreadId>,
 }
 
-fn stage_hold() -> &'static (Mutex<StageHold>, Condvar) {
-    static STAGE_HOLD: OnceLock<(Mutex<StageHold>, Condvar)> = OnceLock::new();
+/// The hold, what announces its changes, and whether a test ever armed one: until one does, no run is held, and the
+/// checks every change the main thread sends and every hold point of a run make go without the lock.
+fn stage_hold() -> &'static (Mutex<StageHold>, Condvar, AtomicBool) {
+    static STAGE_HOLD: OnceLock<(Mutex<StageHold>, Condvar, AtomicBool)> = OnceLock::new();
     STAGE_HOLD.get_or_init(Default::default)
 }
 
 fn lock_stage_hold() -> (std::sync::MutexGuard<'static, StageHold>, &'static Condvar) {
-    let (hold, changed) = stage_hold();
+    let (hold, changed, _) = stage_hold();
     (hold.lock().expect("the stage hold is never poisoned"), changed)
+}
+
+/// Whether no test ever armed a hold, so that none can hold a run.
+fn no_hold_was_ever_armed() -> bool {
+    !stage_hold().2.load(Ordering::Acquire)
 }
 
 /// Makes the stage thread wait at `point` of the next submitted run of the stage `label` names
@@ -682,6 +689,7 @@ pub unsafe extern "C" fn rust_stage_thread_hold_next_submitted_stage(
 ) {
     // SAFETY: Guaranteed by the caller.
     let label = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(label, label_length)) };
+    stage_hold().2.store(true, Ordering::Release);
     let (mut hold, _) = lock_stage_hold();
     hold.armed = Some(ArmedHold {
         label: label.to_owned(),
@@ -800,6 +808,9 @@ pub(crate) fn release_holds_on_recording() {
 /// armed hold holds its run, or until no submitted run it could hold is left. Returns whether the
 /// stage thread holds a run, which the queued stage would wait behind.
 fn stage_thread_holds_run_for_queued_stage() -> bool {
+    if no_hold_was_ever_armed() {
+        return false;
+    }
     let (mut hold, changed) = lock_stage_hold();
     loop {
         if hold.holding.is_some() {
@@ -865,6 +876,9 @@ fn hold_at(point: FfiStageHoldPoint, flight_stage: Option<&'static str>) {
     let Some(run) = RUNNING_SUBMITTED_RUN.with(Cell::get) else {
         return;
     };
+    if no_hold_was_ever_armed() {
+        return;
+    }
     let (mut hold, changed) = lock_stage_hold();
     let holds_run = hold.armed.as_ref().is_some_and(|armed| {
         let held_label = flight_stage
