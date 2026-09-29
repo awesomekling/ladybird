@@ -1021,7 +1021,11 @@ pub(crate) fn ask_devtools(engine: StyleEngineHandle, entry: &'static str, query
 
 fn ask_document(document: DocumentId, entry: &'static str, query: Question) -> StyleAnswer {
     let mut cell = StyleQueryCell::asking(query);
-    let answered = crate::render_owner::ask_engine(document, Query::Engine(cell.for_owner()));
+    let answered = crate::render_owner::ask_engine(
+        document,
+        Query::Engine(cell.for_owner()),
+        crate::render_owner::LockstepProof::engine_door(),
+    );
     let StyleQueryCell { query, answer, retired } = cell;
     // What the owner retired is released here, on the main thread.
     drop(retired);

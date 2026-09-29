@@ -11,6 +11,7 @@ use std::ffi::c_void;
 
 use crate::layout::node_data::NodeSlotId;
 use crate::layout::{ArenaHandle, LayoutNodeArena};
+use crate::render_owner::OwnerWait;
 use crate::stage_thread::{CallerWaits, OwnerReplyTo};
 
 /// A paint preparation pass over a document's render state.
@@ -108,9 +109,11 @@ fn run_and_publish<A, R>(arena: &mut LayoutNodeArena, body: fn(&mut LayoutNodeAr
 }
 
 /// Runs the paint pass `body` with `arguments` over the render state of `arena`'s document on the render owner, sent as
-/// the kind of pass `kind` makes, and waits for its answer. Where the owner does not run it (the calling thread is the
-/// owner, an arena of no document's render state, or a test holds the run it would queue behind), it runs right here.
+/// the kind of pass `kind` makes, and waits for its answer with `wait`. Where the owner does not run it (the calling
+/// thread is the owner, an arena of no document's render state, or a test holds the run it would queue behind), it runs
+/// right here.
 pub(crate) fn run_paint_pass<A, R>(
+    wait: impl OwnerWait,
     arena: &mut LayoutNodeArena,
     kind: fn(Pass<A, R>) -> PaintPass,
     body: fn(&mut LayoutNodeArena, A) -> R,
@@ -120,7 +123,7 @@ pub(crate) fn run_paint_pass<A, R>(
         return run_and_publish(arena, body, arguments);
     }
     // SAFETY: The arena is the first field of its handle, and this thread holds it for the pass.
-    unsafe { run_paint_pass_of(std::ptr::from_mut(arena).cast(), kind, body, arguments) }
+    unsafe { run_paint_pass_of(wait, std::ptr::from_mut(arena).cast(), kind, body, arguments) }
 }
 
 /// Runs the paint pass `body` with `arguments` over the render state of the document whose arena the calling document
@@ -130,6 +133,7 @@ pub(crate) fn run_paint_pass<A, R>(
 ///
 /// `arena` must be a live handle from `layout_arena_create`, on the document thread.
 pub(crate) unsafe fn run_paint_pass_of<A, R>(
+    wait: impl OwnerWait,
     arena: *mut c_void,
     kind: fn(Pass<A, R>) -> PaintPass,
     body: fn(&mut LayoutNodeArena, A) -> R,
@@ -147,6 +151,7 @@ pub(crate) unsafe fn run_paint_pass_of<A, R>(
     }
     let arguments = std::cell::Cell::new(Some(arguments));
     let outcome = crate::stage_thread::wait_for_owner(
+        wait,
         |reply| crate::render_owner::ToOwner::Paint {
             document,
             pass: Box::new(OwnerPaintPass {
@@ -200,6 +205,7 @@ impl<A, R> RunHeldPass for HeldPass<A, R> {
 ///
 /// `arena` must be a live handle from `layout_arena_create`, on the document thread.
 pub(crate) unsafe fn run_held_pass<A: 'static, R: Default + 'static>(
+    wait: impl OwnerWait,
     arena: *mut c_void,
     arguments: A,
     body: fn(&mut LayoutNodeArena, A) -> R,
@@ -213,6 +219,7 @@ pub(crate) unsafe fn run_held_pass<A: 'static, R: Default + 'static>(
     // SAFETY: Guaranteed by the caller. The pass stays on this thread's stack, which waits for it.
     unsafe {
         run_paint_pass_of(
+            wait,
             arena,
             PaintPass::Held,
             // SAFETY: The document thread waits for the pass, with the pass it holds live.

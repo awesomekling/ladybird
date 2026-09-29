@@ -25,7 +25,7 @@ use crate::css::style::published_record::PublishedStyleRecord;
 use crate::css::style::tree::StyleNodeID;
 use crate::lent::Lent;
 use crate::painting::published_frame::{PaintStatus, PublishedPaintFacts, PublishedRows};
-use crate::render_owner::{ChangeSeq, ScriptForcedRead};
+use crate::render_owner::{ChangeSeq, OwnerWait};
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::ffi::c_void;
@@ -113,7 +113,7 @@ impl RowSnapshot {
     ///
     /// As for [`Self::published`].
     #[track_caller]
-    pub(crate) unsafe fn current<'a>(handle: *mut c_void, read: ScriptForcedRead) -> &'a Self {
+    pub(crate) unsafe fn current<'a>(handle: *mut c_void, read: impl OwnerWait) -> &'a Self {
         // SAFETY: Guaranteed by the caller.
         unsafe { Self::published_as_of_sent_changes(handle, Freshness::Current, read) }
     }
@@ -125,7 +125,7 @@ impl RowSnapshot {
     ///
     /// As for [`Self::published`].
     #[track_caller]
-    pub(crate) unsafe fn committed<'a>(handle: *mut c_void, read: ScriptForcedRead) -> &'a Self {
+    pub(crate) unsafe fn committed<'a>(handle: *mut c_void, read: impl OwnerWait) -> &'a Self {
         // SAFETY: Guaranteed by the caller.
         unsafe { Self::published_as_of_sent_changes(handle, Freshness::Committed, read) }
     }
@@ -137,7 +137,7 @@ impl RowSnapshot {
     ///
     /// As for [`Self::published`].
     #[track_caller]
-    pub(crate) unsafe fn settled<'a>(handle: *mut c_void, read: ScriptForcedRead) -> &'a Self {
+    pub(crate) unsafe fn settled<'a>(handle: *mut c_void, read: impl OwnerWait) -> &'a Self {
         // SAFETY: Guaranteed by the caller.
         unsafe { Self::published_as_of_sent_changes(handle, Freshness::Settled, read) }
     }
@@ -147,7 +147,7 @@ impl RowSnapshot {
     /// # Safety
     ///
     /// `handle` must be a live handle on the document thread.
-    pub(crate) unsafe fn current_shared(handle: *mut c_void, read: ScriptForcedRead) -> Lent<Self> {
+    pub(crate) unsafe fn current_shared(handle: *mut c_void, read: impl OwnerWait) -> Lent<Self> {
         // SAFETY: Guaranteed by the caller.
         unsafe { Self::current(handle, read) };
         // SAFETY: As above; the rows were just read, and nothing published since.
@@ -158,7 +158,7 @@ impl RowSnapshot {
     unsafe fn published_as_of_sent_changes<'a>(
         handle: *mut c_void,
         freshness: Freshness,
-        read: ScriptForcedRead,
+        read: impl OwnerWait,
     ) -> &'a Self {
         // SAFETY: Guaranteed by the caller.
         let rows = unsafe { Self::published(handle) };

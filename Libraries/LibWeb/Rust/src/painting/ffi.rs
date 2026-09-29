@@ -24,7 +24,7 @@ use crate::painting::published_frame::{PaintRead, PaintSource};
 use crate::painting::rect_to_viewport_transform::RectToViewportTransform;
 use crate::painting::scroll_chain::ViewportWheelOverflow;
 use crate::painting::svg_filter::SvgFilterPrimitive;
-use crate::render_owner::ScriptForcedRead;
+use crate::render_owner::{LockstepProof, OwnerWait, ScriptForcedRead};
 use libcompositing_rust::ffi::{ffi_slice, tree_from_handle};
 use libgfx_rust::filter::Filter;
 use std::cell::RefCell;
@@ -48,7 +48,8 @@ pub(crate) unsafe fn read_frame<R>(arena: *mut c_void, read: impl FnOnce(&PaintS
 }
 
 /// Reads the paint state of the document whose arena `arena` names through the rows its owner published, as of every
-/// change the document thread sent ([`RowSnapshot::current`]).
+/// change the document thread sent ([`RowSnapshot::current`]), waiting for the owner with `wait` where it has not
+/// published those yet.
 ///
 /// # Safety
 ///
@@ -56,13 +57,13 @@ pub(crate) unsafe fn read_frame<R>(arena: *mut c_void, read: impl FnOnce(&PaintS
 /// owner publish again (it calls nothing of the host).
 pub(crate) unsafe fn read_current<R>(
     arena: *mut c_void,
-    forced: ScriptForcedRead,
+    wait: impl OwnerWait,
     read: impl FnOnce(&PaintSource<'_>) -> R,
 ) -> R {
     let absolute_rects = RefCell::default();
     // SAFETY: Guaranteed by the caller.
     read(&PaintSource::of_rows(
-        unsafe { RowSnapshot::current(arena, forced) },
+        unsafe { RowSnapshot::current(arena, wait) },
         &absolute_rects,
     ))
 }
@@ -75,13 +76,13 @@ pub(crate) unsafe fn read_current<R>(
 /// As for [`read_current`].
 pub(crate) unsafe fn read_committed<R>(
     arena: *mut c_void,
-    forced: ScriptForcedRead,
+    wait: impl OwnerWait,
     read: impl FnOnce(&PaintSource<'_>) -> R,
 ) -> R {
     let absolute_rects = RefCell::default();
     // SAFETY: Guaranteed by the caller.
     read(&PaintSource::of_rows(
-        unsafe { RowSnapshot::committed(arena, forced) },
+        unsafe { RowSnapshot::committed(arena, wait) },
         &absolute_rects,
     ))
 }
@@ -1197,6 +1198,7 @@ pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
     // SAFETY: Guaranteed by the caller.
     unsafe {
         crate::painting::owner_pass::run_paint_pass_of(
+            LockstepProof::host_paint_step(),
             arena,
             crate::painting::owner_pass::PaintPass::AccumulatedVisualContexts,
             |arena, viewport| {
@@ -1352,6 +1354,7 @@ pub unsafe extern "C" fn layout_arena_update_visual_viewport_transform(arena: *m
     // SAFETY: Guaranteed by the caller.
     unsafe {
         crate::painting::owner_pass::run_paint_pass_of(
+            LockstepProof::host_paint_step(),
             arena,
             crate::painting::owner_pass::PaintPass::VisualViewportTransform,
             |arena, ()| update_visual_viewport_transform_stage(arena),
@@ -1436,6 +1439,7 @@ pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
     // SAFETY: Guaranteed by the caller.
     let refresh = unsafe {
         crate::painting::owner_pass::run_paint_pass_of(
+            LockstepProof::host_paint_step(),
             arena,
             crate::painting::owner_pass::PaintPass::ScrollState,
             refresh_scroll_state_stage,
@@ -1767,6 +1771,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
         // SAFETY: Guaranteed by the caller; this thread waits for the pass, which reads the inputs it lends.
         let prepared = unsafe {
             crate::painting::owner_pass::run_held_pass(
+                LockstepProof::recording_on_main(),
                 arena_handle,
                 arguments,
                 |arena, (viewport, inputs, frame_generation)| {
@@ -1791,6 +1796,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     // SAFETY: Guaranteed by the caller; this thread waits for the pass, which reads the inputs it lends.
     unsafe {
         crate::painting::owner_pass::run_held_pass(
+            LockstepProof::recording_on_main(),
             arena_handle,
             arguments,
             |arena, (viewport, inputs, frame_generation)| {
@@ -2459,7 +2465,11 @@ pub unsafe extern "C" fn layout_recording_ticket_publish_in_frame(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_take_in_recording(arena: *mut c_void) {
     // SAFETY: Guaranteed by the caller.
-    unsafe { crate::painting::owner_pass::run_held_pass(arena, (), |arena, ()| drop(arena.recording())) };
+    unsafe {
+        crate::painting::owner_pass::run_held_pass(LockstepProof::recording_on_main(), arena, (), |arena, ()| {
+            drop(arena.recording());
+        });
+    };
 }
 
 /// Runs `handoff(context)`, which hands a navigable's finished frame to its compositor frame sink,
@@ -3049,7 +3059,7 @@ pub unsafe extern "C" fn layout_arena_publish_query_snapshot(
     viewport: crate::painting::query_snapshot::FfiQuerySnapshotViewport,
 ) -> *const c_void {
     // SAFETY: Guaranteed by the caller.
-    let rows = unsafe { RowSnapshot::current_shared(arena, ScriptForcedRead::at_script_entry()) };
+    let rows = unsafe { RowSnapshot::current_shared(arena, LockstepProof::query_snapshot()) };
     crate::painting::query_snapshot::into_handle(crate::painting::query_snapshot::QuerySnapshot::new(rows, &viewport))
 }
 
@@ -4052,13 +4062,18 @@ pub unsafe extern "C" fn layout_arena_publish_compositor_animations(
 ) -> crate::painting::host::FfiCompositorAnimationPublishOutcome {
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        crate::painting::owner_pass::run_held_pass(arena, publish_pending, |arena, publish_pending| {
-            let mut paint_state = arena.paint_state().borrow_mut();
-            crate::painting::visual_context::publish_compositor_animations(
-                &mut paint_state.visual_context,
-                publish_pending,
-            )
-        })
+        crate::painting::owner_pass::run_held_pass(
+            LockstepProof::host_paint_step(),
+            arena,
+            publish_pending,
+            |arena, publish_pending| {
+                let mut paint_state = arena.paint_state().borrow_mut();
+                crate::painting::visual_context::publish_compositor_animations(
+                    &mut paint_state.visual_context,
+                    publish_pending,
+                )
+            },
+        )
     }
 }
 

@@ -838,6 +838,7 @@ impl LayoutNodeArena {
             || self.has_scheduled_scrollable_overflow_recalculation();
         if has_work {
             crate::painting::owner_pass::run_paint_pass(
+                crate::render_owner::LockstepProof::host_paint_step(),
                 self,
                 crate::painting::owner_pass::PaintPass::ScrollableOverflow,
                 |arena, ()| arena.measure_scrollable_overflow_before_publication(),

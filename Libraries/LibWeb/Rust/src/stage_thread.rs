@@ -1676,10 +1676,11 @@ pub(crate) fn owner_work_runs_here() -> bool {
     !on_owner_thread() && has_frame_in_flight() && stage_thread_holds_run_for_queued_stage()
 }
 
-/// Sends the render owner the message `message` makes of where it answers, and waits for the answer. The owner joins
-/// the calling thread for nothing: the thread only waits. Where the calling thread is the owner, or the message would
-/// queue behind a run a test holds, `here` answers right here, as the owner.
+/// Sends the render owner the message `message` makes of where it answers, and waits for the answer, spending `_wait`,
+/// the caller's right to wait. The owner joins the calling thread for nothing: the thread only waits. Where the calling
+/// thread is the owner, or the message would queue behind a run a test holds, `here` answers right here, as the owner.
 pub(crate) fn wait_for_owner<R>(
+    _wait: impl crate::render_owner::OwnerWait,
     message: impl FnOnce(OwnerReplyTo<R>) -> crate::render_owner::ToOwner,
     here: impl FnOnce(&crate::render_owner::Owner) -> R,
 ) -> std::thread::Result<R> {
@@ -1693,6 +1694,7 @@ pub(crate) fn wait_for_owner<R>(
 /// for the answer, as [`wait_for_owner`] does, for what only the owner runs: the owner serves it between the units of
 /// whatever it runs, a run a test holds included. Answers `None` where the calling thread is the owner.
 pub(crate) fn wait_for_owner_thread<R>(
+    _wait: impl crate::render_owner::OwnerWait,
     message: impl FnOnce(OwnerReplyTo<R>) -> crate::render_owner::ToOwner,
 ) -> Option<std::thread::Result<R>> {
     (!on_owner_thread()).then(|| send_and_wait(stage_thread(), message))

@@ -9,7 +9,7 @@
 //! mint the capability nor call an entry that does.
 
 use super::*;
-use crate::render_owner::ScriptForcedRead;
+use crate::render_owner::{LockstepProof, ScriptForcedRead};
 
 pub(crate) struct MainThreadFfiEntry {
     _private: (),
@@ -35,7 +35,7 @@ unsafe extern "C" fn layout_arena_scrolling_box_for_scroll_step(
     };
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
+        read_committed(arena, LockstepProof::input_reads_boxes(), |paintable_rows| {
             let scrolling_box = crate::painting::scroll_chain::scrolling_box_for_scroll_step(
                 paintable_rows,
                 target,
@@ -70,7 +70,7 @@ unsafe extern "C" fn layout_arena_for_each_wheel_scrollable_box_in_containing_bl
     };
     // SAFETY: Guaranteed by the caller.
     let boxes = unsafe {
-        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
+        read_committed(arena, LockstepProof::input_reads_boxes(), |paintable_rows| {
             let mut boxes = Vec::new();
             crate::painting::scroll_chain::for_each_wheel_scrollable_box_in_containing_block_chain(
                 paintable_rows,
@@ -106,7 +106,7 @@ unsafe extern "C" fn layout_arena_first_wheel_scrollable_box_in_containing_block
     };
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
+        read_committed(arena, LockstepProof::input_reads_boxes(), |paintable_rows| {
             let scrollable_box = crate::painting::scroll_chain::first_wheel_scrollable_box_in_containing_block_chain(
                 paintable_rows,
                 start,
@@ -124,7 +124,7 @@ unsafe extern "C" fn layout_arena_first_wheel_scrollable_box_in_containing_block
 unsafe extern "C" fn layout_arena_paintable_event_dispatch_slot(arena: *mut c_void, slot: NodeSlotId) -> NodeSlotId {
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
+        read_committed(arena, LockstepProof::input_reads_boxes(), |paintable_rows| {
             crate::painting::hit_test::resolve::event_dispatch_slot_for_paintable(paintable_rows, slot)
                 .map_or(NodeSlotId::INVALID, |slot| live_slot(paintable_rows, slot))
         })
@@ -162,6 +162,7 @@ unsafe extern "C" fn layout_arena_prepare_for_rendering(
     // SAFETY: Guaranteed by the caller.
     let preparation = unsafe {
         run_paint_pass_of(
+            LockstepProof::host_paint_step(),
             arena,
             PaintPass::PrepareForRendering,
             crate::painting::ffi::prepare_for_rendering,
@@ -179,6 +180,7 @@ unsafe extern "C" fn layout_arena_prepare_for_rendering(
     // SAFETY: As above.
     unsafe {
         run_paint_pass_of(
+            LockstepProof::host_paint_step(),
             arena,
             PaintPass::FinishRenderingPreparation,
             |arena, (background_source_changed, visual_context_update_pending)| {
@@ -203,7 +205,7 @@ unsafe extern "C" fn layout_arena_for_each_snap_area(
 ) {
     // SAFETY: Guaranteed by the caller.
     let areas = unsafe {
-        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
+        read_committed(arena, LockstepProof::scroll_snaps(), |paintable_rows| {
             let mut areas = Vec::new();
             crate::painting::scroll_snap::for_each_snap_area(paintable_rows, snap_container, |slot, area| {
                 areas.push((slot, area));
@@ -272,7 +274,7 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_last_recording_missed_vector_images(arena: *mut c_void) -> bool {
     // SAFETY: Guaranteed by the caller.
-    unsafe { RowSnapshot::current(arena, ScriptForcedRead::at_script_entry()) }
+    unsafe { RowSnapshot::current(arena, LockstepProof::recording_on_main()) }
         .paint_status
         .last_recording_missed_vector_images
 }
@@ -289,17 +291,22 @@ unsafe extern "C" fn layout_arena_discard_retired_recording(arena: *mut c_void) 
     let generation = unsafe { crate::layout::frame_retirement::frame_generation(arena) };
     // SAFETY: As above; this thread waits for the pass.
     let discarded = unsafe {
-        crate::painting::owner_pass::run_held_pass(arena, generation, |arena, generation| {
-            let mut recording = arena.recording();
-            let retired = recording
-                .pending_recording()
-                .as_ref()
-                .is_some_and(|pending| pending.frame_generation != generation);
-            if retired {
-                recording.discard_pending_recording();
-            }
-            retired
-        })
+        crate::painting::owner_pass::run_held_pass(
+            LockstepProof::recording_on_main(),
+            arena,
+            generation,
+            |arena, generation| {
+                let mut recording = arena.recording();
+                let retired = recording
+                    .pending_recording()
+                    .as_ref()
+                    .is_some_and(|pending| pending.frame_generation != generation);
+                if retired {
+                    recording.discard_pending_recording();
+                }
+                retired
+            },
+        )
     };
     if discarded {
         crate::layout::frame_retirement::note_frame_retired();
@@ -319,16 +326,21 @@ unsafe extern "C" fn layout_arena_publish_recording(
 ) {
     // SAFETY: Guaranteed by the caller; this thread waits for the pass, which reaches the resource storage it lends.
     let presented = unsafe {
-        crate::painting::owner_pass::run_held_pass(arena, publish, |arena, publish| {
-            let pending = arena.recording().pending_recording().take();
-            if let Some(pending) = pending {
-                let publish = crate::painting::host::RecordingPublishHost::from(publish);
-                // SAFETY: This is a paint pass the document thread waits for.
-                let publication = crate::painting::host::WaitedPublication::new();
-                crate::painting::record::publish::publish_recording(arena, pending, &publication, &publish);
-            }
-            FfiPresentedRecording::of_last_recording(arena)
-        })
+        crate::painting::owner_pass::run_held_pass(
+            LockstepProof::recording_on_main(),
+            arena,
+            publish,
+            |arena, publish| {
+                let pending = arena.recording().pending_recording().take();
+                if let Some(pending) = pending {
+                    let publish = crate::painting::host::RecordingPublishHost::from(publish);
+                    // SAFETY: This is a paint pass the document thread waits for.
+                    let publication = crate::painting::host::WaitedPublication::new();
+                    crate::painting::record::publish::publish_recording(arena, pending, &publication, &publish);
+                }
+                FfiPresentedRecording::of_last_recording(arena)
+            },
+        )
     };
     // SAFETY: Guaranteed by the caller.
     unsafe { out.write(presented) };
@@ -351,7 +363,7 @@ unsafe extern "C" fn layout_arena_publish_svg_filter_image_frames(
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: Guaranteed by the caller.
     let frames = crate::painting::svg_paint_resources::published_filter_image_frames_in(
-        &unsafe { RowSnapshot::current(arena, ScriptForcedRead::at_script_entry()) }
+        &unsafe { RowSnapshot::current(arena, LockstepProof::recording_on_main()) }
             .paint_facts
             .svg_paint_resources,
     );
@@ -375,7 +387,7 @@ unsafe extern "C" fn layout_arena_take_recording_trace(
 ) -> bool {
     // SAFETY: Guaranteed by the caller.
     let trace = unsafe {
-        crate::painting::owner_pass::run_held_pass(arena, (), |arena, ()| {
+        crate::painting::owner_pass::run_held_pass(LockstepProof::recording_on_main(), arena, (), |arena, ()| {
             let pending = arena.recording().pending_recording_trace().take()?;
             let recording = arena.paint_state().borrow().last_recording.clone()?;
             let log = recording.capture_log_for_verification.as_ref()?;
@@ -684,7 +696,9 @@ unsafe extern "C" fn layout_arena_sync_svg_paint_resources(
     // What to resolve of the enrolled resources, where they changed: each reaches the DOM, which the main thread does.
     // SAFETY: Guaranteed by the caller.
     let Some(requests) = (unsafe {
-        crate::painting::owner_pass::run_held_pass(arena, (), |arena, ()| svg_paint_resource_requests(arena))
+        crate::painting::owner_pass::run_held_pass(LockstepProof::host_paint_step(), arena, (), |arena, ()| {
+            svg_paint_resource_requests(arena)
+        })
     }) else {
         return false;
     };
@@ -726,8 +740,11 @@ unsafe extern "C" fn layout_arena_sync_svg_paint_resources(
     }
     // SAFETY: As above.
     unsafe {
-        crate::painting::owner_pass::run_held_pass(arena, resolved, |arena, resolved| {
-            publish_resolved_svg_paint_resources(arena, resolved)
-        })
+        crate::painting::owner_pass::run_held_pass(
+            LockstepProof::host_paint_step(),
+            arena,
+            resolved,
+            publish_resolved_svg_paint_resources,
+        )
     }
 }
