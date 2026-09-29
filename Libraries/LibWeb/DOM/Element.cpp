@@ -1392,9 +1392,16 @@ static void for_each_box_in_inclusive_subtree(Painting::BoxSlot const& root, Cal
 }
 
 struct ElementDependentInvalidationState {
-    Painting::BoxSlot box;
+    // A pseudo-element's box, looked up ahead so that a snapshot takes what is read of it before it goes. An element's
+    // box is looked up where a move reads it, which most moves do not.
+    Painting::BoxSlot pseudo_element_box;
     Optional<ValueComparingRefPtr<CSS::CounterStyle const>> list_counter_style;
     bool has_snapshot { false };
+
+    Painting::BoxSlot box(DOM::AbstractElement const& abstract_element) const
+    {
+        return abstract_element.pseudo_element().has_value() ? pseudo_element_box : Painting::BoxSlot::bound_to(abstract_element.element());
+    }
 
     // The counter style the box's marker renders from. Only a list item renders a marker, so only its counter style
     // can matter; a display change to or from list-item rebuilds the box regardless. It is resolved from the style the
@@ -1412,10 +1419,10 @@ struct ElementDependentInvalidationState {
 
     void snapshot(CSS::StyleScope const& style_scope)
     {
-        if (!box)
+        if (!pseudo_element_box)
             return;
-        list_counter_style = list_counter_style_of(box, style_scope);
-        box = {};
+        list_counter_style = list_counter_style_of(pseudo_element_box, style_scope);
+        pseudo_element_box = {};
         has_snapshot = true;
     }
 };
@@ -1521,8 +1528,8 @@ static void add_element_dependent_invalidation(CSS::StyleDrainScope const& scope
         }
     };
 
-    if (old_state.box) {
-        compare(ElementDependentInvalidationState::list_counter_style_of(old_state.box, abstract_element.element().style_scope()));
+    if (auto box = old_state.box(abstract_element)) {
+        compare(ElementDependentInvalidationState::list_counter_style_of(box, abstract_element.element().style_scope()));
     } else if (old_state.has_snapshot) {
         compare(old_state.list_counter_style);
     }
@@ -1632,13 +1639,13 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
         auto pseudo_element_style = computed_style(pseudo_element);
         auto const* pseudo_element_values = pseudo_element_style ? &*pseudo_element_style : nullptr;
         ElementDependentInvalidationState old_state {
-            .box = Painting::BoxSlot::of_pseudo_element(*this, pseudo_element),
+            .pseudo_element_box = Painting::BoxSlot::of_pseudo_element(*this, pseudo_element),
             .list_counter_style = {},
             .has_snapshot = false,
         };
         RefPtr<CSS::ComputedValues const> style_to_preserve_for_detachment;
         if (pseudo_element_values && pseudo_element_values->animated_properties()) {
-            auto had_layout_node = !!old_state.box;
+            auto had_layout_node = !!old_state.pseudo_element_box;
             old_state.snapshot(style_scope());
             if (had_layout_node)
                 style_to_preserve_for_detachment = CSS::ComputedValues::Builder { *pseudo_element_values }.build();
@@ -2345,11 +2352,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         }
         CSS::ComputedStyleRecordView new_computed_values { published_new_style_record };
         VERIFY(new_computed_values);
-        ElementDependentInvalidationState old_state {
-            .box = Painting::BoxSlot::bound_to(*this),
-            .list_counter_style = {},
-            .has_snapshot = false,
-        };
+        ElementDependentInvalidationState old_state;
         DOM::AbstractElement abstract_element { *this };
         CSS::StyleEngine::StyleRecordDelta style_record_delta {
             .old_style_record = old_style_record,
@@ -2419,11 +2422,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
     if (style_record != style_record_before_installation) {
         auto new_computed_values = computed_style();
         VERIFY(new_computed_values);
-        ElementDependentInvalidationState old_state {
-            .box = Painting::BoxSlot::bound_to(*this),
-            .list_counter_style = {},
-            .has_snapshot = false,
-        };
+        ElementDependentInvalidationState old_state;
         DOM::AbstractElement abstract_element { *this };
         CSS::StyleEngine::StyleRecordDelta style_record_delta {
             .old_style_record = style_record_before_installation,
