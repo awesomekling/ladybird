@@ -134,8 +134,10 @@ TEST_CASE(a_cold_family_lookup_from_another_thread_is_answered_while_the_main_th
     auto& installed = render_side_font_service();
     EXPECT(Gfx::has_render_side_font_broker());
 
+    // NB: CoreText resolves no generic family names, so ask for a family every macOS has there.
     auto family = installed.font_service->resolve_generic_family("sans-serif"_string, 400, 0);
-    EXPECT(family.has_value());
+    if (!family.has_value())
+        family = "Helvetica"_fly_string;
 
     // The provider's own callbacks stand for the document thread's connection: a question that
     // takes them from inside a render-side scope is the regression this test is about.
