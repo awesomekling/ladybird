@@ -6459,7 +6459,8 @@ pub(crate) fn transition_entries(
     let (writing_mode, direction) = computed_writing_mode_and_direction(table);
 
     let mut entries: Vec<crate::css::transition::FfiTransitionEntry> = Vec::new();
-    let mut entry_indices = vec![usize::MAX; usize::from(crate::css::property_metadata::LAST_LONGHAND_PROPERTY_ID) + 1];
+    // Where each longhand's entry is in `entries`, so a longhand named again takes the later entry's place.
+    let mut entry_indices = [u16::MAX; crate::css::property_metadata::LAST_LONGHAND_PROPERTY_ID as usize + 1];
     let mut properties = Vec::new();
     for (index, property_value) in property_values.iter().enumerate() {
         let transition_property = match property_value.data() {
@@ -6472,23 +6473,29 @@ pub(crate) fn transition_entries(
         };
         properties.clear();
         append_transition_longhands(&mut properties, transition_property, &mut || (writing_mode, direction));
+        // A `transition: all` entry names every longhand, and each takes the same attributes.
+        let delay = time_value_to_milliseconds(delay_values[index % delay_values.len()].data());
+        let duration = time_value_to_milliseconds(duration_values[index % duration_values.len()].data());
+        let timing_function = timing_function_values[index % timing_function_values.len()].pointer();
+        let behavior = match behavior_values[index % behavior_values.len()].data() {
+            StyleValueData::Keyword { keyword } => keyword_to_transition_behavior(*keyword).unwrap(),
+            _ => unreachable!("computed transition-behavior must be a keyword"),
+        };
+        entries.reserve(properties.len());
         for &property_id in &properties {
             let entry = crate::css::transition::FfiTransitionEntry {
                 property_id,
-                delay: time_value_to_milliseconds(delay_values[index % delay_values.len()].data()),
-                duration: time_value_to_milliseconds(duration_values[index % duration_values.len()].data()),
-                timing_function: timing_function_values[index % timing_function_values.len()].pointer(),
-                behavior: match behavior_values[index % behavior_values.len()].data() {
-                    StyleValueData::Keyword { keyword } => keyword_to_transition_behavior(*keyword).unwrap(),
-                    _ => unreachable!("computed transition-behavior must be a keyword"),
-                },
+                delay,
+                duration,
+                timing_function,
+                behavior,
             };
             match entry_indices[usize::from(property_id)] {
-                usize::MAX => {
-                    entry_indices[usize::from(property_id)] = entries.len();
+                u16::MAX => {
+                    entry_indices[usize::from(property_id)] = entries.len() as u16;
                     entries.push(entry);
                 }
-                index => entries[index] = entry,
+                index => entries[usize::from(index)] = entry,
             }
         }
     }
