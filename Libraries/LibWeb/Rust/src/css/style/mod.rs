@@ -1084,6 +1084,10 @@ pub struct HostState {
     /// The compositions the engine published as elements' records since whoever reached it last was done with it, in
     /// order, which the engine's home takes over with the news.
     pub(super) compositions_published: Vec<(StyleNodeID, u64)>,
+    /// The rules the main thread compiled that the engine published since whoever reached it last was done with it,
+    /// which go back with the news for the main thread to free.
+    #[expect(clippy::vec_box, reason = "the rules go back boxed as they came")]
+    pub(super) published_rules: Vec<Box<crate::css::rule::compilation::CompiledRules>>,
     /// What the owner decided of each pseudo-element row it answered last, with the record the row moved to, which the
     /// engine's home takes over for the host's drain: whether the counter styles the row's generated content names
     /// differ from the ones its box was built with, as a `CONTENT_COUNTER_STYLES_*` answer.

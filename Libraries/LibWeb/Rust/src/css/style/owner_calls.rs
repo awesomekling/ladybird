@@ -284,7 +284,10 @@ impl EngineChange {
                 let added = engine.add_sheet(object, origin);
                 debug_assert!(added == sheet, "the engine numbers its sheets as the main thread does");
             }
-            Self::CompileRules(compiled) => compiled.publish(engine),
+            Self::CompileRules(mut compiled) => {
+                compiled.publish(engine);
+                engine.host.published_rules.push(compiled);
+            }
             Self::SetTreeScopeAnimationKeyframes {
                 tree_scope,
                 shadow_root_identity,
