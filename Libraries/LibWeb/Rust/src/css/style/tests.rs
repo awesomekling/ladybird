@@ -521,13 +521,6 @@ fn set_atom_feature(engine: &mut StyleEngine, node: StyleNodeID, feature: LocalF
     );
 }
 
-fn prepare_route_liveness(engine: &mut StyleEngine) {
-    let retained = &mut engine.retained;
-    std::sync::Arc::get_mut(&mut retained.routing)
-        .expect("routing is not shared outside a planning epoch")
-        .prepare_route_liveness(&retained.program, &retained.programs);
-}
-
 /// Take a style transaction and every later wave of its pass, as the host does when it installs
 /// each wave; nothing is installed here.
 fn take_every_wave(
@@ -540,6 +533,13 @@ fn take_every_wave(
         engine.take_style_transaction(root, &mut emit);
     }
     scoped
+}
+
+fn prepare_route_liveness(engine: &mut StyleEngine) {
+    let retained = &mut engine.retained;
+    std::sync::Arc::get_mut(&mut retained.routing)
+        .expect("routing is not shared outside a planning epoch")
+        .prepare_route_liveness(&retained.program, &retained.programs);
 }
 
 fn discard_transaction(engine: &mut StyleEngine) {
