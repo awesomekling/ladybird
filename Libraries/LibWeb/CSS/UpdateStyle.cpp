@@ -204,6 +204,21 @@ static void apply_layout_tree_rebuild_after_style_change(DOM::Element& element, 
         element.set_needs_layout_tree_rebuild(DOM::SetNeedsLayoutTreeUpdateReason::StyleChange, invalidation.layout_tree_rebuild_root());
 }
 
+// The storage of the drain that ended last, which the next one fills again rather than growing its own from nothing.
+static Vector<StyleEffectDrain::RenderEffect> s_spare_render_effects;
+
+StyleEffectDrain::StyleEffectDrain()
+    : m_render_effects(move(s_spare_render_effects))
+{
+}
+
+StyleEffectDrain::~StyleEffectDrain()
+{
+    m_render_effects.clear_with_capacity();
+    if (m_render_effects.capacity() > s_spare_render_effects.capacity())
+        s_spare_render_effects = move(m_render_effects);
+}
+
 void StyleEffectDrain::install(DOM::Document& document, Function<void(StyleDrainScope const&)> const& install)
 {
     auto& style_engine = document.render_inputs_for_write().style_engine();
@@ -396,7 +411,7 @@ void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Docu
     }
     // The rows registered their anchor names, and each name they moved is published once.
     StyleEngineFFI::style_engine_publish_anchor_names(scope, scope.engine().rust_handle());
-    m_render_effects.clear();
+    m_render_effects.clear_with_capacity();
     m_pseudo_element_style_records.clear();
 }
 
@@ -479,6 +494,7 @@ static StyleEngineTransaction accept_style_engine_transaction(DOM::Document& doc
         document.render_inputs_for_write().style_engine().set_published_batch_waits(true);
     }
     auto const& style_engine = style_computer.style_engine();
+    transaction.reactions.ensure_capacity(published_transaction.reactions.size());
     for (auto const& answer : published_transaction.reactions) {
         // The complete answer remains in Rust transaction scratch under this node. The identity
         // names both the semantic reaction and the payload that consumes it.
@@ -488,7 +504,7 @@ static StyleEngineTransaction accept_style_engine_transaction(DOM::Document& doc
             VERIFY(style_engine.style_node_was_retired_beside_pass(StyleNodeID { answer.style_node }));
             continue;
         }
-        transaction.reactions.append(answer);
+        transaction.reactions.unchecked_append(answer);
     }
 
     transaction.only_derived_child_reactions = published_transaction.only_derived_child_reactions;

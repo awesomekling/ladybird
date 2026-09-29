@@ -398,7 +398,7 @@ public:
     [[nodiscard]] CSS::PublishedStyleRecord const* published_style_record(Optional<CSS::PseudoElement> = {}) const;
     u64 animation_style_generation() const { return m_animation_style_generation; }
     u64 animation_subtree_style_generation() const { return m_animation_subtree_style_generation; }
-    [[nodiscard]] bool has_style(Optional<CSS::PseudoElement> pseudo_element = {}) const { return !!style_record_identity(pseudo_element); }
+    [[nodiscard]] bool has_style(Optional<CSS::PseudoElement> pseudo_element = {}) const { return published_style_record(pseudo_element) != nullptr; }
     // What the display of the record the element holds is, read without the engine: a style pass in flight owns the
     // engine's record store, and a DOM mutation beside it asks these.
     [[nodiscard]] bool installed_display_is_contents() const { return m_installed_display_is_contents; }
