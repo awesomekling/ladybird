@@ -4358,8 +4358,9 @@ pub(crate) unsafe fn sample_installed_record_for_clock_tick(
 
 /// Takes the next sample of what the clock ticks of a document left for the host to adopt, as the
 /// host took it (`rust_document_clock_take_adoption`): the element's style node and the record it
-/// held before the tick, and whether the arena took the sample's record ahead of the host. False
-/// once none is left.
+/// held before the tick, and whether the arena took the sample's record ahead of the host. The
+/// sample's record comes with it, which the caller owns a reference of (`published_style_record_release`),
+/// or null where the engine could not take the sample. False once none is left.
 ///
 /// # Safety
 /// The out pointers must be valid for writes, and the tick taken back.
@@ -4369,6 +4370,7 @@ pub unsafe extern "C" fn style_engine_clock_tick_take_entry(
     style_record_before: *mut u64,
     installed_in_arena: *mut bool,
     sample: *mut FfiRowSampledInPass,
+    sampled_record: *mut *const c_void,
 ) -> bool {
     let Some(entry) = crate::clock_frames::take_clock_tick_entry() else {
         return false;
@@ -4377,8 +4379,18 @@ pub unsafe extern "C" fn style_engine_clock_tick_take_entry(
     unsafe {
         *node = entry.style_node.raw();
         *style_record_before = entry.style_record_before.get();
-        *installed_in_arena = entry.installed_in_arena;
-        sample.write(entry.sample);
+        match entry.sampled {
+            Some(sampled) => {
+                *installed_in_arena = sampled.installed_in_arena;
+                sample.write(sampled.sample);
+                *sampled_record = super::published_record::into_handle(sampled.record);
+            }
+            None => {
+                *installed_in_arena = false;
+                sample.write(FfiRowSampledInPass::absent());
+                *sampled_record = std::ptr::null();
+            }
+        }
     }
     true
 }

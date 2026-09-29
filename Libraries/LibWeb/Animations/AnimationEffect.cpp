@@ -17,6 +17,7 @@
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/PublishedStyleRecord.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleDrainScope.h>
 #include <LibWeb/CSS/StyleEffectDrain.h>
@@ -1060,8 +1061,10 @@ static void install_taken_engine_sample(CSS::StyleDrainScope const& scope, DOM::
         apply_published_animation_overlay(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, caller_applies_invalidation);
 }
 
-void adopt_clock_tick_sample(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleRecordID style_record_before_tick, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample, bool installed_in_arena, bool presented_on_render_side)
+void adopt_clock_tick_sample(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleRecordID style_record_before_tick, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample, [[maybe_unused]] CSS::PublishedStyleRecord const& sampled_record, bool installed_in_arena, bool presented_on_render_side)
 {
+    // The caller holds the sample's record, so the engine still holds it for the element to install.
+    ASSERT(sampled_record.identity().value() == sample.style_record);
     auto installed = InstalledInArena::No;
     if (installed_in_arena)
         installed = presented_on_render_side ? InstalledInArena::YesAndPresented : InstalledInArena::Yes;
