@@ -157,15 +157,23 @@ unsafe extern "C" fn layout_arena_prepare_for_rendering(
     visual_context_update_pending: bool,
 ) -> FfiRenderingPreparationOutcome {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    use crate::painting::ffi::RenderingPreparation;
     use crate::painting::owner_pass::{PaintPass, run_paint_pass_of};
     // SAFETY: Guaranteed by the caller.
-    let (background_source_changed, clamped) = unsafe {
+    let preparation = unsafe {
         run_paint_pass_of(
             arena,
-            PaintPass::RootBackgroundAndOverflow,
-            |arena, ()| crate::painting::ffi::root_background_and_overflow(arena),
-            (),
+            PaintPass::PrepareForRendering,
+            crate::painting::ffi::prepare_for_rendering,
+            visual_context_update_pending,
         )
+    };
+    let (background_source_changed, clamped) = match preparation {
+        RenderingPreparation::Prepared(outcome) => return outcome,
+        RenderingPreparation::ClampedScrollOffsets {
+            background_source_changed,
+            clamped,
+        } => (background_source_changed, clamped),
     };
     crate::painting::scrollable_overflow::hand_over_clamped_scroll_offsets(&main_thread, clamped);
     // SAFETY: As above.

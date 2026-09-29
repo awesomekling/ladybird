@@ -9,16 +9,16 @@
 
 use std::ffi::c_void;
 
-use crate::css::css_pixels::CssPixelPoint;
 use crate::layout::node_data::NodeSlotId;
 use crate::layout::{ArenaHandle, LayoutNodeArena};
 use crate::stage_thread::{CallerWaits, OwnerReplyTo};
 
 /// A paint preparation pass over a document's render state.
 pub(crate) enum PaintPass {
-    /// Prepares the root background and the scrollable overflow, and answers whether the root background source
-    /// changed, with the scroll offsets the new overflow clamped.
-    RootBackgroundAndOverflow(Pass<(), (bool, Vec<(NodeSlotId, CssPixelPoint)>)>),
+    /// Prepares the root background and the scrollable overflow, and finishes preparing the document for rendering
+    /// unless the new overflow clamped scroll offsets, which the document thread stores first; given whether a visual
+    /// context update is pending.
+    PrepareForRendering(Pass<bool, crate::painting::ffi::RenderingPreparation>),
     /// Finishes preparing the document for rendering, given whether the root background source changed and whether a
     /// visual context update is pending.
     FinishRenderingPreparation(Pass<(bool, bool), crate::painting::ffi::FfiRenderingPreparationOutcome>),
@@ -62,7 +62,7 @@ impl<A, R> Pass<A, R> {
 impl PaintPass {
     fn run(self, state: impl FnOnce() -> *mut ArenaHandle) {
         match self {
-            Self::RootBackgroundAndOverflow(pass) => pass.run(state),
+            Self::PrepareForRendering(pass) => pass.run(state),
             Self::FinishRenderingPreparation(pass) => pass.run(state),
             Self::AccumulatedVisualContexts(pass) => pass.run(state),
             Self::VisualViewportTransform(pass) => pass.run(state),
