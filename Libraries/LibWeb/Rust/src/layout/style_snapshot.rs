@@ -11,6 +11,7 @@
 //! observes a partly committed table. The published generation changes in place; it is copied only
 //! where a reader still holds it.
 
+use crate::css::style::published_record::PublishedStyleRecord;
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::used_values::FfiCssPixelSize;
 use crate::layout::{LayoutNodeArena, node_data::NodeSlotId};
@@ -26,7 +27,6 @@ pub(crate) struct LayoutStyleSnapshotRow {
     pub(crate) scrollable: u8,
     pub(crate) scrolled: u8,
     pub(crate) layout_commit_generation: u64,
-    pub(crate) style_record: u64,
     pub(crate) has_committed_box: bool,
     pub(crate) writing_mode: u8,
 }
@@ -47,6 +47,9 @@ pub struct FfiLayoutStyleScrollState {
 struct SnapshotGeneration {
     layout_commit_generation: u64,
     rows: Vec<Option<LayoutStyleSnapshotRow>>,
+    /// The style each row's box was committed with, as the engine published it: holding it keeps the record live for
+    /// as long as the generation names it, however far the element's style moved on since.
+    committed_styles: Vec<Option<Arc<PublishedStyleRecord>>>,
 }
 
 impl SnapshotGeneration {
@@ -61,14 +64,26 @@ impl SnapshotGeneration {
         }
         Some(self.rows[index].get_or_insert_default())
     }
+
+    fn set_committed_style(&mut self, node: StyleNodeID, style: Option<Arc<PublishedStyleRecord>>) {
+        let Some(index) = node.element_index().map(|index| index as usize) else {
+            return;
+        };
+        if self.committed_styles.len() <= index {
+            if style.is_none() {
+                return;
+            }
+            self.committed_styles.resize(index + 1, None);
+        }
+        self.committed_styles[index] = style;
+    }
 }
 
-#[derive(Clone, Copy)]
 pub(crate) struct CommittedGeometry {
     node: StyleNodeID,
     content_width_raw: i32,
     content_height_raw: i32,
-    style_record: u64,
+    style: Option<Arc<PublishedStyleRecord>>,
     has_committed_box: bool,
     writing_mode: u8,
 }
@@ -96,7 +111,7 @@ impl LayoutStyleSnapshotCommit {
         size: FfiCssPixelSize,
         has_committed_box: bool,
         writing_mode: u8,
-        style_record: u64,
+        style: Option<Arc<PublishedStyleRecord>>,
     ) {
         debug_assert!(
             self.layout_commit_generation.is_some(),
@@ -110,7 +125,7 @@ impl LayoutStyleSnapshotCommit {
             node,
             content_width_raw: size.width.raw_value(),
             content_height_raw: size.height.raw_value(),
-            style_record,
+            style,
             has_committed_box,
             writing_mode,
         });
@@ -140,9 +155,9 @@ impl LayoutStyleSnapshotStore {
             row.content_width_raw = geometry.content_width_raw;
             row.content_height_raw = geometry.content_height_raw;
             row.layout_commit_generation = generation;
-            row.style_record = geometry.style_record;
             row.has_committed_box = geometry.has_committed_box;
             row.writing_mode = geometry.writing_mode;
+            next.set_committed_style(geometry.node, geometry.style);
         }
     }
 
@@ -184,12 +199,22 @@ impl LayoutStyleSnapshotStore {
                 && let Some(row) = next.rows.get_mut(index as usize)
             {
                 *row = None;
+                next.set_committed_style(*node, None);
             }
         }
     }
 
     pub(crate) fn row(&self, node: StyleNodeID) -> Option<LayoutStyleSnapshotRow> {
         self.published.read().unwrap().row(node).copied()
+    }
+
+    /// The style the node's committed box was laid out with, where it has one.
+    pub(crate) fn committed_box_style(&self, node: StyleNodeID) -> Option<Arc<PublishedStyleRecord>> {
+        let published = self.published.read().unwrap();
+        if !published.row(node)?.has_committed_box {
+            return None;
+        }
+        published.committed_styles.get(node.element_index()? as usize)?.clone()
     }
 }
 
@@ -239,7 +264,7 @@ impl LayoutNodeArena {
             size,
             has_committed_box,
             writing_mode,
-            self.node_style_record(node),
+            self.data(node).style.owner(),
         );
     }
 
@@ -299,7 +324,7 @@ mod tests {
             },
             true,
             crate::css::css_enums::writing_mode::HORIZONTAL_TB,
-            17,
+            None,
         );
         assert!(store.row(node).is_none());
         store.finish_layout_commit(&mut commit);
@@ -309,7 +334,6 @@ mod tests {
                 content_width_raw: 11,
                 content_height_raw: 13,
                 layout_commit_generation: 7,
-                style_record: 17,
                 has_committed_box: true,
                 ..Default::default()
             })
@@ -327,7 +351,7 @@ mod tests {
             FfiCssPixelSize::default(),
             true,
             crate::css::css_enums::writing_mode::HORIZONTAL_TB,
-            19,
+            None,
         );
         store.finish_layout_commit(&mut commit);
         store.publish_scroll_states(&[FfiLayoutStyleScrollState {
@@ -339,7 +363,6 @@ mod tests {
         }]);
         let row = store.row(node).unwrap();
         assert!(row.has_committed_box);
-        assert_eq!(row.style_record, 19);
         assert_eq!((row.stuck, row.snapped, row.scrollable, row.scrolled), (1, 2, 4, 8));
         store.retire(&[node]);
         assert!(store.row(node).is_none());

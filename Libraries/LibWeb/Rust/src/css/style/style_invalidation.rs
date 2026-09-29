@@ -758,10 +758,11 @@ impl RetainedState {
         old_style_record: u64,
         animated_overlay: *const AnimatedOverlay,
     ) -> bool {
-        let old_record = self
-            .computed_group_sets
-            .style_record_view(old_style_record)
-            .unwrap_or_else(|| panic!("old style record {old_style_record:#x} is not live"));
+        // A record someone compares against is live for as long as they hold it; one gone anyway changed everything.
+        let Some(old_record) = self.computed_group_sets.style_record_view(old_style_record) else {
+            debug_assert!(false, "old style record {old_style_record:#x} is not live");
+            return true;
+        };
         let old_overlay = unsafe { old_record.animated_overlay.as_ref() };
         let new_overlay = unsafe { animated_overlay.as_ref() };
         animation_overlay_properties(old_overlay, new_overlay)
@@ -775,10 +776,16 @@ impl RetainedState {
         payloads: &[SharedPayload],
         is_document_element: bool,
     ) -> FfiAnimationInvalidation {
-        let old_record = self
-            .computed_group_sets
-            .style_record_view(old_style_record)
-            .unwrap_or_else(|| panic!("old style record {old_style_record:#x} is not live"));
+        let Some(old_record) = self.computed_group_sets.style_record_view(old_style_record) else {
+            debug_assert!(false, "old style record {old_style_record:#x} is not live");
+            return FfiAnimationInvalidation {
+                invalidation: StyleInvalidation::full().pack(),
+                changed_non_inherited_style_groups: (1 << payloads.len()) - 1,
+                requires_base_style_recomputation: true,
+                requires_layout_node_style_application: true,
+                requires_style_resource_update: true,
+            };
+        };
         assert_eq!(payloads.len(), old_record.payloads.len());
         let old_overlay = unsafe { old_record.animated_overlay.as_ref() };
         let new_overlay = unsafe { animated_overlay.as_ref() };
@@ -856,14 +863,16 @@ impl RetainedState {
         if let Some(result) = self.style_invalidation_cache.get(&key) {
             return *result | FfiStyleInvalidationField::CacheHit as u32;
         }
-        let old_record = self
-            .computed_group_sets
-            .style_record_view(old_style_record)
-            .unwrap_or_else(|| panic!("old style record {old_style_record:#x} is not live"));
-        let new_record = self
-            .computed_group_sets
-            .style_record_view(new_style_record)
-            .unwrap_or_else(|| panic!("new style record {new_style_record:#x} is not live"));
+        let (Some(old_record), Some(new_record)) = (
+            self.computed_group_sets.style_record_view(old_style_record),
+            self.computed_group_sets.style_record_view(new_style_record),
+        ) else {
+            debug_assert!(
+                false,
+                "compared style records {old_style_record:#x} and {new_style_record:#x} are not both live"
+            );
+            return StyleInvalidation::full().pack();
+        };
         let old_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(old_record.payloads));
         let new_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(new_record.payloads));
         let old_table = unsafe { old_record.longhand_table.deref() };

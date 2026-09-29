@@ -371,6 +371,13 @@ impl FinalStyleRecordID {
     }
 }
 
+/// Whether a record someone named by its identity is live, which it is for as long as anyone holds it as published or
+/// pinned; a debug assertion otherwise, and the reader finds no record.
+fn named_record_is_live(live: bool) -> Option<()> {
+    debug_assert!(live, "base style-record is not live");
+    live.then_some(())
+}
+
 struct AnimationOverlayRecord {
     // NB: No sampled value enters a permanent interning table. The current assignment owns one
     //     reference, while detached layout and stabilization baselines can pin an old generation.
@@ -392,6 +399,15 @@ struct AnimationOverlayRecord {
     is_assigned: bool,
     /// Whether the slot waits in `retired_animation_overlay_slots` for the host to let go of it.
     is_retired: bool,
+}
+
+impl AnimationOverlayRecord {
+    /// Whether anyone besides the engine holds the record as it was published (a layout row, a publication of the
+    /// rows, a change on its way to the owner), and so may name it to the engine again. Only the engine hands the
+    /// value out, so a count of one cannot grow while the engine decides.
+    fn is_held_as_published(&self) -> bool {
+        self.published.get().is_some_and(|record| Arc::strong_count(record) > 1)
+    }
 }
 
 /// What a caller of `publish` still owns of the components being interned, and, on the way back,
@@ -1898,7 +1914,11 @@ impl ComputedGroupSets {
                 Some(overlay.effective_custom_property_environment),
             )
         } else {
-            let Some(base) = previous_style_record.base_record() else {
+            // A previous record the engine reclaimed meanwhile names whatever took its index since.
+            let Some(base) = previous_style_record
+                .base_record()
+                .filter(|&base| self.style_record_generation_is_live(base, previous_style_record.base_generation()))
+            else {
                 return;
             };
             (base, None)
@@ -2080,9 +2100,9 @@ impl ComputedGroupSets {
         }
     }
 
-    /// Reclaims a slot the engine no longer assigns or pins, unless the host pins its record or may
-    /// be pinning it beside a pass in flight: then the slot is retired until the host's table,
-    /// read again, lets go of it.
+    /// Reclaims a slot the engine no longer assigns or pins, unless the host pins its record, may be
+    /// pinning it beside a pass in flight, or holds it as published: then the slot is retired until
+    /// the host lets go of it.
     fn reclaim_or_retire_animation_overlay_slot(&mut self, slot: u32) {
         let host_pins = self.host_pins;
         let record = self.animation_overlay_slots[slot as usize]
@@ -2093,7 +2113,7 @@ impl ComputedGroupSets {
         if record.is_retired {
             return;
         }
-        if host_pins.may_pin(record.final_style_record.raw()) {
+        if host_pins.may_pin(record.final_style_record.raw()) || record.is_held_as_published() {
             record.is_retired = true;
             self.retired_animation_overlay_slots.push(slot);
             return;
@@ -2117,7 +2137,7 @@ impl ComputedGroupSets {
                 record.is_retired = false;
                 continue;
             }
-            if host_pins.may_pin(record.final_style_record.raw()) {
+            if host_pins.may_pin(record.final_style_record.raw()) || record.is_held_as_published() {
                 self.retired_animation_overlay_slots.push(slot);
                 continue;
             }
@@ -2202,6 +2222,7 @@ impl ComputedGroupSets {
             if current.pin_count == 0
                 && !current.is_retired
                 && !self.host_pins.may_pin(current.final_style_record.raw())
+                && !current.is_held_as_published()
             {
                 let old_final_style_record = current.final_style_record;
                 let old_payload_bytes = size_of_val(current.payloads.as_slice()) as u64;
@@ -2606,10 +2627,9 @@ impl ComputedGroupSets {
     ) -> Option<FinalStyleRecordID> {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         let requested_style_record_identity = final_style_record.base_record()?;
-        assert!(
+        named_record_is_live(
             self.style_record_generation_is_live(requested_style_record_identity, final_style_record.base_generation()),
-            "base style-record is not live"
-        );
+        )?;
         let previous_base_style_record_identity = if target.is_pseudo() {
             self.pseudo_row(target.node, target.pseudo_kind)
                 .and_then(|row| row.assignment)
@@ -3887,10 +3907,7 @@ impl ComputedGroupSets {
             return (!record.payloads.is_empty()).then_some(&record.payloads);
         }
         let style_record = final_style_record.base_record()?;
-        assert!(
-            self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-            "base style-record is not live"
-        );
+        named_record_is_live(self.style_record_generation_is_live(style_record, final_style_record.base_generation()))?;
         let record = self.style_records.get_index(style_record.index())?;
         self.sets[record.groups].payloads.as_ref()
     }
@@ -3900,20 +3917,16 @@ impl ComputedGroupSets {
         self.debug_assert_style_record_is_published(raw_style_record);
         let (base_style_record, overlay_holds_image_values) =
             if let Some(style_record) = final_style_record.base_record() {
-                assert!(
+                named_record_is_live(
                     self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-                    "base style-record is not live"
-                );
+                )?;
                 (style_record, false)
             } else {
                 let slot = *self.animation_overlay_slots_by_record.get(&final_style_record)?;
                 let overlay = self.animation_overlay_slots[slot as usize].as_ref()?;
                 (overlay.base_style_record, overlay.holds_image_values)
             };
-        assert!(
-            self.style_record_is_live(base_style_record),
-            "base style-record is not live"
-        );
+        named_record_is_live(self.style_record_is_live(base_style_record))?;
         let record = self.style_records.get_index(base_style_record.index())?;
         Some(
             self.computed_fixed_metadata.get(record.fixed_metadata).dependency_flags
@@ -3926,10 +3939,9 @@ impl ComputedGroupSets {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         let base_style_record = match final_style_record.base_record() {
             Some(style_record) => {
-                assert!(
+                named_record_is_live(
                     self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-                    "base style-record is not live"
-                );
+                )?;
                 style_record
             }
             None => {
@@ -3937,10 +3949,7 @@ impl ComputedGroupSets {
                 self.animation_overlay_slots[slot as usize].as_ref()?.base_style_record
             }
         };
-        assert!(
-            self.style_record_is_live(base_style_record),
-            "base style-record is not live"
-        );
+        named_record_is_live(self.style_record_is_live(base_style_record))?;
         let record = self.style_records.get_index(base_style_record.index())?;
         Some(
             self.group_identities(record.groups)
@@ -3968,10 +3977,9 @@ impl ComputedGroupSets {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         let base_style_record = match final_style_record.base_record() {
             Some(style_record) => {
-                assert!(
+                named_record_is_live(
                     self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-                    "base style-record is not live"
-                );
+                )?;
                 style_record
             }
             None => {
@@ -3979,10 +3987,7 @@ impl ComputedGroupSets {
                 self.animation_overlay_slots[slot as usize].as_ref()?.base_style_record
             }
         };
-        assert!(
-            self.style_record_is_live(base_style_record),
-            "base style-record is not live"
-        );
+        named_record_is_live(self.style_record_is_live(base_style_record))?;
         let identity = self
             .style_records
             .get_index(base_style_record.index())?
@@ -4000,11 +4005,9 @@ impl ComputedGroupSets {
         self.debug_assert_style_record_is_published(raw_style_record);
         let (base_style_record, payloads, animation_overlay_identity, animated_overlay) =
             if let Some(style_record) = final_style_record.base_record() {
-                let live = self.style_record_generation_is_live(style_record, final_style_record.base_generation());
-                debug_assert!(live, "base style-record is not live");
-                if !live {
-                    return None;
-                }
+                named_record_is_live(
+                    self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
+                )?;
                 let record = self.style_records.get_index(style_record.index())?;
                 (
                     style_record,
@@ -4022,11 +4025,7 @@ impl ComputedGroupSets {
                     HostShared::new(std::ptr::from_ref(overlay.animated_overlay.as_ref())),
                 )
             };
-        let live = self.style_record_is_live(base_style_record);
-        debug_assert!(live, "base style-record is not live");
-        if !live {
-            return None;
-        }
+        named_record_is_live(self.style_record_is_live(base_style_record))?;
         let record = self.style_records.get_index(base_style_record.index())?;
         let base_payloads = self.sets[record.groups].payloads();
         let fixed_metadata = self
@@ -4143,21 +4142,31 @@ impl ComputedGroupSets {
         }
     }
 
+    /// The slot of an animation-overlay record someone named, which holds it for as long as anyone holds the record
+    /// as published or pinned; a debug assertion otherwise, and no slot.
+    fn named_animation_overlay_slot(&self, style_record: FinalStyleRecordID) -> Option<u32> {
+        let slot = self.animation_overlay_slots_by_record.get(&style_record).copied();
+        debug_assert!(slot.is_some(), "animation-overlay record is live");
+        slot
+    }
+
     pub fn pin_style_record(&mut self, raw_style_record: u64) {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         if let Some(style_record) = final_style_record.base_record() {
-            assert!(
+            if named_record_is_live(
                 self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-                "base style-record is not live"
-            );
+            )
+            .is_none()
+            {
+                return;
+            }
             let pin_count = self.base_style_record_pins.entry(style_record).or_default();
             *pin_count = pin_count.checked_add(1).expect("base style-record pin count overflow");
             return;
         }
-        let slot = *self
-            .animation_overlay_slots_by_record
-            .get(&final_style_record)
-            .expect("animation-overlay record is live");
+        let Some(slot) = self.named_animation_overlay_slot(final_style_record) else {
+            return;
+        };
         let record = self.animation_overlay_slots[slot as usize]
             .as_mut()
             .expect("animation-overlay slot is live");
@@ -4183,10 +4192,13 @@ impl ComputedGroupSets {
     pub fn unpin_style_record(&mut self, raw_style_record: u64) {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         if let Some(style_record) = final_style_record.base_record() {
-            assert!(
+            if named_record_is_live(
                 self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-                "base style-record is not live"
-            );
+            )
+            .is_none()
+            {
+                return;
+            }
             let std::collections::hash_map::Entry::Occupied(mut entry) =
                 self.base_style_record_pins.entry(style_record)
             else {
@@ -4199,10 +4211,9 @@ impl ComputedGroupSets {
             }
             return;
         }
-        let slot = *self
-            .animation_overlay_slots_by_record
-            .get(&final_style_record)
-            .expect("animation-overlay record is live");
+        let Some(slot) = self.named_animation_overlay_slot(final_style_record) else {
+            return;
+        };
         let record = self.animation_overlay_slots[slot as usize]
             .as_mut()
             .expect("animation-overlay slot is live");
@@ -4772,6 +4783,85 @@ mod tests {
         assert!(sets.style_record_is_held(second.style_record_identity.raw()));
         sets.remove(node);
         assert_eq!(sets.live_animation_overlay_records(), 0);
+    }
+
+    /// A layout row holds the animation overlay it was given as the engine published it until the change that moves
+    /// the row on reaches the owner: the node moving off the overlay leaves the slot to the retired sweep, and the
+    /// row's box can still pin the record by its identity as it leaves the document.
+    #[test]
+    fn an_animation_overlay_held_as_published_outlives_its_node_moving_on() {
+        let mut sets = ComputedGroupSets::default();
+        let _pins = host_pins_lent_to(&mut sets);
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut first_metadata = metadata(0, 0, 0);
+        first_metadata.animation_overlay_identity = 1;
+        first_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let first = sets
+            .publish_unowned(Some(target), &[], 0, 0, first_metadata)
+            .style_record_identity
+            .raw();
+        let row = sets.publish_style_record(first).expect("the overlay is live");
+
+        let mut second_metadata = metadata(0, 0, 0);
+        second_metadata.animation_overlay_identity = 2;
+        second_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let second = sets.publish_unowned(Some(target), &[], 0, 0, second_metadata);
+        assert_ne!(first, second.style_record_identity.raw());
+        sets.reclaim_retired_animation_overlays();
+        assert!(sets.style_record_is_held(first));
+        sets.pin_style_record(first);
+        sets.unpin_style_record(first);
+
+        // The row moves on too: nothing holds the old overlay now.
+        drop(row);
+        sets.reclaim_retired_animation_overlays();
+        assert!(!sets.style_record_is_held(first));
+        assert!(sets.style_record_is_held(second.style_record_identity.raw()));
+        sets.remove(node);
+        assert_eq!(sets.live_animation_overlay_records(), 0);
+    }
+
+    /// The layout snapshot names the style a container's box was committed with, which the element may have moved on
+    /// from many times over before the next layout: the snapshot holds the record live, so a container query can
+    /// still read it.
+    #[test]
+    fn a_record_a_layout_snapshot_holds_outlives_its_node_moving_on() {
+        use crate::layout::style_snapshot::{LayoutStyleSnapshotCommit, LayoutStyleSnapshotStore};
+        let mut sets = ComputedGroupSets::default();
+        let node = StyleNodeID::element(1);
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let committed = publish_owned(&mut sets, target, &owned_payloads(2), owned_longhand_table())
+            .style_record_identity
+            .raw();
+        let snapshots = LayoutStyleSnapshotStore::default();
+        let mut commit = LayoutStyleSnapshotCommit::default();
+        commit.begin(1);
+        commit.push(
+            node,
+            crate::layout::used_values::FfiCssPixelSize::default(),
+            true,
+            crate::css::css_enums::writing_mode::HORIZONTAL_TB,
+            sets.publish_style_record(committed),
+        );
+        snapshots.finish_layout_commit(&mut commit);
+        let current = publish_owned(&mut sets, target, &owned_payloads(3), owned_longhand_table())
+            .style_record_identity
+            .raw();
+        assert_ne!(committed, current);
+
+        sets.reclaim_unreachable();
+        let committed_style = snapshots.committed_box_style(node).expect("the box was committed");
+        assert_eq!(committed_style.style_record, committed);
+        assert!(sets.style_record_view(committed).is_some());
+        drop(committed_style);
+
+        // The element leaves: nothing holds the committed record now.
+        snapshots.retire(&[node]);
+        sets.reclaim_unreachable();
+        assert!(!sets.style_record_is_held(committed));
+        assert!(sets.style_record_view(current).is_some());
     }
 
     #[test]

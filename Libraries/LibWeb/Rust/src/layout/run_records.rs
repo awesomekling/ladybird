@@ -158,7 +158,8 @@ impl LayoutScratch {
         }
         let slot = &mut records[slot_index as usize];
         if slot.nonce == run_nonce {
-            return RunRecordClaim::AlreadyClaimed;
+            slot.record = record;
+            return RunRecordClaim::ClaimedAgain;
         }
         // Runs nest, so the nonces of the runs in progress ascend. An entry left by a run that returned is free.
         if slot.nonce != 0 && self.live_run_nonces.borrow().binary_search(&slot.nonce).is_ok() {
@@ -204,7 +205,7 @@ impl Drop for InnermostRunGuard<'_> {
 
 enum RunRecordClaim {
     Claimed,
-    AlreadyClaimed,
+    ClaimedAgain,
     HeldByEnclosingRun,
 }
 
@@ -265,16 +266,18 @@ impl<'arena> RunRecords<'arena> {
     }
 
     pub(crate) fn register(&self, node: Node, used: UsedValues) -> &UsedValues {
-        let slot_index = node.slot_index();
-        let registered_twice = || -> ! {
-            panic!(
-                "slot {} registered twice in the run rooted at slot {}",
-                slot_index,
-                self.root.slot_index()
-            )
-        };
-        if node == self.root && self.root_used.is_some() {
-            registered_twice();
+        // A run registers each node once. Should it register one twice anyway, as a layout over a tree whose facts
+        // disagreed with its style once did, the later record takes the node's place, and whoever holds the earlier
+        // one goes on reading it.
+        if node == self.root
+            && let Some(root_used) = self.root_used
+        {
+            debug_assert!(
+                false,
+                "the root of the run at slot {} registered twice",
+                node.slot_index()
+            );
+            return root_used;
         }
         assert_eq!(
             self.scratch.innermost_run_nonce(),
@@ -284,15 +287,22 @@ impl<'arena> RunRecords<'arena> {
         let stack_index = u32::try_from(self.scratch.run_record_stack.length())
             .expect("a layout pass holds fewer than 2^32 run records");
         let record = self.scratch.run_record_stack.push(used);
-        match self.scratch.claim_run_record(slot_index, self.nonce, stack_index) {
-            RunRecordClaim::Claimed => {}
-            RunRecordClaim::AlreadyClaimed => registered_twice(),
+        let registered_twice = match self
+            .scratch
+            .claim_run_record(node.slot_index(), self.nonce, stack_index)
+        {
+            RunRecordClaim::Claimed => false,
+            RunRecordClaim::ClaimedAgain => true,
             RunRecordClaim::HeldByEnclosingRun => {
-                if self.records_outside_table.borrow_mut().insert(node, record).is_some() {
-                    registered_twice();
-                }
+                self.records_outside_table.borrow_mut().insert(node, record).is_some()
             }
-        }
+        };
+        debug_assert!(
+            !registered_twice,
+            "slot {} registered twice in the run rooted at slot {}",
+            node.slot_index(),
+            self.root.slot_index()
+        );
         // SAFETY: The record stays on the stack until this run returns, which ends this borrow of the run.
         unsafe { record.as_ref() }
     }
