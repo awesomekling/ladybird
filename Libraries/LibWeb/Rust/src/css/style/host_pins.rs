@@ -26,7 +26,6 @@
 
 use super::fast_hash::FastMap;
 use std::cell::{Cell, RefCell};
-use std::ptr::NonNull;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 /// A write the render owner made to the document thread's table, which the table takes in before
@@ -133,102 +132,124 @@ impl HostStyleRecordPins {
     }
 }
 
-/// What the engine may know of the document thread's pins.
-#[derive(Clone, Copy, Default)]
+/// How the engine holds the document thread's table: while the document thread waits on it, the engine may read it;
+/// beside a pass in flight, the document thread may pin any record at any moment.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub(crate) enum HostPinsLend {
-    /// No host pins records: an engine a test or a replay drives.
     #[default]
-    NoHost,
-    /// The document thread waits on the engine, which may read its table.
-    Lent(HostPinsHandle),
-    /// A pass runs beside the document thread, which may pin any record at any moment.
-    BesideFlight(HostPinsHandle),
+    Lent,
+    BesideFlight,
 }
 
-impl HostPinsLend {
+/// The document thread's pins as the engine holds them: the table, which no host pins in when a test or a replay
+/// drives the engine, and whether it is lent now.
+#[derive(Default)]
+pub(crate) struct HostPins {
+    table: Option<HostPinTable>,
+    lend: HostPinsLend,
+}
+
+impl HostPins {
+    pub(crate) fn new(table: HostPinTable) -> Self {
+        Self {
+            table: Some(table),
+            lend: HostPinsLend::Lent,
+        }
+    }
+
+    /// The table, as long as the engine lives: whoever holds it pins in it without entering the engine.
+    pub(crate) fn table(&self) -> Option<&HostPinTable> {
+        self.table.as_ref()
+    }
+
+    /// The table, when the engine may read it.
+    pub(crate) fn lent_table(&self) -> Option<&HostStyleRecordPins> {
+        match (&self.table, self.lend) {
+            // SAFETY: The document thread waits on the engine while the table is lent.
+            (Some(table), HostPinsLend::Lent) => Some(unsafe { table.pins() }),
+            _ => None,
+        }
+    }
+
     /// Whether the host holds a pin on `record`, or may take one before the engine can know.
-    pub(crate) fn may_pin(self, record: u64) -> bool {
-        match self {
-            Self::NoHost => false,
-            Self::Lent(handle) => {
-                // SAFETY: The document thread waits on the engine while the table is lent.
-                let table = unsafe { handle.0.as_ref() };
-                table.has_pins_waiting_for_frame() || table.is_pinned(record)
-            }
-            Self::BesideFlight(_) => true,
+    pub(crate) fn may_pin(&self, record: u64) -> bool {
+        match self.lent_table() {
+            Some(table) => table.has_pins_waiting_for_frame() || table.is_pinned(record),
+            None => self.table.is_some(),
         }
     }
 
     /// Whether the engine has to leave every record it would reclaim for later: beside a pass in
     /// flight, or while a pin the host promised waits for the frame in flight.
-    pub(crate) fn defers_reclamation(self) -> bool {
-        match self {
-            Self::NoHost => false,
-            // SAFETY: As for `may_pin`.
-            Self::Lent(handle) => unsafe { handle.0.as_ref() }.has_pins_waiting_for_frame(),
-            Self::BesideFlight(_) => true,
+    pub(crate) fn defers_reclamation(&self) -> bool {
+        match self.lent_table() {
+            Some(table) => table.has_pins_waiting_for_frame(),
+            None => self.table.is_some(),
         }
     }
 
-    /// The table, when the engine may read it.
-    pub(crate) fn table(&self) -> Option<&HostStyleRecordPins> {
-        match self {
-            // SAFETY: As for `may_pin`.
-            Self::Lent(handle) => Some(unsafe { handle.0.as_ref() }),
-            Self::NoHost | Self::BesideFlight(_) => None,
-        }
+    /// Stops lending the table while the engine runs beside the document thread, and returns how it was lent, which
+    /// [`Self::restore`] lends it as again once it no longer does.
+    pub(crate) fn lend_beside(&mut self) -> HostPinsLend {
+        std::mem::replace(&mut self.lend, HostPinsLend::BesideFlight)
     }
 
-    /// The table itself, whatever the engine may read of it now.
-    pub(crate) fn handle(self) -> Option<HostPinsHandle> {
-        match self {
-            Self::NoHost => None,
-            Self::Lent(handle) | Self::BesideFlight(handle) => Some(handle),
-        }
-    }
-
-    /// Stops lending the table to a pass that runs beside the document thread.
-    pub(crate) fn beside_flight(self) -> Self {
-        match self {
-            Self::Lent(handle) => Self::BesideFlight(handle),
-            other => other,
-        }
-    }
-
-    /// Lends the table again once the document thread has taken the frame back.
-    pub(crate) fn taken_back(self) -> Self {
-        match self {
-            Self::BesideFlight(handle) => Self::Lent(handle),
-            other => other,
-        }
+    pub(crate) fn restore(&mut self, lend: HostPinsLend) {
+        self.lend = lend;
     }
 }
 
-/// The document thread's table, as the engine holds it.
-#[derive(Clone, Copy)]
-pub(crate) struct HostPinsHandle(NonNull<HostStyleRecordPins>);
+/// The document thread's table, owned jointly by the document thread and by everything on the render owner that pins
+/// in it or reads it: the engine and the arena that links it, which may both outlive the document thread's own hold.
+#[derive(Clone, Default)]
+pub(crate) struct HostPinTable(std::sync::Arc<HostStyleRecordPins>);
 
-// SAFETY: The engine dereferences the handle only while the document thread waits on it, on
-// whichever thread runs the engine then.
-unsafe impl Send for HostPinsHandle {}
+// SAFETY: Only the document thread reads or writes the table itself, or a thread it waits on; the render owner beside it
+// reaches only the channel's sender, which is `Sync`. Once the document thread lets go of it, the engine and its arena
+// are left to reach it, which the owner does not do at once.
+unsafe impl Send for HostPinTable {}
 // SAFETY: As above.
-unsafe impl Sync for HostPinsHandle {}
+unsafe impl Sync for HostPinTable {}
 
-impl HostPinsHandle {
+impl HostPinTable {
+    /// Hands the document thread its own hold, for [`Self::from_host`] to reach and [`Self::release_host`] to drop.
+    pub(crate) fn into_host(self) -> *const HostStyleRecordPins {
+        std::sync::Arc::into_raw(self.0)
+    }
+
+    /// Another hold of the table the document thread holds at `pins`.
+    ///
     /// # Safety
-    /// `pins` must come from [`super::bridge::style_record_host_pins_create`] and outlive the
-    /// engine that holds the handle.
-    pub(crate) unsafe fn new(pins: *mut HostStyleRecordPins) -> Self {
-        Self(NonNull::new(pins).expect("a host pin table handle is not null"))
+    /// `pins` must come from [`Self::into_host`] and not have been released.
+    pub(crate) unsafe fn from_host(pins: *const HostStyleRecordPins) -> Self {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { std::sync::Arc::increment_strong_count(pins) };
+        // SAFETY: As above; the count just taken is this hold's.
+        Self(unsafe { std::sync::Arc::from_raw(pins) })
+    }
+
+    /// Drops the document thread's own hold.
+    ///
+    /// # Safety
+    /// `pins` must come from [`Self::into_host`], and the document thread must not reach it again.
+    pub(crate) unsafe fn release_host(pins: *const HostStyleRecordPins) {
+        // SAFETY: Guaranteed by the caller.
+        drop(unsafe { std::sync::Arc::from_raw(pins) });
     }
 
     /// The table, for the document thread's own pins.
     ///
     /// # Safety
-    /// The caller must be the document thread, or run while the document thread waits on it.
+    /// The caller must be the document thread, or run while the document thread waits on it, or hold the table once
+    /// the document thread has let go of it.
     pub(crate) unsafe fn pins(&self) -> &HostStyleRecordPins {
-        // SAFETY: Guaranteed by the caller; the table outlives every holder of the handle.
-        unsafe { self.0.as_ref() }
+        &self.0
+    }
+
+    /// The table, for a test that stands in for the document thread.
+    #[cfg(test)]
+    pub(crate) fn host(&self) -> &HostStyleRecordPins {
+        &self.0
     }
 
     /// Pins `record` for the render owner, which the table takes in before it is next read or written.
@@ -242,23 +263,24 @@ impl HostPinsHandle {
     }
 
     fn send_from_owner(&self, write: OwnerPinWrite) {
-        // SAFETY: The table outlives every holder of the handle, and the projection reaches only the sender, which
-        // nothing but the render owner uses; the document thread goes on with the rest of the table beside it.
-        let sender = unsafe { &*std::ptr::addr_of!((*self.0.as_ptr()).owner_writes_sender) };
-        // The document thread keeps the receiver as long as the table.
+        // SAFETY: The hold keeps the table alive, and the projection reaches only the sender, which nothing but the
+        // render owner uses; the document thread goes on with the rest of the table beside it.
+        let sender = unsafe { &*std::ptr::addr_of!((*std::sync::Arc::as_ptr(&self.0)).owner_writes_sender) };
+        // The table keeps the receiver as long as the sender.
         let _ = sender.send(write);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{HostPinsHandle, HostStyleRecordPins};
+    use super::HostPinTable;
 
     #[test]
     fn the_table_takes_in_the_owners_pins_before_it_is_read_or_written() {
-        let mut table = HostStyleRecordPins::default();
-        // SAFETY: The table outlives the handle.
-        let handle = unsafe { HostPinsHandle::new(&raw mut table) };
+        let host = HostPinTable::default();
+        // SAFETY: The test is the document thread.
+        let table = unsafe { host.pins() };
+        let handle = host.clone();
         let owner = std::thread::spawn(move || {
             handle.pin_from_owner(7);
             handle.pin_from_owner(9);
@@ -269,11 +291,35 @@ mod tests {
         assert!(!table.is_pinned(9));
 
         // A write of the document thread's own comes after the pin the owner sent before it.
-        handle.pin_from_owner(11);
+        host.pin_from_owner(11);
         table.unpin(11);
         table.unpin(7);
         let mut pinned = Vec::new();
         table.for_each_pinned(|record| pinned.push(record));
         assert!(pinned.is_empty());
+    }
+
+    /// The engine and its arena hold the table past the document thread's own hold, and pin and read in it as they
+    /// leave: the table goes with the last hold.
+    #[test]
+    fn the_owners_holds_outlive_the_document_threads() {
+        let host = HostPinTable::default().into_host();
+        // SAFETY: `host` is the document thread's hold.
+        let engine = unsafe { HostPinTable::from_host(host) };
+        let arena = engine.clone();
+        // SAFETY: As above; the test is the document thread.
+        unsafe { &*host }.pin(3);
+        // SAFETY: As above, and the document thread does not reach it again.
+        unsafe { HostPinTable::release_host(host) };
+        std::thread::spawn(move || {
+            arena.pin_from_owner(5);
+            arena.unpin_from_owner(3);
+        })
+        .join()
+        .unwrap();
+        // SAFETY: The document thread has let go of the table; the engine is its one reader.
+        let table = unsafe { engine.pins() };
+        assert!(table.is_pinned(5));
+        assert!(!table.is_pinned(3));
     }
 }

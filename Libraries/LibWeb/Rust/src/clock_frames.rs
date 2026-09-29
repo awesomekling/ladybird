@@ -1158,10 +1158,8 @@ fn run_display_tick(owner: &crate::render_owner::Owner, context: u64, frame_time
     // Taking the clock applies the arena's pending changes, which may reach the engine.
     let taken = match crate::render_owner::style_engine_of(document) {
         // SAFETY: The owner holds the document's render state, and the engine with it.
-        Some(engine) if !engine.is_null() => unsafe {
-            engine.reach_on_owner_beside_main(owner, |_| take_clock(owner, document))
-        },
-        _ => take_clock(owner, document),
+        Some(engine) => unsafe { engine.reach_on_owner_beside_main(owner, |_| take_clock(owner, document)) },
+        None => take_clock(owner, document),
     };
     let Some((mut clock, arena)) = taken else {
         count(&COUNTERS.ticks_dropped_without_clock);
@@ -1251,15 +1249,13 @@ fn run_display_tick_on(
             }
         };
         // The whole tick reaches the engine as the owner, beside the main thread: its layout round and its recording
-        // too.
+        // too. The tick holds the engine, which an unlink the tick applies does not drop under it.
         // SAFETY: The owner holds the document's render state: its arena, and the engine the arena links.
-        let engine = unsafe { &*arena }.arena().style_engine_handle();
-        let reach_and_run_tick = || {
-            if engine.is_null() {
-                return run_tick(None);
-            }
+        let engine = unsafe { &*arena }.arena().hold_style_engine();
+        let reach_and_run_tick = || match &engine {
+            None => run_tick(None),
             // SAFETY: As above.
-            unsafe { engine.reach_on_owner_beside_main(owner, |engine| run_tick(Some(engine))) }
+            Some(engine) => unsafe { engine.reach_on_owner_beside_main(owner, |engine| run_tick(Some(engine))) },
         };
         tick = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
             reach_and_run_tick,

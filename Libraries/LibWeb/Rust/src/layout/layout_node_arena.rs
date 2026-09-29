@@ -25,7 +25,7 @@ use super::update_layout::FfiLayoutTreeBuildStats;
 use super::used_values::SizeConstraint;
 use crate::css::style::bridge::ElementBoxKind;
 use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
-use crate::css::style::host_pins::HostPinsHandle;
+use crate::css::style::host_pins::HostPinTable;
 use crate::css::style::tree::{NaturalSize, ReplacedContentInput, StyleNodeID};
 use crate::css::style::{
     PublishedBoxFacts, PublishedTextSource, StyleEngine, TextStyleParentFacts,
@@ -870,7 +870,7 @@ impl FreedSubtree {
 /// thread has one (an engine a test drives). The render owner, which writes beside the document thread, sends the pin
 /// for the table to take in.
 fn pin_host_style_record(arena: &LayoutNodeArena, record: u64) {
-    match arena.host_style_record_pins.get() {
+    match &*arena.host_style_record_pins.borrow() {
         Some(pins) if crate::stage_thread::on_owner_thread() => pins.pin_from_owner(record),
         // SAFETY: The document thread does the owner's work itself.
         Some(pins) => unsafe { pins.pins() }.pin(record),
@@ -880,7 +880,7 @@ fn pin_host_style_record(arena: &LayoutNodeArena, record: u64) {
 
 /// Releases a pin [`pin_host_style_record`] took, as that does.
 fn unpin_host_style_record(arena: &LayoutNodeArena, record: u64) {
-    match arena.host_style_record_pins.get() {
+    match &*arena.host_style_record_pins.borrow() {
         Some(pins) if crate::stage_thread::on_owner_thread() => pins.unpin_from_owner(record),
         // SAFETY: As for `pin_host_style_record`.
         Some(pins) => unsafe { pins.pins() }.unpin(record),
@@ -1136,8 +1136,9 @@ pub(crate) struct LayoutNodeArena {
     /// registers it.
     style_engine: Cell<Option<StyleEngineLink>>,
     /// The document thread's style-record pin table, which the host's pins on rows go into: they
-    /// never enter the engine, so they never wait for a style pass in flight.
-    host_style_record_pins: Cell<Option<HostPinsHandle>>,
+    /// never enter the engine, so they never wait for a style pass in flight. The arena holds it as
+    /// long as it links the engine, which the document thread may let go of first.
+    host_style_record_pins: RefCell<Option<HostPinTable>>,
     /// Whether the host listens for box presence. The callback itself is in the host tables,
     /// which only the main thread reaches; this says whether a change is worth handing back.
     host_hears_box_presence: Cell<bool>,
@@ -1328,7 +1329,7 @@ impl LayoutNodeArena {
             may_have_auto_content_visibility: Cell::new(false),
             may_have_scroll_snap_areas: Cell::new(false),
             style_engine: Cell::new(None),
-            host_style_record_pins: Cell::new(None),
+            host_style_record_pins: RefCell::new(None),
             host_hears_box_presence: Cell::new(false),
             host_handbacks: RefCell::new(HostHandbacks::default()),
             host_handback_spans: Cell::new(0),
@@ -2934,14 +2935,14 @@ impl LayoutNodeArena {
         let unlinked = self.style_engine.replace(Some(link));
         debug_assert!(unlinked.is_none(), "an arena links one style engine");
         engine.install_layout_style_snapshots(self.layout_style_snapshots.clone());
-        self.host_style_record_pins.set(engine.host_style_record_pins());
+        *self.host_style_record_pins.borrow_mut() = engine.host_style_record_pins().cloned();
     }
 
     /// Drops the arena's link to its style engine, which the host is about to destroy, returning the link: the engine
     /// may go away with it, so the caller drops it once its reach of the engine has ended.
     #[must_use]
     pub(crate) fn unlink_style_engine(&self) -> Option<StyleEngineLink> {
-        self.host_style_record_pins.set(None);
+        self.host_style_record_pins.take();
         self.style_engine.take()
     }
 
@@ -3148,6 +3149,15 @@ impl LayoutNodeArena {
     pub(crate) fn set_needs_full_layout_tree_update(&self, value: bool) {
         self.needs_full_layout_tree_update.set(value);
         self.publish_layout_tree_state();
+    }
+
+    /// Another hold of the style engine the arena links, for a reach of the owner's: whatever the reach unlinks, the
+    /// engine stays until the hold goes.
+    pub(crate) fn hold_style_engine(&self) -> Option<StyleEngineLink> {
+        // SAFETY: As for `style_engine_handle`.
+        unsafe { &*self.style_engine.as_ptr() }
+            .as_ref()
+            .map(StyleEngineLink::hold)
     }
 
     /// The style engine the arena's nodes take their style from, or null before it has one.
