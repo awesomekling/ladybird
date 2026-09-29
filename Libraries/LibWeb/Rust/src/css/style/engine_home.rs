@@ -333,6 +333,10 @@ impl Drop for StyleEngineLink {
         if let Some(home) = Arc::into_inner(home)
             && home.thread != std::thread::current().id()
         {
+            // The owner built the engine's prefix caches as it matched, much of what the engine holds, and frees
+            // them itself rather than leave them to the document thread.
+            // SAFETY: Nothing holds the home any more.
+            unsafe { &mut *home.engine.as_ptr() }.discard_retained_prefix_caches();
             RETURNED_HOMES
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
