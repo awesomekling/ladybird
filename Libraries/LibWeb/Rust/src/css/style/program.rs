@@ -290,6 +290,9 @@ struct RuleDeclarationData {
     /// Whether no written value adds to what a cascade state's written facts answer, which lets
     /// the facts skip finding each winner's declaration in this rule.
     written_values_add_no_state_facts: bool,
+    /// Whether a declaration of a non-inherited property is written `inherit`, or was written with
+    /// a value the rule arrived without: only such a rule can make a winner state inherit one.
+    may_inherit_a_non_inherited_property: bool,
     /// The custom properties the rule declares, in declaration order, and the values they were
     /// written with, parallel to them: a custom property resolves from its written spelling.
     custom_declarations: Vec<CustomDeclaration>,
@@ -1293,12 +1296,20 @@ impl StyleSheetProgram {
         let written_values_add_no_state_facts = written_value_checks
             .iter()
             .all(super::publication::WrittenValueChecks::adds_no_state_facts);
+        let may_inherit_a_non_inherited_property = declared.iter().enumerate().any(|(index, declared)| {
+            !crate::css::property_metadata::property_is_inherited(declared.property)
+                && written_values.get(index).is_none_or(|value| {
+                    matches!(value.data(), crate::css::style_value::StyleValueData::Keyword { keyword }
+                        if *keyword == crate::css::style_compute::keyword::INHERIT)
+                })
+        });
         entry.declarations = share_rule_declarations(
             RuleDeclarationData {
                 declared_properties: declared,
                 written_values,
                 written_value_checks,
                 written_values_add_no_state_facts,
+                may_inherit_a_non_inherited_property,
                 custom_declarations,
                 custom_written_values,
             },
@@ -1436,6 +1447,15 @@ impl StyleSheetProgram {
             .declarations
             .data
             .written_values_add_no_state_facts
+    }
+
+    /// Whether a winner of the rule can inherit a non-inherited property: one of its declarations
+    /// is written `inherit`, or its written values are unknown.
+    pub(super) fn may_inherit_a_non_inherited_property(&self, rule: RuleID) -> bool {
+        self.rules[rule.0 as usize]
+            .declarations
+            .data
+            .may_inherit_a_non_inherited_property
     }
 
     pub(super) fn written_value_checks(&self, rule: RuleID, index: usize) -> super::publication::WrittenValueChecks {

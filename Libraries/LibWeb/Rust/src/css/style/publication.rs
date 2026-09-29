@@ -2180,7 +2180,7 @@ impl RetainedState {
         let mut facts = StateWrittenFacts::default();
         // Most states hold only winners of rules written without anything these facts are about,
         // which the state's rules answer without walking its winners.
-        if !self.winner_groups.state_has_element_winners(state)
+        if !self.winner_groups.state_has_winners_outside_rules(state)
             && self
                 .winner_groups
                 .state_winning_rules(state)
@@ -3269,6 +3269,18 @@ impl RetainedState {
     }
 
     fn state_explicitly_inherits_non_inherited_property(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
+        // Most states hold only winners of rules that write no `inherit` for a non-inherited
+        // property, which the rules answer without finding each winner's declaration.
+        let rule_may_inherit = |rule| self.program.may_inherit_a_non_inherited_property(rule);
+        if !self.winner_groups.state_has_winners_outside_rules(state)
+            && !self
+                .winner_groups
+                .state_winning_rules(state)
+                .iter()
+                .any(|&rule| rule_may_inherit(rule))
+        {
+            return false;
+        }
         let is_inherit_keyword = |value: Option<&crate::css::style_value::RetainedStyleValueData>| {
             value.is_none_or(|value| {
                 matches!(value.data(), crate::css::style_value::StyleValueData::Keyword { keyword }
@@ -3283,6 +3295,7 @@ impl RetainedState {
                 return false;
             };
             match winner.source {
+                WinnerSource::Rule(rule) if !rule_may_inherit(rule) => false,
                 WinnerSource::Rule(rule) => is_inherit_keyword(self.program.written_winner_value(
                     rule,
                     winner.property,
