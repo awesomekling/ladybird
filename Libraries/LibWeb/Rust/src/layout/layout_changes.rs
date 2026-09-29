@@ -129,7 +129,8 @@ pub(crate) enum LayoutChange {
         style_node: StyleNodeID,
         generated_for: u8,
     },
-    /// The host applied the style of `style_record` to the row: see [`LayoutNodeArena::install_row_style`].
+    /// The row's DOM target took `style_record`, and the host applied its style to the row: see
+    /// [`LayoutNodeArena::install_row_style`].
     InstallRowStyle {
         node: NodeSlotId,
         style_record: u64,

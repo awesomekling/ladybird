@@ -266,16 +266,34 @@ void StyleEffectDrain::take_layout_node_style_records(DOM::Document& document)
 
 void StyleEffectDrain::apply_layout_node_style(DOM::Document& document, StyleNodeID style_node, RequiredInvalidationAfterStyleChange const& invalidation, PublishedStyleRecord const* style_record, PseudoElementStyleRecords const& pseudo_element_style_records)
 {
-    if (invalidation.needs_layout_tree_rebuild())
-        return;
     auto* arena = document.layout_arena_handle();
     if (!arena)
         return;
 
-    // If we're keeping the layout tree, we can just apply the new style to the existing layout tree.
+    // Installing a record leaves the boxes to take it here.
     auto identity = DOM::NodeIdentity::of_style_node(style_node);
     auto box = Painting::BoxSlot::bound_to(document, identity);
     ASSERT(!box || style_record);
+    auto for_each_pseudo_element_box = [&](auto callback) {
+        for (size_t index = 0; index < pseudo_element_style_records.size(); ++index) {
+            auto const& pseudo_element_style_record = pseudo_element_style_records[index];
+            if (!pseudo_element_style_record)
+                continue;
+            auto pseudo_element = static_cast<PseudoElement>(to_underlying(first_synthetic_pseudo_element) + index);
+            if (auto pseudo_element_box = Painting::BoxSlot::bound_to(document, identity, pseudo_element))
+                callback(pseudo_element_box, *pseudo_element_style_record);
+        }
+    };
+    // A box the layout tree is built again for only holds its record until then.
+    if (invalidation.needs_layout_tree_rebuild()) {
+        Layout::set_style_record_of_box(box, style_record);
+        for_each_pseudo_element_box([](Painting::BoxSlot const& pseudo_element_box, PublishedStyleRecord const& pseudo_element_style_record) {
+            Layout::set_style_record_of_box(pseudo_element_box, &pseudo_element_style_record);
+        });
+        return;
+    }
+
+    // If we're keeping the layout tree, we can just apply the new style to the existing layout tree.
     // A flight applied the row's record to the layout nodes and painted after it: the element's box only takes the record
     // into its mirror, and its pseudo-elements' records are the ones they hold. A row whose record or pseudo-element
     // records are others than the flight's is installed here over what the flight did, marks and all.
@@ -302,17 +320,11 @@ void StyleEffectDrain::apply_layout_node_style(DOM::Document& document, StyleNod
         Painting::repaint_document_after_owner_style_change(document, InvalidateDisplayList::PaintCommandsAndHitTestList);
     }
 
-    for (size_t index = 0; index < pseudo_element_style_records.size(); ++index) {
-        auto const& pseudo_element_style_record = pseudo_element_style_records[index];
-        if (!pseudo_element_style_record)
-            continue;
-        auto pseudo_element = static_cast<PseudoElement>(to_underlying(first_synthetic_pseudo_element) + index);
-        if (auto pseudo_element_box = Painting::BoxSlot::bound_to(document, identity, pseudo_element)) {
-            Layout::apply_style_to_box(pseudo_element_box, *pseudo_element_style_record);
-            if (Painting::has_committed_box(pseudo_element_box))
-                Painting::repaint_after_style_change(pseudo_element_box, invalidation);
-        }
-    }
+    for_each_pseudo_element_box([&](Painting::BoxSlot const& pseudo_element_box, PublishedStyleRecord const& pseudo_element_style_record) {
+        Layout::apply_style_to_box(pseudo_element_box, pseudo_element_style_record);
+        if (Painting::has_committed_box(pseudo_element_box))
+            Painting::repaint_after_style_change(pseudo_element_box, invalidation);
+    });
 }
 
 void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Document& document)

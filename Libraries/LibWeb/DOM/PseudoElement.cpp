@@ -76,14 +76,14 @@ void SyntheticPseudoElement::update_animated_properties(Badge<Web::Animations::K
     effect.update_computed_properties_for_style(context, abstract_element);
 }
 
-void SyntheticPseudoElement::replace_style_record(RefPtr<CSS::PublishedStyleRecord const> style_record)
+// Whether the pseudo-element took a record other than the one it held.
+bool SyntheticPseudoElement::replace_style_record(RefPtr<CSS::PublishedStyleRecord const> style_record)
 {
     VERIFY(m_originating_element);
     if (style_record_identity() == (style_record ? style_record->identity() : CSS::StyleRecordID {}))
-        return;
+        return false;
     m_style_record = move(style_record);
-    if (auto box = Painting::BoxSlot::of_pseudo_element(*m_originating_element, m_type))
-        Layout::set_style_record_of_box(box, m_style_record);
+    return true;
 }
 
 void SyntheticPseudoElement::set_computed_style(RefPtr<CSS::PublishedStyleRecord const> style_record)
@@ -92,7 +92,7 @@ void SyntheticPseudoElement::set_computed_style(RefPtr<CSS::PublishedStyleRecord
         clear_computed_style();
         return;
     }
-    replace_style_record(move(style_record));
+    (void)replace_style_record(move(style_record));
 }
 
 void SyntheticPseudoElement::clear_computed_style(RefPtr<CSS::ComputedValues const> style_to_preserve_for_detachment)
@@ -110,7 +110,10 @@ void SyntheticPseudoElement::clear_computed_style(RefPtr<CSS::ComputedValues con
 
 void SyntheticPseudoElement::refresh_computed_style(NonnullRefPtr<CSS::PublishedStyleRecord const> style_record)
 {
-    replace_style_record(move(style_record));
+    if (!replace_style_record(move(style_record)))
+        return;
+    if (auto box = Painting::BoxSlot::of_pseudo_element(*m_originating_element, m_type))
+        Layout::set_style_record_of_box(box, m_style_record);
 }
 
 SyntheticPseudoElementTreeNode::SyntheticPseudoElementTreeNode(CSS::PseudoElement type)

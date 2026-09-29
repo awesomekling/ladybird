@@ -66,6 +66,7 @@ public:
     virtual CSS::StyleRecordID style_record_identity() const override { return m_style_record ? m_style_record->identity() : CSS::StyleRecordID {}; }
     virtual CSS::PublishedStyleRecord const* published_style_record() const override { return m_style_record; }
     void update_animated_properties(Badge<Web::Animations::KeyframeEffect> const&, DOM::AbstractElement, Web::Animations::KeyframeEffect&, Web::Animations::AnimationUpdateContext&) override;
+    // The box follows the record where the drain applies it: apply_layout_node_style().
     void set_computed_style(RefPtr<CSS::PublishedStyleRecord const>);
     void clear_computed_style(RefPtr<CSS::ComputedValues const> style_to_preserve_for_detachment = nullptr);
     void refresh_computed_style(NonnullRefPtr<CSS::PublishedStyleRecord const>);
@@ -78,7 +79,7 @@ public:
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
 private:
-    void replace_style_record(RefPtr<CSS::PublishedStyleRecord const>);
+    bool replace_style_record(RefPtr<CSS::PublishedStyleRecord const>);
 
     // A pseudo-element has no identity of its own: its box is the row bound to its generator's
     // identity and its type in the layout node arena.

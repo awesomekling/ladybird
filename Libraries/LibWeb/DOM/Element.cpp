@@ -5159,11 +5159,12 @@ void Element::update_animated_properties_for_abstract_element(Badge<Web::Animati
     effect.update_computed_properties_for_style(context, abstract_element);
 }
 
-void Element::replace_style_record(CSS::StyleDrainScope const& scope, CSS::StyleRecordID style_record_identity)
+// Whether the element took a record other than the one it held.
+bool Element::replace_style_record(CSS::StyleDrainScope const& scope, CSS::StyleRecordID style_record_identity)
 {
     VERIFY(!style_record_identity || style_node_id() != 0);
     if (this->style_record_identity() == style_record_identity)
-        return;
+        return false;
     m_style_record = scope.engine().publish_style_record(scope, style_record_identity);
     // A record the drain installs is one the engine holds; if it is not, the element holds no style.
     ASSERT(m_style_record || !style_record_identity);
@@ -5176,8 +5177,7 @@ void Element::replace_style_record(CSS::StyleDrainScope const& scope, CSS::Style
     // element's record resolves `rem`, for one.
     if (style_node_id() != 0)
         scope.engine().set_element_container_query_inputs(scope, style_node_id(), style_record_identity);
-    if (auto box = Painting::BoxSlot::bound_to(*this))
-        Layout::set_style_record_of_box(box, m_style_record);
+    return true;
 }
 
 // An element leaving the tree holds no style; the engine hears so between passes.
@@ -5209,7 +5209,7 @@ void Element::set_computed_style(CSS::StyleDrainScope const& scope, Optional<CSS
         return;
     }
     ++m_animation_style_generation;
-    replace_style_record(scope, style_record_identity);
+    (void)replace_style_record(scope, style_record_identity);
     computed_properties_changed();
 }
 
@@ -5233,7 +5233,10 @@ void Element::refresh_computed_style(CSS::StyleDrainScope const& scope, Optional
         return;
     }
 
-    replace_style_record(scope, style_record_identity);
+    if (replace_style_record(scope, style_record_identity)) {
+        if (auto box = Painting::BoxSlot::bound_to(*this))
+            Layout::set_style_record_of_box(box, m_style_record);
+    }
     if (style_node_id() != 0 && m_style_record && m_style_record->is_animation_overlay())
         scope.engine().set_sampled_composition_identity(scope, style_node_id(), style_record_identity);
     VERIFY(has_style());
