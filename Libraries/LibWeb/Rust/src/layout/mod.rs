@@ -61,6 +61,7 @@ pub(crate) mod update_layout;
 pub mod used_values;
 mod viewport_propagation;
 
+pub(crate) use crate::css::style::engine_home::StyleEngineLink;
 use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::css::style::fast_hash::FastSet as HashSet;
 use crate::layout::layout_node_arena::IntrinsicBlockSizeMeasurement;
@@ -68,7 +69,6 @@ use crate::layout::layout_node_arena::IntrinsicInlineSizeMeasurement;
 use crate::layout::layout_node_arena::IntrinsicSizeCacheKey;
 use crate::layout::layout_node_arena::IntrinsicSizeCacheKind;
 pub(crate) use crate::layout::layout_node_arena::MainThreadFfiEntry as ArenaMainThreadFfiEntry;
-pub(crate) use crate::layout::layout_node_arena::StyleEngineLink;
 pub(crate) use crate::layout::layout_node_arena::{HostPayment, OwnerAppliedStyle};
 pub(crate) use crate::layout::layout_node_arena::{LayoutNodeArena, SLOTS_PER_CHUNK};
 use crate::layout::layout_node_arena::{TableCellMeasurement, TableCellMeasurementKey};

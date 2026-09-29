@@ -2185,8 +2185,7 @@ pub unsafe extern "C" fn layout_arena_committed_transform_reference_box(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_destroy(engine: StyleEngineHandle) {
     // SAFETY: Guaranteed by the caller.
-    let mut engine = unsafe { engine.destroy("style_engine_destroy") };
-    engine.end_recording();
+    unsafe { engine.destroy("style_engine_destroy") };
 }
 
 /// Returns the live element descendants whose inheritance path begins at `root` in the flat tree.
