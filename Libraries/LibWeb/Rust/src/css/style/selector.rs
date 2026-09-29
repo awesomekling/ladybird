@@ -70,6 +70,7 @@ use super::relative_selector::RelativeQuery;
 use super::relative_selector::RelativeQueryID;
 use super::relative_selector::WitnessEffect;
 use super::relative_selector::candidate_witnesses;
+use super::selector_evaluation::ElementFeatures;
 use super::selector_evaluation::RememberedPrefix;
 use super::selector_evaluation::SelectorBindings;
 use super::selector_evaluation::SelectorEvaluator;
@@ -213,20 +214,6 @@ impl TagTest {
             written: name,
             folded: name,
             fold_in_namespace: StyleAtomID::NONE,
-        }
-    }
-
-    #[must_use]
-    pub fn matches(self, tag: StyleAtomID, namespace: StyleAtomID) -> bool {
-        // https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
-        // When comparing a CSS element type selector to the names of HTML elements in HTML documents, the CSS element type
-        // selector must first be converted to ASCII lowercase. The same selector when compared to other elements must be
-        // compared according to its original case. In both cases, to match, the values must be identical to each other
-        // (and therefore the comparison is case sensitive).
-        if !self.fold_in_namespace.is_none() && namespace == self.fold_in_namespace {
-            tag == self.folded
-        } else {
-            tag == self.written
         }
     }
 }
@@ -4848,6 +4835,44 @@ pub struct MatchFactRow<'a> {
     pub(super) row: u32,
 }
 
+impl<'a> ElementFeatures for MatchFactRow<'a> {
+    type Attribute = (&'a StyleNodeFacts, super::index::AttributeFact);
+
+    fn local_name_is(&self, name: StyleAtomID) -> bool {
+        self.facts.tag_of(self.row) == name
+    }
+
+    fn namespace_is(&self, namespace: StyleAtomID) -> bool {
+        self.facts.namespace_of(self.row) == namespace
+    }
+
+    fn has_id(&self, id: StyleAtomID) -> bool {
+        self.facts.id_of(self.row) == id
+    }
+
+    fn has_class(&self, class: StyleAtomID) -> bool {
+        self.facts.classes_of(self.row).contains(&class)
+    }
+
+    /// `[*|x]` names the attribute called `x` in each namespace the element carries it in, and they all publish the
+    /// same any-namespace atom as their local name.
+    fn attributes_named(
+        &self,
+        name: StyleAtomID,
+        any_namespace: bool,
+    ) -> impl Iterator<Item = (&'a StyleNodeFacts, super::index::AttributeFact)> + '_ {
+        let facts = self.facts;
+        facts
+            .attributes_of(self.row)
+            .iter()
+            .filter(move |attribute| match any_namespace {
+                false => attribute.name == name,
+                true => facts.attribute_name_forms(attribute.name).local == name,
+            })
+            .map(move |&attribute| (facts, attribute))
+    }
+}
+
 /// Which positional tests an evaluator answers from its workspace's shared sibling index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PositionalIndexPolicy {
@@ -5981,6 +6006,12 @@ impl SelectorTree for EngineTree<'_> {
         }
     }
 
+    fn first_sibling(self, node: StyleNodeID) -> StyleNodeID {
+        self.parent(node)
+            .and_then(|parent| self.first_child(parent))
+            .unwrap_or(node)
+    }
+
     fn live_parent(self, node: StyleNodeID) -> Option<StyleNodeID> {
         self.tree.parent(node)
     }
@@ -6017,6 +6048,10 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
     type Tree = EngineTree<'a>;
     type Row = MatchFactRow<'a>;
     type Attribute = (&'a StyleNodeFacts, super::index::AttributeFact);
+    type Features<'s>
+        = MatchFactRow<'a>
+    where
+        Self: 's;
     type Incomplete = Incomplete;
     type Counters = Counters;
     type PrefixSlot = PrecedingSiblingParentID;
@@ -6032,60 +6067,13 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
         self.row_of(node)
     }
 
-    fn local_name_is(&self, row: MatchFactRow<'a>, name: StyleAtomID) -> bool {
-        row.facts.tag_of(row.row) == name
-    }
-
-    fn namespace_is(&self, row: MatchFactRow<'a>, namespace: StyleAtomID) -> bool {
-        row.facts.namespace_of(row.row) == namespace
-    }
-
-    fn has_id(&self, row: MatchFactRow<'a>, id: StyleAtomID) -> bool {
-        row.facts.id_of(row.row) == id
-    }
-
-    fn has_class(&self, row: MatchFactRow<'a>, class: StyleAtomID) -> bool {
-        row.facts.classes_of(row.row).contains(&class)
+    fn features(&self, row: MatchFactRow<'a>) -> MatchFactRow<'a> {
+        row
     }
 
     fn same_type(&self, row: MatchFactRow<'a>, other: MatchFactRow<'a>) -> bool {
         row.facts.tag_of(row.row) == other.facts.tag_of(other.row)
             && row.facts.namespace_of(row.row) == other.facts.namespace_of(other.row)
-    }
-
-    /// Every attribute a test names.
-    ///
-    /// There can be more than one: `[*|x]` names the attribute called `x` in each namespace the
-    /// element carries it in, and they publish the same any-namespace atom.
-    fn attributes(
-        &self,
-        row: MatchFactRow<'a>,
-        test: AttributeTest,
-    ) -> impl Iterator<Item = (&'a StyleNodeFacts, super::index::AttributeFact)> + '_ {
-        // Whether this subject folds attribute names at all, which is one namespace comparison for
-        // the whole test rather than one per attribute.
-        let folds = !test.fold_in_namespace.is_none() && row.facts.namespace_of(row.row) == test.fold_in_namespace;
-        row.facts
-            .attributes_of(row.row)
-            .iter()
-            .copied()
-            .filter(move |attribute| {
-                if !test.any_namespace {
-                    if attribute.name == test.name {
-                        return true;
-                    }
-                    if !folds {
-                        return false;
-                    }
-                }
-                let forms = row.facts.attribute_name_forms(attribute.name);
-                let (written, folded) = match test.any_namespace {
-                    true => (forms.local, forms.folded_local),
-                    false => (attribute.name, forms.folded_name),
-                };
-                written == test.name || (folds && folded == test.folded)
-            })
-            .map(move |attribute| (row.facts, attribute))
     }
 
     fn attribute_value_atom(&self, (_, attribute): (&'a StyleNodeFacts, super::index::AttributeFact)) -> StyleAtomID {
@@ -6124,6 +6112,10 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
         // not, so the element publishes whether it holds one.
         let row = self.row_of(node)?;
         Ok(self.tree.first_element_child(node).is_none() && !row.facts.has_text_content_of(row.row))
+    }
+
+    fn is_root(&self, node: StyleNodeID) -> bool {
+        self.parent_of(node).is_none()
     }
 
     fn is_node(&self, node: StyleNodeID, named: StyleNodeID) -> bool {
