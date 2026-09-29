@@ -1665,7 +1665,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
             }
         }
         // The records the move reads: the pseudo-element's until now, the one it moves to, and its element's.
-        auto record_damage = [&, old_pseudo_element_record = RefPtr { published_style_record(pseudo_element) }](bool with_counter_styles_changed) {
+        RefPtr<CSS::PublishedStyleRecord const> const old_pseudo_element_record = published_style_record(pseudo_element);
+        auto record_damage = [&](bool with_counter_styles_changed) {
             return CSS::StyleEngineFFI::published_pseudo_element_record_damage(handle_of(old_pseudo_element_record),
                 handle_of(engine_pseudo_element_record),
                 handle_of(published_style_record()),
@@ -1716,7 +1717,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
                 // it, its composition already installed.
                 auto const decided = CSS::StyleEngineFFI::style_engine_take_pseudo_element_transition_step_decided_in_pass(
                     scope.engine().rust_handle(), style_node_id().value(), to_underlying(pseudo_element));
-                auto transition_invalidation = style_computer.run_transition_step_for_installed_record(scope, { *this, pseudo_element }, old_style_record, decided.present ? &decided : nullptr);
+                auto transition_invalidation = style_computer.run_transition_step_for_installed_record(scope, { *this, pseudo_element }, old_pseudo_element_record, decided.present ? &decided : nullptr);
                 invalidation |= transition_invalidation;
             }
         } else if (auto existing_pseudo_element = get_synthetic_pseudo_element(pseudo_element); existing_pseudo_element.has_value())

@@ -403,15 +403,19 @@ void StyleComputer::pin_transition_stabilization_baseline_if_a_later_pass_may_ne
     record_transition_stabilization_baseline(scope, abstract_element);
 }
 
-void StyleComputer::record_transition_stabilization_baseline(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, Optional<StyleRecordID> before_change_style_record) const
+void StyleComputer::record_transition_stabilization_baseline(StyleDrainScope const& scope, DOM::AbstractElement abstract_element) const
 {
+    record_transition_stabilization_baseline(scope, abstract_element, abstract_element.published_style_record());
+}
+
+void StyleComputer::record_transition_stabilization_baseline(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, RefPtr<PublishedStyleRecord const> before_change_style_record) const
+{
+    // A row the engine settled is drained once its record is installed, so the style the element
+    // holds is already the after-change one. The row names the style it moved away from.
     auto style_node_id = abstract_element.element().style_node_id();
     if (style_node_id == 0)
         return;
-    // A row the engine settled is drained once its record is installed, so the style the element
-    // holds is already the after-change one. The row names the style it moved away from.
-    auto style_record_identity = before_change_style_record.value_or_lazy_evaluated([&] { return abstract_element.style_record_identity(); });
-    scope.engine().record_transition_baseline(scope, style_node_id, pseudo_element_to_ffi(abstract_element.pseudo_element()), style_record_identity);
+    scope.engine().record_transition_baseline(scope, style_node_id, pseudo_element_to_ffi(abstract_element.pseudo_element()), move(before_change_style_record));
 }
 
 // A provisionally started transition already contributed to the style published by the pass that
@@ -790,7 +794,7 @@ static bool transition_step_names_each_property(StyleEngineFFI::FfiTransitionSte
 // whole of what the step needs. A transition the step starts layers its current
 // values into the working set to keep the frame from jumping; publishing that is the same animation
 // overlay publication an animation sampling performs, on the same element, against the same base.
-RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_installed_record(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, StyleRecordID before_change_style_record, StyleEngineFFI::FfiTransitionStepDecidedInPass const* decided) const
+RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_installed_record(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, RefPtr<PublishedStyleRecord const> published_before_change_style_record, StyleEngineFFI::FfiTransitionStepDecidedInPass const* decided) const
 {
     auto installed_style = abstract_element.computed_style();
     if (!installed_style)
@@ -799,7 +803,8 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     VERIFY(installed_style_record);
 
     // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
-    record_transition_stabilization_baseline(scope, abstract_element, before_change_style_record);
+    auto before_change_style_record = published_before_change_style_record ? published_before_change_style_record->identity() : StyleRecordID {};
+    record_transition_stabilization_baseline(scope, abstract_element, published_before_change_style_record);
     // A step the pass decided was decided over the epoch's before-change style and the parent the
     // pass read, and where the target had no before-change style the pass decided no step.
     if (decided && !decided->has_before_change_style)
@@ -827,12 +832,14 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     }
 
     if (!decided) {
-        if (auto baseline = scope.engine().transition_baseline(scope, abstract_element.element().style_node_id(), pseudo_element_to_ffi(abstract_element.pseudo_element())); baseline != 0)
-            before_change_style_record = StyleRecordID { baseline };
+        if (auto baseline = scope.engine().transition_baseline(abstract_element.element().style_node_id(), pseudo_element_to_ffi(abstract_element.pseudo_element()))) {
+            before_change_style_record = baseline->identity();
+            published_before_change_style_record = move(baseline);
+        }
 
         // A transition starts from the before-change style. The newly installed record may itself
         // have display: none; checking it would skip the discrete transition into that state.
-        ComputedStyleRecordView before_change_style { scope.engine().publish_style_record(scope, before_change_style_record) };
+        ComputedStyleRecordView before_change_style { published_before_change_style_record };
         if (!before_change_style || before_change_style->in_display_none_subtree())
             return {};
         if (auto parent = abstract_element.element_to_inherit_style_from(); parent.has_value()) {
