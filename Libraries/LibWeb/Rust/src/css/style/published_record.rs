@@ -171,6 +171,22 @@ pub unsafe extern "C" fn published_style_record_read(record: *const c_void) -> F
     }
 }
 
+/// Whether the record styles a counter or a quote, as
+/// [`ComputedValuesView::affects_generated_content_state`](crate::css::computed_value_views::ComputedValuesView::affects_generated_content_state)
+/// says. A read of the record alone, which asks the engine nothing.
+///
+/// # Safety
+///
+/// `record` must be a live handle the engine handed out.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn published_style_record_affects_generated_content_state(record: *const c_void) -> bool {
+    let record = unsafe { record_from_handle(record) };
+    crate::css::computed_value_views::ComputedValuesView::new(SharedPayload::as_pointer_slice(
+        record.payloads.as_slice(),
+    ))
+    .affects_generated_content_state()
+}
+
 /// # Safety
 ///
 /// `record` must be a live handle the engine handed out, released once.
