@@ -183,6 +183,10 @@ void Document::take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffec
         return;
     }
 
+    // Each row the frame owes resources writes the arena as it takes them (the provider it is handed, the images it
+    // observes), which go to the render owner as one message.
+    Layout::ArenaChangeBatch const change_batch;
+
     // An image box that owns its image's provider is handed it here, and lays out again if the image is already there.
     for (auto const& owed : ReadonlySpan<Layout::RustFFI::FfiOwedImageResources> { effects.owed_image_resources, effects.owed_image_resources_count }) {
         bool image_was_available = false;
