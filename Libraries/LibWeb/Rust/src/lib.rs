@@ -23,6 +23,7 @@ pub use libcompositing_rust::fast_hash;
 pub(crate) mod cow_column;
 pub mod css;
 pub mod layout;
+pub(crate) mod lent;
 pub mod painting;
 pub(crate) mod render_owner;
 pub(crate) mod stage;

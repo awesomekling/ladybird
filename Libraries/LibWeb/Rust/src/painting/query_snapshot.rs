@@ -29,6 +29,7 @@ use crate::layout::node_facts::{self, QueryFacts};
 use crate::layout::row_reads::RowSnapshot;
 use crate::layout::text_queries::{append_rendered_text, style_collapses_white_space};
 use crate::layout::{LayoutNodeArena, PublishedTextSlot};
+use crate::lent::Lent;
 use crate::painting::client_rects;
 use crate::painting::geometry_read::GeometryRead;
 use crate::painting::paintable_data::PaintableData;
@@ -93,7 +94,7 @@ pub struct FfiQuerySnapshotViewport {
 pub(crate) struct QuerySnapshot {
     /// The shape, style and paintable row of every row, the row each node is bound to, and the rendered text of every
     /// text row, as layout left it.
-    tree: Arc<RowSnapshot>,
+    tree: Lent<RowSnapshot>,
     viewport_conversion: ViewportConversion,
 }
 
@@ -115,7 +116,7 @@ impl LayoutNodeArena {
 impl QuerySnapshot {
     /// The committed geometry of the document whose rows are `tree`, which converts rects to viewport space as
     /// `viewport` says.
-    pub(crate) fn new(tree: Arc<RowSnapshot>, viewport: &FfiQuerySnapshotViewport) -> Self {
+    pub(crate) fn new(tree: Lent<RowSnapshot>, viewport: &FfiQuerySnapshotViewport) -> Self {
         let viewport_conversion = ViewportConversion::of(&tree, viewport);
         Self {
             tree,
