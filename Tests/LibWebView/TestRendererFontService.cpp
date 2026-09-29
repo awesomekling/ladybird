@@ -11,8 +11,8 @@
 #include <LibGfx/Font/SystemFallbackFonts.h>
 #include <LibTest/TestCase.h>
 #include <LibThreading/Thread.h>
-#include <LibWebView/FontService.h>
 #include <LibWebCommon/WebView/RendererFontService.h>
+#include <LibWebView/FontService.h>
 #include <LibWebView/RendererFontServiceConnection.h>
 
 namespace {

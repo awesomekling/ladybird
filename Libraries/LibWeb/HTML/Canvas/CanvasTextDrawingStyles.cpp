@@ -151,7 +151,7 @@ void CanvasTextDrawingStyles<CanvasType>::set_font(Utf16View font)
     u32 tree_scope = 0;
     if constexpr (SameAs<CanvasType, HTML::HTMLCanvasElement>) {
         tree_scope = canvas_element.document_or_shadow_root_style_scope().style_engine_tree_scope().value();
-    } else if (auto* window = window_from_global_object(HTML::relevant_global_object(canvas_element))) {
+    } else if (auto* window = window_from_global_object(canvas_element.relevant_global_object())) {
         tree_scope = window->associated_document().style_scope().style_engine_tree_scope().value();
     }
 
