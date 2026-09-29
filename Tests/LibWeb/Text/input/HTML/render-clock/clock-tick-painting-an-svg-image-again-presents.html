@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 40px;
+        background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' preserveAspectRatio='none'><rect width='10' height='10' fill='green'/></svg>");
+        background-size: 100% 100%;
+    }
+    @keyframes blink {
+        0% {
+            width: 100px;
+        }
+        50% {
+            width: 0px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    // The box is 100px wide for the first half of each period, and has no width for the second.
+    const period = 400;
+
+    // The first frame time past `time` whose phase in the animation's period lies in [from, to).
+    async function frameTimeInPhase(time, startTime, from = 0, to = period) {
+        for (;;) {
+            await nextTask();
+            const now = performance.now();
+            const phase = (now - startTime) % period;
+            if (now > time + 1 && phase >= from && phase < to)
+                return now;
+        }
+    }
+
+    // The main thread renders an SVG background image at its box's size. A render clock tick lays the box out with no
+    // width, and presents a frame without the image, which leaves the image's render to nothing but the renders the
+    // main thread resolved. The next tick gives the box its width back and paints the image from those renders again:
+    // the frame it presents carries the render.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        box.style.animation = `blink ${period}ms step-end infinite`;
+        let frameTime = performance.now();
+        for (let i = 0; i < 3; ++i) {
+            frameTime = await frameTimeInPhase(frameTime, frameTime);
+            internals.injectRenderingOpportunity(frameTime);
+            await nextTask();
+        }
+        // The rendering updates end before the test goes on.
+        while (internals.frameSchedulerState() !== "idle")
+            await nextTask();
+        const startTime = box.getAnimations()[0].startTime;
+        // The last rendering update paints the image at the box's width.
+        frameTime = await frameTimeInPhase(frameTime, startTime, 50, 150);
+        internals.injectRenderingOpportunity(frameTime);
+        while (internals.frameSchedulerState() !== "idle")
+            await nextTask();
+
+        const leased = internals.renderClockTicks(document);
+        const countersBefore = internals.getRenderClockCounters();
+        frameTime = await frameTimeInPhase(frameTime, startTime, 250, 350);
+        const tookTickWithoutImage = await internals.injectClockTick(frameTime);
+        frameTime = await frameTimeInPhase(frameTime, startTime, 50, 150);
+        const tookTickWithImage = await internals.injectClockTick(frameTime);
+        const countersAfter = internals.getRenderClockCounters();
+        internals.setManualRenderingOpportunities(false);
+
+        println(`the lease was granted: ${leased}`);
+        println(`a lease took both ticks: ${tookTickWithoutImage && tookTickWithImage}`);
+        println(`frames presented: ${countersAfter.ticksPresented - countersBefore.ticksPresented}`);
+        println(`ticks handed over to the main thread: ${countersAfter.ticksNeedingMain - countersBefore.ticksNeedingMain}`);
+        done();
+    });
+</script>

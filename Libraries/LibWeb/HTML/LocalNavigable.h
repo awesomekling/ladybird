@@ -326,8 +326,8 @@ public:
     };
     Optional<RenderClockFrameKit> seal_render_clock_frame_kit();
     // On the render side, with the main thread idle: publishes what a tick recorded, and hands the frame to the
-    // compositor.
-    static void present_render_clock_frame(RenderClockFrameKit&);
+    // compositor. Returns whether it did.
+    static bool present_render_clock_frame(RenderClockFrameKit&);
     // On the render side, as the frame in flight `presented` of the kit's document presented: the ticks present after
     // it, as it was presented. Returns whether they can.
     static bool follow_presented_frame(RenderClockFrameKit&, Compositor::Presentation& presented);

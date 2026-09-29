@@ -157,7 +157,7 @@ fn record_display_list_impl<O: Observer>(
             recorder
                 .resources
                 .painted_vector_images
-                .extend(frame.vector_images.iter().map(|(id, request)| (*id, *request)));
+                .extend(frame.vector_images.iter().map(|(id, render)| (*id, render.clone())));
             recorder
                 .observer
                 .observe(|log| log.leaf(Operation::Scope(root_scope), Action::Copy, false));

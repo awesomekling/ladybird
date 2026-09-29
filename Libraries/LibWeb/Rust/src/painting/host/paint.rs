@@ -539,24 +539,44 @@ pub struct FfiSnapAreaGeometry {
     pub always_stop: bool,
 }
 
+/// An SVG-as-image render the host made: the display list it paints with, and the render itself,
+/// which the caller owns.
+#[repr(C)]
+pub struct FfiVectorImageRender {
+    pub display_list_id: u64,
+    pub render: *const c_void,
+}
+
 /// Renders SVG-as-image documents for a recording. Each call lays out and records another
 /// document, so only the main thread makes them, outside every paint pass.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiVectorImageCallbacks {
     pub context: *mut c_void,
-    pub resolve_vector_image_display_list: unsafe extern "C" fn(*mut c_void, *const FfiVectorImageRenderRequest) -> u64,
+    pub resolve_vector_image_display_list:
+        unsafe extern "C" fn(*mut c_void, *const FfiVectorImageRenderRequest) -> FfiVectorImageRender,
+    pub release_vector_image_render: unsafe extern "C" fn(*const c_void),
 }
 
 impl FfiVectorImageCallbacks {
     pub(crate) fn resolve_vector_image_display_list(
         &self,
         _: &crate::stage::MainThread,
-        request: &FfiVectorImageRenderRequest,
-    ) -> u64 {
+        request: crate::painting::record::vector_images::VectorImageRenderRequest,
+    ) -> crate::painting::record::vector_images::VectorImageRender {
         // SAFETY: The C++ host records the image's display list synchronously and reads the
         // request only for the duration of the call.
-        unsafe { (self.resolve_vector_image_display_list)(self.context, request) }
+        let render = unsafe { (self.resolve_vector_image_display_list)(self.context, &request.to_ffi()) };
+        // SAFETY: The host made the render for the request and hands it over, and releases what it made with
+        // `release_vector_image_render`.
+        unsafe {
+            crate::painting::record::vector_images::VectorImageRender::adopt(
+                request,
+                crate::painting::display_list::commands::DisplayListResourceId(render.display_list_id),
+                render.render,
+                self.release_vector_image_render,
+            )
+        }
     }
 }
 
@@ -567,6 +587,7 @@ pub struct FfiRecordingPublishCallbacks {
     pub add_font: unsafe extern "C" fn(*mut c_void, *const c_void),
     pub add_image_frame: unsafe extern "C" fn(*mut c_void, *const c_void),
     pub add_video_sink: unsafe extern "C" fn(*mut c_void, u64, u64),
+    pub add_vector_image_render: unsafe extern "C" fn(*mut c_void, *const c_void),
 }
 
 #[derive(Clone, Copy)]
@@ -575,6 +596,7 @@ pub(crate) struct RecordingPublishHost {
     add_font: unsafe extern "C" fn(*mut c_void, *const c_void),
     add_image_frame: unsafe extern "C" fn(*mut c_void, *const c_void),
     add_video_sink: unsafe extern "C" fn(*mut c_void, u64, u64),
+    add_vector_image_render: unsafe extern "C" fn(*mut c_void, *const c_void),
 }
 
 impl From<FfiRecordingPublishCallbacks> for RecordingPublishHost {
@@ -584,6 +606,7 @@ impl From<FfiRecordingPublishCallbacks> for RecordingPublishHost {
             add_font: host.add_font,
             add_image_frame: host.add_image_frame,
             add_video_sink: host.add_video_sink,
+            add_vector_image_render: host.add_vector_image_render,
         }
     }
 }
@@ -647,5 +670,14 @@ impl RecordingPublishHost {
     pub(crate) fn add_video_sink(&self, _: &impl PublishesToHost, resource_id: u64, sink_handle: u64) {
         // SAFETY: The C++ host registers the sink synchronously.
         unsafe { (self.add_video_sink)(self.context, resource_id, sink_handle) };
+    }
+
+    pub(crate) fn add_vector_image_render(
+        &self,
+        _: &impl PublishesToHost,
+        render: &crate::painting::record::vector_images::VectorImageRender,
+    ) {
+        // SAFETY: The C++ host adds what the live render holds synchronously.
+        unsafe { (self.add_vector_image_render)(self.context, render.as_raw()) };
     }
 }

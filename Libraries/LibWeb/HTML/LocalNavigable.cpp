@@ -6829,8 +6829,9 @@ Optional<Compositor::CompositorFrame> LocalNavigable::finish_compositor_frame(Pe
     VERIFY(document->has_committed_viewport_box());
     auto frame = presenter().build_frame(inputs, *source, move(published));
     // The recording painted an SVG-as-image the main thread had not rendered yet as an empty image. It renders the
-    // image before the next recording, which paints it.
-    if (should_record_display_list && Painting::last_recording_missed_vector_images(*document))
+    // image before the next recording, which paints it. A frame that could not be built presents nothing, and the next
+    // one records again.
+    if (!frame.has_value() || (should_record_display_list && Painting::last_recording_missed_vector_images(*document)))
         document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::PaintCommands);
     return frame;
 }
@@ -6909,8 +6910,10 @@ static bool present_from_frame_in_flight(Compositor::Presentation& presentation)
         presentation.published = published;
     }
     auto frame = presentation.presenter->build_frame(presentation.inputs, presentation.source, move(published));
-    bool const carries_scene = frame.display_list_update.has_value() || frame.visual_context_tree_update.has_value();
-    presentation.frame_sink->submit(move(frame));
+    if (!frame.has_value())
+        return false;
+    bool const carries_scene = frame->display_list_update.has_value() || frame->visual_context_tree_update.has_value();
+    presentation.frame_sink->submit(frame.release_value());
     if (carries_scene)
         presentation.presented_scene_epoch = presentation.presenter->did_present_scene();
     return true;
@@ -6957,6 +6960,9 @@ void LocalNavigable::adopt_presented_frame(PendingCompositorFrame& pending_frame
 {
     auto& presentation = *pending_frame.presentation;
     m_presenter->take_back_from_frame_in_flight();
+    // The frame could not be built, and the compositor lacks what the main thread paints for: it paints again.
+    if (!m_presenter->compositor_display_list_paint_config().has_value())
+        pending_frame.document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::PaintCommands);
     if (presentation.presented_scene_epoch.has_value())
         m_presenter->did_adopt_scene(*presentation.presented_scene_epoch);
     if (!presentation.published.has_value())
@@ -7037,7 +7043,7 @@ Optional<LocalNavigable::RenderClockFrameKit> LocalNavigable::seal_render_clock_
     return RenderClockFrameKit { .presentation = presentation.release_nonnull(), .recording = move(recording), .presented = false };
 }
 
-void LocalNavigable::present_render_clock_frame(RenderClockFrameKit& kit)
+bool LocalNavigable::present_render_clock_frame(RenderClockFrameKit& kit)
 {
     auto& presentation = *kit.presentation;
     // What the tick's layout moved of the visual contexts, a clip or a transform, goes to the compositor with the tree:
@@ -7064,11 +7070,12 @@ void LocalNavigable::present_render_clock_frame(RenderClockFrameKit& kit)
     presentation.published.clear();
     presentation.presented_scene_epoch.clear();
     kit.recording->timer.start();
-    present_from_frame_in_flight(presentation);
+    bool const presented = present_from_frame_in_flight(presentation);
     // The next tick's recording is identical to what this one published where it changes nothing.
     if (presentation.published.has_value() && presentation.published->becomes_paint_command_cache_source)
         presentation.paint_command_cache_source = presentation.published->display_list;
     kit.presented = true;
+    return presented;
 }
 
 bool LocalNavigable::follow_presented_frame(RenderClockFrameKit& kit, Compositor::Presentation& presented)

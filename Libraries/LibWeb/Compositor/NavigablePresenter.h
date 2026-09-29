@@ -259,8 +259,10 @@ public:
     u64 compositor_visual_animation_count() const { return m_compositor_visual_animation_count.load(); }
 
     // Builds the frame that brings the compositor context up to date with `published` (or, if the frame recorded
-    // nothing, with its source's tree and scroll state). Reaches no document but through `source`.
-    CompositorFrame build_frame(PresentationInputs&, PresentationSource&, Optional<PublishedDisplayList> published);
+    // nothing, with its source's tree and scroll state). Reaches no document but through `source`. Builds nothing where
+    // the frame references a resource the storage lacks: the compositor keeps what it shows, and the next frame the
+    // main thread paints records again.
+    Optional<CompositorFrame> build_frame(PresentationInputs&, PresentationSource&, Optional<PublishedDisplayList> published);
 
 private:
     NavigablePresenter() = default;

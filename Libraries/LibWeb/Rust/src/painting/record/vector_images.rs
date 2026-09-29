@@ -74,7 +74,7 @@ pub(crate) fn painted_vector_images(
     let prediction_inputs = {
         let paint_state = layout_arena.paint_state().borrow();
         if let Some(recording) = paint_state.last_recording.as_ref() {
-            last_painted.extend(recording.vector_images.values().copied());
+            last_painted.extend(recording.vector_images.values().map(|render| render.request));
             last_painted.extend(recording.missed_vector_images.iter().copied());
         }
         paint_state
@@ -302,21 +302,73 @@ impl VectorImageRenderRequest {
     }
 }
 
-/// The display lists of the SVG-as-image renders a recording paints. Rendering one lays out and
-/// records another document, so the main thread resolves them and hands the recording this map;
-/// the recording only looks renders up in it.
-#[derive(Clone, Default)]
+/// An SVG-as-image render the main thread made: the display list a recording paints for `request`,
+/// with every resource the list references, which the host holds until the last map or frame that
+/// names the render lets it go. A recording carries the renders it paints to its publication, which
+/// hands them to the storage the frame presents from whole: whatever the storage dropped since the
+/// main thread made them (a frame that painted none of them retains none), the frame never names a
+/// display list the storage lacks.
+pub(crate) struct VectorImageRender {
+    pub(crate) request: VectorImageRenderRequest,
+    pub(crate) display_list: DisplayListResourceId,
+    retained: *const std::ffi::c_void,
+    release: unsafe extern "C" fn(*const std::ffi::c_void),
+}
+
+// SAFETY: The host's render is immutable, and what it holds is reference counted atomically.
+unsafe impl Send for VectorImageRender {}
+// SAFETY: As above.
+unsafe impl Sync for VectorImageRender {}
+
+impl VectorImageRender {
+    /// # Safety
+    ///
+    /// `retained` must be a render the host made for `request`, painted with `display_list`, whose
+    /// ownership passes to the returned value; `release` must release it.
+    pub(crate) unsafe fn adopt(
+        request: VectorImageRenderRequest,
+        display_list: DisplayListResourceId,
+        retained: *const std::ffi::c_void,
+        release: unsafe extern "C" fn(*const std::ffi::c_void),
+    ) -> Self {
+        Self {
+            request,
+            display_list,
+            retained,
+            release,
+        }
+    }
+
+    pub(crate) fn as_raw(&self) -> *const std::ffi::c_void {
+        self.retained
+    }
+}
+
+impl Drop for VectorImageRender {
+    fn drop(&mut self) {
+        // SAFETY: The render owns what it retained, and releases it once.
+        unsafe { (self.release)(self.retained) };
+    }
+}
+
+/// The SVG-as-image renders a frame paints, by the display list it paints each with.
+pub(crate) type PaintedVectorImages = HashMap<DisplayListResourceId, std::sync::Arc<VectorImageRender>>;
+
+/// The SVG-as-image renders a recording paints. Rendering one lays out and records another
+/// document, so the main thread resolves them and hands the recording this map; the recording only
+/// looks renders up in it.
+#[derive(Default)]
 pub(crate) struct VectorImageDisplayLists {
-    lists: HashMap<VectorImageRenderRequest, DisplayListResourceId>,
+    renders: HashMap<VectorImageRenderRequest, std::sync::Arc<VectorImageRender>>,
 }
 
 impl VectorImageDisplayLists {
-    pub(crate) fn get(&self, request: &VectorImageRenderRequest) -> Option<DisplayListResourceId> {
-        self.lists.get(request).copied()
+    pub(crate) fn get(&self, request: &VectorImageRenderRequest) -> Option<&std::sync::Arc<VectorImageRender>> {
+        self.renders.get(request)
     }
 
-    pub(crate) fn insert(&mut self, request: VectorImageRenderRequest, display_list: DisplayListResourceId) {
-        self.lists.insert(request, display_list);
+    pub(crate) fn insert(&mut self, render: VectorImageRender) {
+        self.renders.insert(render.request, std::sync::Arc::new(render));
     }
 }
 

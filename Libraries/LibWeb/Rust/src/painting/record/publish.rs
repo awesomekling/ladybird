@@ -60,6 +60,9 @@ pub(crate) fn publish_to_host(
     for (resource_id, sink_handle) in video_sinks {
         publish.add_video_sink(main_thread, resource_id, sink_handle);
     }
+    for render in painted_vector_images.values() {
+        publish.add_vector_image_render(main_thread, render);
+    }
     output.vector_images = painted_vector_images;
     output.missed_vector_images = missed_vector_images;
     if let Some(recording_from_scratch) = recording_from_scratch {

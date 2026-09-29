@@ -791,19 +791,27 @@ DisplayListResourceSet DisplayListResourceStorage::collect_referenced_resources(
     return referenced_resources;
 }
 
-DisplayListResourceTransaction DisplayListResourceStorage::create_transaction(
+Optional<DisplayListResourceTransaction> DisplayListResourceStorage::create_transaction(
     DisplayListResourceSet const& previous,
     DisplayListResourceSet const& current) const
 {
     DisplayListResourceTransaction transaction;
 
     for (auto id : current.fonts) {
-        if (!previous.fonts.contains(id))
-            transaction.fonts.append({ id, font(id) });
+        if (previous.fonts.contains(id))
+            continue;
+        auto font = m_fonts.get(id.value());
+        if (!font.has_value())
+            return {};
+        transaction.fonts.append({ id, **font });
     }
     for (auto id : current.image_frames) {
-        if (!previous.image_frames.contains(id))
-            transaction.image_frames.append({ id, image_frame(id) });
+        if (previous.image_frames.contains(id))
+            continue;
+        auto frame = m_image_frames.get(id.value());
+        if (!frame.has_value())
+            return {};
+        transaction.image_frames.append({ id, (*frame)->frame });
     }
     for (auto id : current.video_sinks) {
         if (previous.video_sinks.contains(id))
@@ -812,8 +820,12 @@ DisplayListResourceTransaction DisplayListResourceStorage::create_transaction(
             transaction.video_sinks.append({ id, *sink_handle });
     }
     for (auto id : current.display_lists) {
-        if (!previous.display_lists.contains(id))
-            transaction.display_lists.append({ display_list_resource(id).display_list, display_list_visual_context_tree(id) });
+        if (previous.display_lists.contains(id))
+            continue;
+        auto resource = m_display_lists.get(id.value());
+        if (!resource.has_value())
+            return {};
+        transaction.display_lists.append({ resource->display_list, resource->visual_context_tree });
     }
 
     for (auto id : previous.fonts) {
@@ -833,6 +845,26 @@ DisplayListResourceTransaction DisplayListResourceStorage::create_transaction(
             transaction.display_list_ids_to_remove.append(id);
     }
     return transaction;
+}
+
+Optional<DisplayListResourceTransaction> DisplayListResourceStorage::transaction_adding_display_list(DisplayListResourceId id) const
+{
+    DisplayListResourceSet resources;
+    add_referenced_display_list(id, resources);
+    return create_transaction({}, resources);
+}
+
+void DisplayListResourceStorage::add_resources(DisplayListResourceTransaction const& resources)
+{
+    for (auto const& font : resources.fonts)
+        m_fonts.ensure(font.id.value(), [&] { return font.font; });
+    for (auto const& frame : resources.image_frames)
+        m_image_frames.ensure(frame.id.value(), [&] { return make<DisplayListStoredImageFrameResource>(frame.frame); });
+    for (auto const& video_sink : resources.video_sinks)
+        add_video_sink(video_sink.id, video_sink.sink_handle);
+    for (auto const& display_list : resources.display_lists)
+        add_display_list(display_list.display_list, display_list.visual_context_tree);
+    m_has_resources_added_since_last_retain = true;
 }
 
 void DisplayListResourceStorage::apply_transaction(DisplayListResourceTransaction&& transaction)
