@@ -28,6 +28,7 @@ use crate::render_owner::{ChangeSeq, ScriptForcedRead};
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 /// The rows of a document's layout as the arena published them: the shape and style of every row, the row each node is
@@ -96,8 +97,7 @@ impl RowSnapshot {
         let published = unsafe { &*std::ptr::addr_of!((*handle.cast::<LayoutNodeArena>()).published_rows) };
         // SAFETY: As above; only the document thread writes the rows it adopted, as it adopts them.
         let adopted = unsafe { &HostTables::beside_frame(handle).adopted_rows };
-        // SAFETY: As above.
-        if unsafe { adopted.latest() }.generation > unsafe { published.latest() }.generation {
+        if adopted.is_later_than(published) {
             adopted
         } else {
             published
@@ -296,19 +296,32 @@ enum Freshness {
 /// document thread takes a reference of its own on the rows it reads beside a frame in flight ([`FrameRows`]), and
 /// borrows them only where no frame in flight owns the arena ([`RowSnapshot::published`]).
 #[derive(Default)]
-pub(crate) struct RowSnapshotSlot(Mutex<Arc<RowSnapshot>>);
+pub(crate) struct RowSnapshotSlot {
+    rows: Mutex<Arc<RowSnapshot>>,
+    /// The generation of the rows the slot holds, which tells a reader which of two slots holds the later rows
+    /// without taking either lock.
+    generation: AtomicU64,
+}
 
 impl RowSnapshotSlot {
     fn rows(&self) -> std::sync::MutexGuard<'_, Arc<RowSnapshot>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.rows.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Replaces the rows the slot holds with `rows`, on the thread that writes the slot: the arena's owner, or the
     /// document thread for the rows it adopted.
     pub(crate) fn publish(&self, rows: Arc<RowSnapshot>) {
+        let mut held = self.rows();
+        self.generation.store(rows.generation, Ordering::Release);
         // The rows it held go once the slot is let go of: a reader may hold the last reference to them.
-        let previous = std::mem::replace(&mut *self.rows(), rows);
+        let previous = std::mem::replace(&mut *held, rows);
+        drop(held);
         drop(previous);
+    }
+
+    /// Whether the slot holds later rows than `other` does.
+    fn is_later_than(&self, other: &Self) -> bool {
+        self.generation.load(Ordering::Acquire) > other.generation.load(Ordering::Acquire)
     }
 
     /// The rows the slot holds, with a reference of the caller's own.
@@ -347,16 +360,8 @@ impl FrameRows {
     /// `handle` must be a live handle on the document thread.
     pub(crate) unsafe fn of(handle: *mut c_void) -> Self {
         assert!(!handle.is_null(), "layout node arena handle is null");
-        // SAFETY: Guaranteed by the caller. A handle is also a pointer to its arena, and the projection borrows nothing
-        // of the arena beside the slot, which guards what it holds.
-        let published = unsafe { &*std::ptr::addr_of!((*handle.cast::<LayoutNodeArena>()).published_rows) }.shared();
-        // SAFETY: As above; only the document thread writes the rows it adopted.
-        let adopted = unsafe { &HostTables::beside_frame(handle).adopted_rows }.shared();
-        Self(if adopted.generation > published.generation {
-            adopted
-        } else {
-            published
-        })
+        // SAFETY: Guaranteed by the caller.
+        Self(unsafe { RowSnapshot::read_slot(handle) }.shared())
     }
 
     /// The rows, for a holder that keeps them beyond the read.
