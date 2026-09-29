@@ -72,6 +72,9 @@ TableSpans table_spans_of(DOM::Node const*);
 // What a style change does to a box beyond the record its row installs: re-deriving its values from the record, or,
 // for a change that only moves the images it names, loading and observing those.
 WEB_API void apply_style_to_box(Painting::BoxSlot const&, CSS::PublishedStyleRecord const&);
+// Like apply_style_to_box(), for a box whose row the render owner applied the record to ahead of the host, as it took
+// the style transaction whose batch the host installs: the row adopts it, and keeps its style and its layout.
+void adopt_owner_style_of_box(Painting::BoxSlot const&, CSS::PublishedStyleRecord const&);
 WEB_API void attach_style_resources_to_box(Painting::BoxSlot const&);
 // Sets the record the box holds as its DOM target's, unless the box holds a style of its own.
 void set_style_record_of_box(Painting::BoxSlot const&, CSS::PublishedStyleRecord const*);

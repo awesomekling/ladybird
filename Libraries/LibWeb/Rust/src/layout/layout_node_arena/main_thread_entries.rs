@@ -98,13 +98,17 @@ impl OwnerAppliedStyle {
 unsafe extern "C" fn layout_arena_finish_owner_style_host_half(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // What the rows the owner applied marked that the install did not take goes with the update.
-    if let Some(host_tables) = main_thread.host_tables() {
-        host_tables.hold_flight_style_damages(Default::default());
-    }
+    // What the rows the owner applied marked that the install did not take goes with the update. The install took the
+    // marks of each row it adopted the record of, so where none is left, it adopted every row.
+    let host_adopted_every_row = main_thread
+        .host_tables()
+        .is_none_or(|host_tables| host_tables.take_flight_style_damages().is_empty());
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
     if document.is_valid() {
-        crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::FinishOwnerStyleHostHalf);
+        crate::render_owner::send_arena_change(
+            document,
+            crate::render_owner::ArenaChange::FinishOwnerStyleHostHalf { host_adopted_every_row },
+        );
     }
 }

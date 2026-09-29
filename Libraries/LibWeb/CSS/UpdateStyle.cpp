@@ -317,7 +317,7 @@ void StyleEffectDrain::apply_layout_node_style(DOM::Document& document, StyleNod
     auto applied_by_flight = marks_of_flight(arena, style_node, false, style_record ? style_record->identity() : StyleRecordID {});
     if (applied_by_flight.has_value() && !moves_pseudo_element_records && flight_marks_cover(*applied_by_flight, invalidation)) {
         if (box && style_record)
-            Layout::apply_style_to_box(box, *style_record);
+            Layout::adopt_owner_style_of_box(box, *style_record);
         return;
     }
     (void)marks_of_flight(arena, style_node, true);

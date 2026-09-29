@@ -624,14 +624,20 @@ static void did_update_box_style_record(Painting::BoxSlot const& box, DOM::Node 
     document.forget_snapped_areas_of_scroll_container(snap_container);
 }
 
-void apply_style_to_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord const& style_record)
+enum class RowStyle {
+    Install,
+    AdoptOwners,
+};
+
+static void apply_style_to_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord const& style_record, RowStyle row_style)
 {
     if (!box.is_live() || box.is_text())
         return;
     // The install lets go of the row's image observers and notes that it attached no images, which is all a style that
     // holds none attaches. The observers go once the row's new ones observe, so a shared resource is never dropped and
     // refetched.
-    auto released_image_observers = adopt_own_if_nonnull(static_cast<Painting::StyleImageObserverSet*>(RustFFI::layout_arena_install_row_style(box.arena(), box.slot(), style_record.handle())));
+    auto* send_row_style = row_style == RowStyle::AdoptOwners ? RustFFI::layout_arena_adopt_owner_row_style : RustFFI::layout_arena_install_row_style;
+    auto released_image_observers = adopt_own_if_nonnull(static_cast<Painting::StyleImageObserverSet*>(send_row_style(box.arena(), box.slot(), style_record.handle())));
     auto dom_node = box.dom_node();
     did_update_box_style_record(box, dom_node.ptr(), style_record.payloads());
     if (has_flag(style_record.dependency_flags(), CSS::StyleRecordDependencyFlag::HoldsImageValues)) {
@@ -640,6 +646,16 @@ void apply_style_to_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord 
     }
     // Only a row that held images has paint facts of them to clear.
     Painting::push_paint_facts_after_style_attach(box, dom_node.ptr(), released_image_observers ? Painting::StyleHoldsImageValues::No : Painting::StyleHoldsImageValues::NoAndHeldNone);
+}
+
+void apply_style_to_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord const& style_record)
+{
+    apply_style_to_box(box, style_record, RowStyle::Install);
+}
+
+void adopt_owner_style_of_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord const& style_record)
+{
+    apply_style_to_box(box, style_record, RowStyle::AdoptOwners);
 }
 
 void attach_style_resources_to_box(Painting::BoxSlot const& box)
