@@ -420,7 +420,7 @@ void push_paint_facts_after_style_attach(BoxSlot const& row, DOM::Node* dom_node
         push_image_map_area_facts_onto(*image_element, row);
     if (style_holds_image_values == StyleHoldsImageValues::Yes) {
         push_layer_image_paint_facts(row);
-    } else {
+    } else if (style_holds_image_values == StyleHoldsImageValues::No) {
         auto& journal = row.document().invalidation_journal();
         if (auto identity = row.dom_node_identity()) {
             journal.note_layer_image_paint_facts_cleared(identity);

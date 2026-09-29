@@ -12,7 +12,10 @@
 namespace Web::Painting {
 
 enum class StyleHoldsImageValues : u8 {
+    // The row may have held images before: their paint facts are cleared.
     No,
+    // The row held no images before either, so it has no paint facts of them to clear.
+    NoAndHeldNone,
     Yes,
 };
 

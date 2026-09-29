@@ -596,12 +596,11 @@ static Painting::BoxSlot scroll_snap_container_of(Painting::BoxSlot const& box, 
     return box;
 }
 
-// What a box taking a style record tells the rest of the document.
-static void did_update_box_style_record(Painting::BoxSlot const& box, void const* style_payloads)
+// What a box taking a style record tells the rest of the document. `dom_node` is the node the box was built for.
+static void did_update_box_style_record(Painting::BoxSlot const& box, DOM::Node const* dom_node, void const* style_payloads)
 {
     auto& document = box.document();
-    auto dom_node = box.dom_node();
-    if (auto const* element = as_if<DOM::Element>(dom_node.ptr()); element && element->has_style(CSS::PseudoElement::Selection))
+    if (auto const* element = as_if<DOM::Element>(dom_node); element && element->has_style(CSS::PseudoElement::Selection))
         Painting::push_selection_pseudo_style(*element);
 
     if (CSS::style_group_from_payloads<CSS::ComputedValues::MiscResetValues>(style_payloads)->scroll_snap_type_value().strictness != CSS::ScrollSnapStrictness::None)
@@ -609,7 +608,7 @@ static void did_update_box_style_record(Painting::BoxSlot const& box, void const
 
     // NB: The root element's style can be published before the layout tree gives the document a viewport to snap
     //     with, and is published again once building the layout tree binds this node's style record.
-    auto snap_container = scroll_snap_container_of(box, dom_node.ptr());
+    auto snap_container = scroll_snap_container_of(box, dom_node);
     if (!snap_container)
         return;
 
@@ -629,10 +628,18 @@ void apply_style_to_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord 
 {
     if (!box.is_live() || box.is_text())
         return;
-    auto* old_image_observers = RustFFI::layout_arena_install_row_style(box.arena(), box.slot(), style_record.handle());
-    did_update_box_style_record(box, style_record.payloads());
-    delete static_cast<Painting::StyleImageObserverSet*>(old_image_observers);
-    attach_style_resources_to_box(box);
+    // The install lets go of the row's image observers and notes that it attached no images, which is all a style that
+    // holds none attaches. The observers go once the row's new ones observe, so a shared resource is never dropped and
+    // refetched.
+    auto released_image_observers = adopt_own_if_nonnull(static_cast<Painting::StyleImageObserverSet*>(RustFFI::layout_arena_install_row_style(box.arena(), box.slot(), style_record.handle())));
+    auto dom_node = box.dom_node();
+    did_update_box_style_record(box, dom_node.ptr(), style_record.payloads());
+    if (has_flag(style_record.dependency_flags(), CSS::StyleRecordDependencyFlag::HoldsImageValues)) {
+        attach_style_resources_to_box(box);
+        return;
+    }
+    // Only a row that held images has paint facts of them to clear.
+    Painting::push_paint_facts_after_style_attach(box, dom_node.ptr(), released_image_observers ? Painting::StyleHoldsImageValues::No : Painting::StyleHoldsImageValues::NoAndHeldNone);
 }
 
 void attach_style_resources_to_box(Painting::BoxSlot const& box)
@@ -714,7 +721,7 @@ void set_style_record_of_box(Painting::BoxSlot const& box, CSS::PublishedStyleRe
     // A layout-derived record is independent of its DOM target's record. A rendering consequence replaces and
     // re-derives it explicitly through apply_style_to_box().
     if (RustFFI::layout_arena_replace_row_style_record(box.arena(), box.slot(), style_record->handle()))
-        did_update_box_style_record(box, style_record->payloads());
+        did_update_box_style_record(box, box.dom_node().ptr(), style_record->payloads());
 }
 
 // Whether a box is the one its pseudo-element is bound to. The generated content inside the box carries the same
