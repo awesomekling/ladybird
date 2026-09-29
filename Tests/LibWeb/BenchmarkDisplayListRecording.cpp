@@ -378,9 +378,12 @@ void time_rust_recordings(DocumentShape shape, StringView label)
         auto placeholder_display_list = Compositing::DisplayList::create_from_command_bytes(visual_context_tree, {}, {});
         Web::Painting::InspectorOverlayInputs overlay_inputs;
         auto timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
-        auto display_list = Web::Painting::record_rust_display_list(document, *placeholder_display_list, loaded_page.display_list_resource_storage, Web::Painting::PaintCommandCacheMode::ReadWrite, benchmark_paint_config(), overlay_inputs);
+        auto recording = Web::Painting::begin_rust_display_list_recording(document, *placeholder_display_list, loaded_page.display_list_resource_storage, Web::Painting::PaintCommandCacheMode::ReadWrite, benchmark_paint_config(), overlay_inputs, Web::Painting::RecordingRun::Now);
+        VERIFY(recording.has_value());
+        Web::Painting::DocumentPresentationSource source { document, 0 };
+        auto& paint_state = document.paint_state();
+        (void)Web::Painting::publish_rust_display_list_recording(*recording, paint_state.display_list_used_as_paint_command_cache_source(), paint_state.paint_command_cache_source_referenced_resources(), source);
         samples.microseconds.append(timer.elapsed_time().to_microseconds());
-        VERIFY(display_list);
     }
     samples.report(label);
 }

@@ -12,6 +12,7 @@
 #include <LibCore/ElapsedTimer.h>
 #include <LibGC/Ptr.h>
 #include <LibGfx/Color.h>
+#include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/PaintableTypes.h>
@@ -30,7 +31,7 @@ enum class RecordingRun : u8 {
 
 // The ticket a recording the main thread submitted answers on, which the main thread holds to learn whether the
 // recording is still in flight: the document has not taken it in yet.
-class SubmittedRecordingTicket {
+class WEB_API SubmittedRecordingTicket {
 public:
     SubmittedRecordingTicket() = default;
     // Adopts a ticket retained for the caller.
