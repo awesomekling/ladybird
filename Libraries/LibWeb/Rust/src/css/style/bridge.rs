@@ -4633,6 +4633,8 @@ pub(crate) struct HomeAnswers {
     sheets: u32,
     /// The elements with anchor names registered.
     anchored: HashSet<StyleNodeID>,
+    /// Whether a registration the main thread sent since the last publication may have moved anchor names.
+    anchor_names_unpublished: bool,
     /// The transition steps the passes decided that the host has not taken yet.
     transition_steps: super::transition_step::TransitionStepsForHost,
     /// The animation plans the rows left that the host has not taken yet.
@@ -5033,6 +5035,8 @@ impl HomeAnswers {
                 self.environments.take_named_in_settle(*node, *pseudo_kind);
             }
             StyleChange::Engine(EngineChange::RegisterAnchorNames { node, has_names, .. }) => {
+                // Only an element that has names, or had them, moves any.
+                self.anchor_names_unpublished |= *has_names || self.anchored.contains(node);
                 match has_names {
                     true => self.anchored.insert(*node),
                     false => self.anchored.remove(node),
@@ -6506,10 +6510,15 @@ pub unsafe extern "C" fn style_engine_register_anchor_names(
 /// Engine must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_publish_anchor_names(engine: StyleEngineInputHandle) {
-    crate::render_owner::send_arena_change(
-        engine.home().document(),
-        crate::render_owner::ArenaChange::PublishAnchorNames,
-    );
+    // SAFETY: On the main thread.
+    let answers = unsafe { engine.home().answers() };
+    // Registration alone moves names, so where none may have, there is nothing to publish.
+    if std::mem::take(&mut answers.anchor_names_unpublished) {
+        crate::render_owner::send_arena_change(
+            engine.home().document(),
+            crate::render_owner::ArenaChange::PublishAnchorNames,
+        );
+    }
 }
 
 /// Interns one name identity and returns its document-local atom.
