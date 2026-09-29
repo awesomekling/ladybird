@@ -28,6 +28,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Condvar, Mutex, OnceLock};
 use std::thread::ThreadId;
+use std::time::{Duration, Instant};
 
 type Job = Box<dyn FnOnce() + Send>;
 
@@ -67,6 +68,17 @@ mod tsan {
 struct StageThread {
     jobs: Sender<StageMessage>,
     id: ThreadId,
+    /// How long a thread waiting for this thread's answer polls for it before sleeping.
+    answer_spin: Duration,
+}
+
+/// The stage thread's end of its callers' messages, and how it waits for them.
+struct Incoming {
+    messages: Receiver<StageMessage>,
+    /// Whether the stage thread answered a thread waiting for it since it last waited for a message.
+    answered_a_waiting_thread: Cell<bool>,
+    /// How long the stage thread polls for the next message after answering a thread that waited for it.
+    next_question_spin: Duration,
 }
 
 /// What the frame scheduler on the main thread does for a submitted stage.
@@ -117,7 +129,18 @@ const STAGE_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 impl StageThread {
     fn spawn(name: &str) -> Self {
-        let (jobs, incoming) = channel::<StageMessage>();
+        let (jobs, messages) = channel::<StageMessage>();
+        // A thread woken from sleep takes tens of microseconds to run again, which a handoff between a document thread
+        // and the stage thread pays twice. With one core, polling only keeps the thread that would answer from running.
+        let polling_helps = std::thread::available_parallelism().is_ok_and(|cores| cores.get() > 1);
+        let spin = |duration| if polling_helps { duration } else { Duration::ZERO };
+        let incoming = Incoming {
+            messages,
+            answered_a_waiting_thread: Cell::new(false),
+            // A thread that just had its answer mostly asks again right away, in a script's run of style and layout
+            // reads.
+            next_question_spin: spin(Duration::from_micros(200)),
+        };
         let thread = std::thread::Builder::new()
             .name(name.into())
             .stack_size(STAGE_THREAD_STACK_SIZE)
@@ -141,6 +164,7 @@ impl StageThread {
         Self {
             jobs,
             id: thread.thread().id(),
+            answer_spin: spin(Duration::from_millis(1)),
         }
     }
 }
@@ -150,7 +174,7 @@ thread_local! {
     // submitted it.
     static WAITING_CALLER: Cell<Option<ThreadId>> = const { Cell::new(None) };
     // On the stage thread, where the caller's messages arrive.
-    static INCOMING: RefCell<Option<Receiver<StageMessage>>> = const { RefCell::new(None) };
+    static INCOMING: RefCell<Option<Incoming>> = const { RefCell::new(None) };
     // On the stage thread, the messages that arrived while it ran something that could not take them, in the order
     // they arrived, ahead of everything still incoming.
     static DEFERRED: RefCell<VecDeque<StageMessage>> = const { RefCell::new(VecDeque::new()) };
@@ -1372,8 +1396,7 @@ fn next_message() -> Option<StageMessage> {
     // With nothing waiting, the owner takes in what the document threads sent it before it waits for more: beside
     // them, rather than at the start of the next unit or question they would wait for.
     if on_owner_thread() {
-        let waiting =
-            INCOMING.with(|incoming| incoming.borrow().as_ref().and_then(|incoming| incoming.try_recv().ok()));
+        let waiting = try_incoming();
         if waiting.is_some() {
             return waiting;
         }
@@ -1387,7 +1410,48 @@ fn next_message() -> Option<StageMessage> {
 /// The next message to arrive, for a wait inside something the stage thread runs, which leaves what it defers for the
 /// stage thread's own loop.
 fn next_incoming() -> Option<StageMessage> {
-    INCOMING.with(|incoming| incoming.borrow().as_ref().and_then(|incoming| incoming.recv().ok()))
+    INCOMING.with_borrow(|incoming| {
+        let incoming = incoming.as_ref()?;
+        let spin = if incoming.answered_a_waiting_thread.replace(false) {
+            incoming.next_question_spin
+        } else {
+            Duration::ZERO
+        };
+        recv_after_spinning(&incoming.messages, spin).ok()
+    })
+}
+
+/// The next message that has already arrived, if any.
+fn try_incoming() -> Option<StageMessage> {
+    INCOMING.with_borrow(|incoming| incoming.as_ref()?.messages.try_recv().ok())
+}
+
+/// On the stage thread, notes that it answered a thread waiting for it.
+fn note_answered_a_waiting_thread() {
+    INCOMING.with_borrow(|incoming| {
+        if let Some(incoming) = incoming {
+            incoming.answered_a_waiting_thread.set(true);
+        }
+    });
+}
+
+/// Receives from `receiver`, polling it for up to `spin` before sleeping.
+fn recv_after_spinning<T>(receiver: &Receiver<T>, spin: Duration) -> Result<T, std::sync::mpsc::RecvError> {
+    if spin.is_zero() {
+        return receiver.recv();
+    }
+    let deadline = Instant::now() + spin;
+    loop {
+        match receiver.try_recv() {
+            Ok(value) => return Ok(value),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => return Err(std::sync::mpsc::RecvError),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+        if Instant::now() >= deadline {
+            return receiver.recv();
+        }
+        std::hint::spin_loop();
+    }
 }
 
 /// On the Rendering thread, between two units of the rendering update of `document` it runs: serves every message
@@ -1398,9 +1462,7 @@ fn next_incoming() -> Option<StageMessage> {
 pub(crate) fn serve_messages_between_units(document: crate::render_owner::DocumentId) -> bool {
     let thread = stage_thread();
     let mut recalled = RECALLED_WHILE_HELD.with(|recalled| recalled.replace(false));
-    while let Some(message) =
-        INCOMING.with(|incoming| incoming.borrow().as_ref().and_then(|incoming| incoming.try_recv().ok()))
-    {
+    while let Some(message) = try_incoming() {
         let deferred = DEFERRED.with_borrow(|deferred| {
             deferred
                 .iter()
@@ -1563,6 +1625,7 @@ unsafe fn run_stage_on<R: Send>(thread: &'static StageThread, stage: impl FnOnce
         *slot = Some(std::panic::catch_unwind(AssertUnwindSafe(stage)));
         WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
         tsan::release(thread);
+        note_answered_a_waiting_thread();
         // The calling thread is waiting on this reply, so it cannot have gone away.
         let _ = to_caller.send(());
     });
@@ -1576,7 +1639,7 @@ unsafe fn run_stage_on<R: Send>(thread: &'static StageThread, stage: impl FnOnce
     }
     // A stage submitted earlier runs first; this stage queues behind it and does not reach what it
     // owns, so the caller waits for this stage's reply only.
-    from_stage.recv().unwrap_or_else(|_| std::process::abort());
+    recv_after_spinning(&from_stage, thread.answer_spin).unwrap_or_else(|_| std::process::abort());
     tsan::acquire(thread);
     match outcome.expect("a finished stage leaves its outcome") {
         Ok(value) => value,
@@ -1601,6 +1664,7 @@ impl<R> OwnerReplyTo<R> {
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(unit));
         WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
         tsan::release(thread);
+        note_answered_a_waiting_thread();
         // The waiting thread keeps the receiver until it has the answer.
         let _ = reply.send(outcome);
     }
@@ -1650,7 +1714,7 @@ fn send_and_wait<R>(
         // The Rendering thread only goes away if the process is going away.
         std::process::abort();
     }
-    let outcome = answered.recv().unwrap_or_else(|_| std::process::abort());
+    let outcome = recv_after_spinning(&answered, thread.answer_spin).unwrap_or_else(|_| std::process::abort());
     tsan::acquire(thread);
     outcome
 }
