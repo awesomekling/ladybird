@@ -36,6 +36,7 @@ use crate::css::style::bridge::{
     FfiRowSampledInPass, FfiStyleInvalidationField, sample_installed_record_for_clock_tick,
 };
 use crate::css::style::engine_home::{AtHome, Holder, Owed, StyleEngineLoan};
+use crate::css::style::published_record::PublishedStyleRecord;
 use crate::css::style::tree::StyleNodeID;
 use crate::css::style::{StyleEngineHandle, StyleEngineInputHandle};
 use crate::layout::node_data::NodeSlotId;
@@ -87,10 +88,18 @@ pub(crate) struct ClockTickEntry {
     pub(crate) style_node: StyleNodeID,
     /// The record the target held before the tick: one, so that an element that holds none adopts nothing.
     pub(crate) style_record_before: NonZeroU64,
-    /// The sample; `present` is false where the engine could not take it and the host samples the
-    /// target itself.
+    /// What the tick sampled, or `None` where the engine could not take the sample and the host samples the target
+    /// itself.
+    pub(crate) sampled: Option<ClockTickSample>,
+}
+
+/// A sample a tick took of a target.
+pub(crate) struct ClockTickSample {
     pub(crate) sample: FfiRowSampledInPass,
-    /// Whether the arena took the sample's record ahead of the host.
+    /// The record the sample published, which the entry holds live until the host installs it or lets the entry go:
+    /// the arena's log, which pins it too, moves on to the record of a later tick over the target.
+    pub(crate) record: Arc<PublishedStyleRecord>,
+    /// Whether the arena took the record ahead of the host.
     pub(crate) installed_in_arena: bool,
 }
 
@@ -352,21 +361,32 @@ impl DocumentClock {
                     &samples,
                 )
             };
-            let Some(sample) = sampled else {
-                outcome = FfiClockTickOutcome::NeedsMain;
-                presentable = false;
-                entries.push(ClockTickEntry {
-                    style_node: target.style_node,
-                    style_record_before: style_record,
-                    sample: FfiRowSampledInPass::absent(),
-                    installed_in_arena: false,
-                });
-                continue;
-            };
             // The sample moved nothing the record composed.
-            if sample.style_record == style_record.get() {
+            if sampled
+                .as_ref()
+                .is_some_and(|sample| sample.style_record == style_record.get())
+            {
                 continue;
             }
+            let published = sampled.and_then(|sample| {
+                // SAFETY: As above.
+                let record = unsafe { &*engine }.publish_style_record(sample.style_record);
+                debug_assert!(record.is_some(), "a sample publishes a record the engine holds");
+                Some((sample, record?))
+            });
+            let Some((sample, record)) = published else {
+                outcome = FfiClockTickOutcome::NeedsMain;
+                presentable = false;
+                leave_entry(
+                    entries,
+                    ClockTickEntry {
+                        style_node: target.style_node,
+                        style_record_before: style_record,
+                        sampled: None,
+                    },
+                );
+                continue;
+            };
             let level = sample.invalidation.invalidation & 0x3;
             let needs_layout_tree_rebuild = level >= 3;
             let needs_relayout = level >= 2;
@@ -381,23 +401,18 @@ impl DocumentClock {
                     sample.invalidation.invalidation & FfiStyleInvalidationField::AffectsHitTesting as u32 != 0;
                 self.repaints.push((row, affects_hit_testing));
             }
-            // Ticks the host has not adopted yet fold into one entry per target, over the record the
-            // host holds: the arena's log keeps only the last record too.
-            if let Some(entry) = entries.iter_mut().find(|entry| {
-                entry.style_node == target.style_node
-                    && entry.sample.style_record == style_record.get()
-                    && entry.installed_in_arena
-                    && installed_in_arena
-            }) {
-                entry.sample = folded_sample(&entry.sample, sample);
-                continue;
-            }
-            entries.push(ClockTickEntry {
-                style_node: target.style_node,
-                style_record_before: style_record,
-                sample,
-                installed_in_arena,
-            });
+            leave_entry(
+                entries,
+                ClockTickEntry {
+                    style_node: target.style_node,
+                    style_record_before: style_record,
+                    sampled: Some(ClockTickSample {
+                        sample,
+                        record,
+                        installed_in_arena,
+                    }),
+                },
+            );
         }
         self.presentable = presentable;
         outcome
@@ -487,6 +502,37 @@ fn box_holds_only_text(arena: &LayoutNodeArena, row: NodeSlotId) -> bool {
         child = data.next_sibling.get();
     }
     true
+}
+
+/// Leaves `entry` among the `entries` of the ticks the host has not adopted yet, one per target, as the arena's log
+/// keeps only the last record a tick installed over a row. A tick over the record an earlier tick installed in the
+/// arena folds into its entry, over the record the host holds. A tick over a record the host wrote over the row since
+/// takes the place of the earlier entry, which went over a record the host holds no more, or over this tick's, where
+/// the row holds only the later sample now. Only a tick whose sample the arena did not take follows the earlier one,
+/// which the host adopts first.
+fn leave_entry(entries: &mut Vec<ClockTickEntry>, entry: ClockTickEntry) {
+    let Some(index) = entries
+        .iter()
+        .rposition(|earlier| earlier.style_node == entry.style_node)
+    else {
+        return entries.push(entry);
+    };
+    let earlier = &mut entries[index];
+    let Some(earlier_sampled) = earlier
+        .sampled
+        .as_mut()
+        .filter(|earlier| earlier.sample.style_record == entry.style_record_before.get())
+    else {
+        *earlier = entry;
+        return;
+    };
+    match entry.sampled {
+        Some(later) if earlier_sampled.installed_in_arena && later.installed_in_arena => {
+            earlier_sampled.sample = folded_sample(&earlier_sampled.sample, later.sample);
+            earlier_sampled.record = later.record;
+        }
+        sampled => entries.push(ClockTickEntry { sampled, ..entry }),
+    }
 }
 
 /// One sample for what `earlier` and `later`, taken over the record `earlier` installed, did: the
@@ -1213,7 +1259,10 @@ fn run_display_tick_on(
             }
             // A sample the arena did not take, the host installs over the record the target held
             // before: only its entry keeps that record alive, and no later tick may sample over it.
-            if entries.iter().any(|entry| !entry.installed_in_arena) {
+            if entries
+                .iter()
+                .any(|entry| !entry.sampled.as_ref().is_some_and(|sampled| sampled.installed_in_arena))
+            {
                 return (FfiClockTickOutcome::NeedsMain, false, false);
             }
             // What the samples left, the tick lays out in the frame the main thread handed the clock.
@@ -1592,6 +1641,69 @@ mod tests {
         sample.invalidation.invalidation = invalidation;
         sample.invalidation.changed_non_inherited_style_groups = groups;
         sample
+    }
+
+    fn entry(style_node: u32, before: u64, record: u64, installed_in_arena: bool) -> ClockTickEntry {
+        let home = Arc::default();
+        let payloads = Arc::new(crate::css::style::record_payloads::StyleRecordPayloads::retain(
+            &[crate::css::host_shared::SharedPayload::null()],
+            &home,
+        ));
+        ClockTickEntry {
+            style_node: StyleNodeID::from_raw(style_node).expect("a style node"),
+            style_record_before: NonZeroU64::new(before).expect("a record"),
+            sampled: Some(ClockTickSample {
+                sample: sample(record, 0, 0),
+                record: PublishedStyleRecord::of_payloads(record, payloads),
+                installed_in_arena,
+            }),
+        }
+    }
+
+    fn left(entries: &[ClockTickEntry]) -> Vec<(u32, u64, u64)> {
+        entries
+            .iter()
+            .map(|entry| {
+                let sampled = entry.sampled.as_ref().expect("a sample");
+                assert_eq!(sampled.record.style_record, sampled.sample.style_record);
+                (
+                    entry.style_node.raw(),
+                    entry.style_record_before.get(),
+                    sampled.sample.style_record,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_tick_over_the_record_an_earlier_tick_installed_folds_into_its_entry() {
+        let mut entries = Vec::new();
+        leave_entry(&mut entries, entry(1, 10, 20, true));
+        leave_entry(&mut entries, entry(2, 11, 21, true));
+        leave_entry(&mut entries, entry(1, 20, 30, true));
+        assert_eq!(left(&entries), [(1, 10, 30), (2, 11, 21)]);
+    }
+
+    #[test]
+    fn a_sample_the_arena_did_not_take_follows_the_earlier_entry() {
+        let mut entries = Vec::new();
+        leave_entry(&mut entries, entry(1, 10, 20, true));
+        leave_entry(&mut entries, entry(1, 20, 30, false));
+        assert_eq!(left(&entries), [(1, 10, 20), (1, 20, 30)]);
+    }
+
+    // kick.com: a tick samples over the record 348 a restyle stamped over the row, and installs 401 in the arena. The
+    // host stamps 348 over the row again as it drains the restyle, and the next tick samples over 348 once more: the
+    // arena's log moves on to 431, and lets go of 401. An entry of its own for each tick had the host, which still
+    // holds 348, install 401 as the engine let go of it.
+    #[test]
+    fn a_tick_over_a_record_the_host_wrote_over_the_row_takes_the_place_of_the_earlier_entry() {
+        let mut entries = Vec::new();
+        leave_entry(&mut entries, entry(1, 246, 306, true));
+        leave_entry(&mut entries, entry(1, 348, 401, true));
+        assert_eq!(left(&entries), [(1, 348, 401)]);
+        leave_entry(&mut entries, entry(1, 348, 431, true));
+        assert_eq!(left(&entries), [(1, 348, 431)]);
     }
 
     #[test]

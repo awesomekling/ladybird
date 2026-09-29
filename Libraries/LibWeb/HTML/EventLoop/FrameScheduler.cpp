@@ -15,6 +15,7 @@
 #include <LibWeb/Animations/DocumentTimeline.h>
 #include <LibWeb/Animations/KeyframeEffect.h>
 #include <LibWeb/Animations/ScrollTimeline.h>
+#include <LibWeb/CSS/PublishedStyleRecord.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/Compositor/CompositorHost.h>
@@ -1254,15 +1255,18 @@ FrameScheduler::AdoptedClockTicks FrameScheduler::adopt_clock_tick(DOM::Document
         u64 style_record_before = 0;
         bool installed_in_arena = false;
         CSS::StyleEngineFFI::FfiRowSampledInPass sample {};
-        while (CSS::StyleEngineFFI::style_engine_clock_tick_take_entry(&style_node, &style_record_before, &installed_in_arena, &sample)) {
+        void const* sampled_record_handle = nullptr;
+        while (CSS::StyleEngineFFI::style_engine_clock_tick_take_entry(&style_node, &style_record_before, &installed_in_arena, &sample, &sampled_record_handle)) {
+            // The entry hands over the record its sample published, which the engine keeps for as long as it is held.
+            auto sampled_record = CSS::PublishedStyleRecord::adopt(sampled_record_handle);
             auto element = document.style_computer().element_for_style_node(CSS::StyleNodeID { style_node });
             // An element that left the document, or that the main thread restyled beside the tick (a frame in flight
             // that held the engine included, which taking the adoption took in), takes nothing.
             if (!element || !element->is_connected() || DOM::AbstractElement { *element }.style_record_identity().value() != style_record_before)
                 continue;
-            if (!sample.present)
+            if (!sampled_record)
                 continue;
-            Animations::adopt_clock_tick_sample(scope, DOM::AbstractElement { *element }, CSS::StyleRecordID { style_record_before }, sample, installed_in_arena, presented_on_render_side);
+            Animations::adopt_clock_tick_sample(scope, DOM::AbstractElement { *element }, CSS::StyleRecordID { style_record_before }, sample, *sampled_record, installed_in_arena, presented_on_render_side);
             installed_any = true;
         }
     });
