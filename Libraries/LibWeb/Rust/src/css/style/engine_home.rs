@@ -72,7 +72,7 @@ impl StyleEngineInputHandle {
         let answers = unsafe { &mut *home.answers.get() };
         // One lock adopts the news left since, and leaves the change.
         let mut exchange = home.exchange();
-        exchange.adopt_news(answers);
+        home.adopt_news(&mut exchange, answers);
         let leaves = change.leaves(answers.pending);
         answers.follow_sent(&change, leaves);
         exchange.leave_sent(home.beside_pass.get(), (change, leaves));
@@ -175,6 +175,9 @@ struct StyleEngineHome {
     thread: std::thread::ThreadId,
     /// All that crosses between the main thread and whoever reaches the engine, which may run beside it.
     exchange: Mutex<Exchange>,
+    /// Whether the exchange holds news the main thread has not adopted. Written with the exchange held, and read
+    /// without it by a main thread read of the answers, which nearly always finds none.
+    news_waiting: AtomicBool,
     /// What the home answers the main thread with, of what the engine holds. The main thread's alone.
     answers: UnsafeCell<HomeAnswers>,
     /// Whether the thread that owns the engine with its render state (a unit test's, or the replay tool's) reached it
@@ -322,15 +325,25 @@ impl StyleEngineHome {
         }
     }
 
+    /// Has the main thread's `answers` adopt the news in `exchange`, this home's, if any. On the main thread.
+    fn adopt_news(&self, exchange: &mut Exchange, answers: &mut HomeAnswers) {
+        exchange.adopt_news(answers);
+        self.news_waiting.store(false, Ordering::Relaxed);
+    }
+
     /// Takes back the news the main thread has not adopted yet, for a reach of the engine that begins.
     fn take_news(&self) -> EngineNews {
-        self.exchange().news.take().unwrap_or_default()
+        let mut exchange = self.exchange();
+        self.news_waiting.store(false, Ordering::Relaxed);
+        exchange.news.take().unwrap_or_default()
     }
 
     /// Leaves the main thread `news`, with what `engine` holds now, as a reach of it is done.
     fn leave_news(&self, mut news: EngineNews, engine: &mut StyleEngine) {
         news.gather(engine);
-        self.exchange().news = Some(news);
+        let mut exchange = self.exchange();
+        exchange.news = Some(news);
+        self.news_waiting.store(true, Ordering::Release);
     }
 
     /// Applies to `engine` what the main thread wrote to it since it was last reached, by whoever reaches it now.
@@ -358,6 +371,7 @@ impl StyleEngineHome {
         if exchange.unapplied.is_empty() {
             return;
         }
+        self.news_waiting.store(false, Ordering::Relaxed);
         let news = exchange.news.take().unwrap_or_default();
         drop(exchange);
         self.apply_unapplied(engine);
@@ -440,7 +454,8 @@ unsafe fn reach_on_this_thread<T>(home: usize, engine: *mut StyleEngine, run: im
     // A reach within one of the same engine finds it as the outer one left it.
     let outermost = outer != home;
     let _restore = Restore(outer);
-    // SAFETY: Guaranteed by the caller. Of the home, only the engine and the exchange are touched off the main thread.
+    // SAFETY: Guaranteed by the caller. Of the home, only the engine, the exchange and whether it holds news are
+    // touched off the main thread.
     let home = unsafe { &*(home as *const StyleEngineHome) };
     let _leave_news = LeaveNews {
         home,
@@ -604,6 +619,7 @@ impl StyleEngineHandle {
             document,
             thread: crate::stage_thread::acting_thread(),
             exchange: Mutex::default(),
+            news_waiting: AtomicBool::new(false),
             answers: UnsafeCell::default(),
             reached_by_owning_thread: Cell::new(false),
             beside_pass: Cell::new(false),
@@ -712,7 +728,9 @@ impl StyleEngineHandle {
         home.follow_owning_thread();
         // SAFETY: Guaranteed by the caller.
         let answers = unsafe { &mut *home.answers.get() };
-        home.exchange().adopt_news(answers);
+        if home.news_waiting.load(Ordering::Acquire) {
+            home.adopt_news(&mut home.exchange(), answers);
+        }
         answers
     }
 
