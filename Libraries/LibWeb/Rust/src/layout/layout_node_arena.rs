@@ -1998,17 +1998,29 @@ impl LayoutNodeArena {
         self.publish(Arc::new(released));
     }
 
+    /// Lets go of the rows published last, for a unit the document thread waits for, which publishes before it
+    /// answers: the thread reads no rows meanwhile, and reads those the unit publishes once it has the answer, so the
+    /// unit writes in place the chunks nothing else holds rather than copying them for rows nothing reads. A display
+    /// tick that holds the rows publishes them for itself.
+    pub(crate) fn let_go_of_rows_while_document_thread_waits(&mut self) {
+        if self.held_rows.is_none() {
+            self.published_rows.let_go();
+            self.release_published_paintable_rows();
+        }
+    }
+
     /// Keeps a slot freed from now on from being reused until the returned pin is dropped: a frame that names slots to
     /// its readers holds it.
     pub(crate) fn retire_freed_slots_while_frame_lives(&mut self) -> super::tree_shape::RetiredSlots {
         self.tree_shape.retire_freed_slots()
     }
 
-    /// The rows the arena published last, for a snapshot of its own to share.
+    /// The rows the arena published last, for a snapshot of its own to share: none in a unit that let go of them
+    /// ([`Self::let_go_of_rows_while_document_thread_waits`]) until it publishes again.
     pub(crate) fn published_rows(&self) -> Arc<super::row_reads::RowSnapshot> {
         match &self.held_rows {
             Some(Some(held)) => Arc::clone(held),
-            _ => self.published_rows.shared(),
+            _ => self.published_rows.shared_on_owner(),
         }
     }
 
