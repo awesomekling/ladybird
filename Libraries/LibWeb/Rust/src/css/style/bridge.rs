@@ -7159,14 +7159,11 @@ fn finish_submitted_style_transaction(
 /// # Safety
 /// As for [`style_engine_take_style_transaction`]'s `computation_inputs`.
 unsafe fn begin_style_transaction(engine: &mut StyleEngine, mut computation_inputs: FfiDocumentStyleComputationInputs) {
-    let resource_contexts =
-        unsafe { super::resource_contexts::DocumentResourceContexts::take_from(&mut computation_inputs) };
+    let resource_contexts_moved = unsafe { engine.document_resource_contexts.take_in(&mut computation_inputs) };
     engine.document_media_snapshot =
         unsafe { super::custom_property_cascade::DocumentMediaSnapshot::take_from(&mut computation_inputs) };
     engine.document_function_snapshot =
         unsafe { super::custom_property_cascade::DocumentFunctionSnapshot::take_from(&mut computation_inputs) };
-    let resource_contexts_moved = engine.document_resource_contexts.moved_for_records(&resource_contexts);
-    engine.document_resource_contexts = resource_contexts;
     engine.custom_property_registrations_changed = engine
         .document_style_computation_inputs
         .custom_property_registration_generation
