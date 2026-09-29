@@ -11,7 +11,7 @@ use crate::painting::display_list::builder::RecordedDisplayList;
 use crate::painting::display_list::commands::{
     DisplayListCommandType, DisplayListResourceId, ImageFrameResourceId, PaintNestedDisplayList, VideoSinkResourceId,
 };
-use crate::painting::record::vector_images::{VectorImageDisplayLists, VectorImageRenderRequest};
+use crate::painting::record::vector_images::{PaintedVectorImages, VectorImageDisplayLists, VectorImageRenderRequest};
 use libgfx_rust::font::{FontHandle, FontId};
 use libgfx_rust::image_frame::ImageFrameHandle;
 
@@ -22,7 +22,7 @@ pub(crate) struct RecordingResourceManifest {
     pub(crate) video_sinks: HashMap<u64, u64>,
     // The SVG-as-image renders the recording painted, by the display list it painted each with:
     // the ones it recorded and the ones in output it copied from the published frame.
-    pub(crate) painted_vector_images: HashMap<DisplayListResourceId, VectorImageRenderRequest>,
+    pub(crate) painted_vector_images: PaintedVectorImages,
     // The renders the recording's map lacked, which it painted as empty images.
     pub(crate) missed_vector_images: HashSet<VectorImageRenderRequest>,
 }
@@ -51,12 +51,14 @@ impl RecordingResourceManifest {
         request: VectorImageRenderRequest,
         resolved: &VectorImageDisplayLists,
     ) -> Option<DisplayListResourceId> {
-        let Some(display_list) = resolved.get(&request) else {
+        let Some(render) = resolved.get(&request) else {
             self.missed_vector_images.insert(request);
             return None;
         };
-        self.painted_vector_images.insert(display_list, request);
-        Some(display_list)
+        self.painted_vector_images
+            .entry(render.display_list)
+            .or_insert_with(|| render.clone());
+        Some(render.display_list)
     }
 
     /// Notes the SVG-as-image renders in `bytes` of `source`, whose renders are `source_vector_images`,
@@ -64,7 +66,7 @@ impl RecordingResourceManifest {
     pub(crate) fn note_copied_vector_images(
         &mut self,
         source: &RecordedDisplayList,
-        source_vector_images: &HashMap<DisplayListResourceId, VectorImageRenderRequest>,
+        source_vector_images: &PaintedVectorImages,
         bytes: Range<u32>,
     ) {
         if source_vector_images.is_empty() {
@@ -78,8 +80,8 @@ impl RecordingResourceManifest {
                 }
                 let id = crate::painting::display_list::builder::read_command::<PaintNestedDisplayList>(payload)
                     .display_list_id;
-                if let Some(request) = source_vector_images.get(&id) {
-                    self.painted_vector_images.insert(id, *request);
+                if let Some(render) = source_vector_images.get(&id) {
+                    self.painted_vector_images.entry(id).or_insert_with(|| render.clone());
                 }
             },
         );
@@ -90,6 +92,9 @@ impl RecordingResourceManifest {
 mod tests {
     use super::*;
     use crate::css::css_pixels::CssPixels;
+    use crate::painting::record::vector_images::VectorImageRender;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn request(image_identity: u64) -> VectorImageRenderRequest {
         VectorImageRenderRequest::new(
@@ -101,10 +106,33 @@ mod tests {
         )
     }
 
+    // The tests' renders retain a counter of their releases.
+    unsafe extern "C" fn count_release(retained: *const std::ffi::c_void) {
+        // SAFETY: Each test's counter outlives its renders.
+        unsafe { &*retained.cast::<AtomicUsize>() }.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn render(image_identity: u64, display_list: u64, released: &AtomicUsize) -> VectorImageRender {
+        // SAFETY: `count_release` releases the counter by counting.
+        unsafe {
+            VectorImageRender::adopt(
+                request(image_identity),
+                DisplayListResourceId(display_list),
+                std::ptr::from_ref(released).cast(),
+                count_release,
+            )
+        }
+    }
+
+    fn requests(painted: &PaintedVectorImages) -> HashMap<DisplayListResourceId, VectorImageRenderRequest> {
+        painted.iter().map(|(id, render)| (*id, render.request)).collect()
+    }
+
     #[test]
     fn a_resolved_render_is_looked_up_and_a_missed_one_waits_for_the_main_thread() {
+        let released = AtomicUsize::new(0);
         let mut resolved = VectorImageDisplayLists::default();
-        resolved.insert(request(1), DisplayListResourceId(42));
+        resolved.insert(render(1, 42, &released));
         let mut manifest = RecordingResourceManifest::default();
         assert_eq!(
             manifest.vector_image_display_list(request(1), &resolved),
@@ -114,13 +142,19 @@ mod tests {
         assert_eq!(manifest.vector_image_display_list(request(2), &resolved), None);
         assert_eq!(manifest.missed_vector_images, HashSet::from([request(2)]));
         assert_eq!(
-            manifest.painted_vector_images,
+            requests(&manifest.painted_vector_images),
             HashMap::from([(DisplayListResourceId(42), request(1))])
         );
+        // The recording carries the render itself to its publication, which outlives the map it was looked up in.
+        drop(resolved);
+        assert_eq!(released.load(Ordering::Relaxed), 0);
+        drop(manifest);
+        assert_eq!(released.load(Ordering::Relaxed), 1);
     }
 
     #[test]
     fn a_copied_render_stays_painted() {
+        let released = AtomicUsize::new(0);
         let mut recorder = crate::painting::display_list::recorder::DisplayListRecorder::new(None);
         for id in [7, 8] {
             recorder.paint_nested_display_list(
@@ -131,15 +165,20 @@ mod tests {
         }
         let source = recorder.into_builder().finish();
         let first_command_end = source.bytes.len() as u32 / 2;
-        let source_vector_images = HashMap::from([
-            (DisplayListResourceId(7), request(1)),
-            (DisplayListResourceId(8), request(2)),
+        let source_vector_images = PaintedVectorImages::from([
+            (DisplayListResourceId(7), Arc::new(render(1, 7, &released))),
+            (DisplayListResourceId(8), Arc::new(render(2, 8, &released))),
         ]);
         let mut manifest = RecordingResourceManifest::default();
         manifest.note_copied_vector_images(&source, &source_vector_images, 0..first_command_end);
         assert_eq!(
-            manifest.painted_vector_images,
+            requests(&manifest.painted_vector_images),
             HashMap::from([(DisplayListResourceId(7), request(1))])
         );
+        // The frame it copied from lets its renders go; the copy keeps the one it paints.
+        drop(source_vector_images);
+        assert_eq!(released.load(Ordering::Relaxed), 1);
+        drop(manifest);
+        assert_eq!(released.load(Ordering::Relaxed), 2);
     }
 }

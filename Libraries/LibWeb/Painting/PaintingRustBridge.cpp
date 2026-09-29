@@ -578,29 +578,44 @@ static Layout::RustFFI::FfiRecordingPublishCallbacks recording_publish_callbacks
         .add_video_sink = [](void* context_pointer, u64 resource_id, u64 sink_handle) {
             auto& context = *static_cast<RecordingPublishStorage*>(context_pointer);
             context.resource_storage.add_video_sink(Compositing::VideoSinkResourceId { resource_id }, Media::VideoSinkHandle { sink_handle }); },
+        .add_vector_image_render = [](void* context_pointer, void const* render) {
+            auto& context = *static_cast<RecordingPublishStorage*>(context_pointer);
+            context.resource_storage.add_resources(*static_cast<Compositing::DisplayListResourceTransaction const*>(render)); },
     };
+}
+
+// An SVG-as-image render goes to the recording as a transaction that adds its display list with every resource the list
+// references, which the recording hands back to the storage it publishes to.
+static Layout::RustFFI::FfiVectorImageRender adopt_vector_image_render(Compositing::DisplayListResourceId id, Compositing::DisplayListResourceTransaction&& render)
+{
+    return { .display_list_id = id.value(), .render = new Compositing::DisplayListResourceTransaction(move(render)) };
 }
 
 static Layout::RustFFI::FfiVectorImageCallbacks vector_image_callbacks(RecordingPublishContext& context)
 {
     return {
         .context = &context,
-        .resolve_vector_image_display_list = [](void* context_pointer, Layout::RustFFI::FfiVectorImageRenderRequest const* request) -> u64 {
+        .resolve_vector_image_display_list = [](void* context_pointer, Layout::RustFFI::FfiVectorImageRenderRequest const* request) {
             auto& context = *static_cast<RecordingPublishContext*>(context_pointer);
-            auto const& document = *context.document;
-            auto empty_display_list = [&] {
-                return context.resource_storage.add_display_list(Compositing::DisplayList::create(document.paint_state().visual_context_tree(document)), document.paint_state().visual_context_tree(document)).value();
-            };
+            auto& resource_storage = context.resource_storage;
             // The recording published the image and the scheme it renders with, so finding it is a
             // lookup rather than a walk back to the element that references it.
-            auto const* svg_image_data = SVG::SVGDecodedImageData::with_vector_image_identity(request->image_identity);
-            if (!svg_image_data)
-                return empty_display_list();
-            auto display_list = svg_image_data->record_display_list_at_scale({ request->css_width, request->css_height }, request->raster_scale, static_cast<CSS::PreferredColorScheme>(request->color_scheme), context.resource_storage);
-            if (!display_list.has_value())
-                return empty_display_list();
-            return context.resource_storage.add_display_list(move(*display_list)).value();
-        },
+            if (auto const* svg_image_data = SVG::SVGDecodedImageData::with_vector_image_identity(request->image_identity)) {
+                if (auto display_list = svg_image_data->record_display_list_at_scale({ request->css_width, request->css_height }, request->raster_scale, static_cast<CSS::PreferredColorScheme>(request->color_scheme), resource_storage); display_list.has_value()) {
+                    auto id = resource_storage.add_display_list(display_list.release_value());
+                    if (auto render = resource_storage.transaction_adding_display_list(id); render.has_value())
+                        return adopt_vector_image_render(id, render.release_value());
+                }
+            }
+            // An image that is gone, or that did not render whole, paints as an empty image.
+            auto const& document = *context.document;
+            auto visual_context_tree = document.paint_state().visual_context_tree(document);
+            auto empty_display_list = Compositing::DisplayList::create(visual_context_tree);
+            Compositing::DisplayListResourceId id { empty_display_list->id() };
+            Compositing::DisplayListResourceTransaction render;
+            render.display_lists.append({ move(empty_display_list), move(visual_context_tree) });
+            return adopt_vector_image_render(id, move(render)); },
+        .release_vector_image_render = [](void const* render) { delete static_cast<Compositing::DisplayListResourceTransaction const*>(render); },
     };
 }
 

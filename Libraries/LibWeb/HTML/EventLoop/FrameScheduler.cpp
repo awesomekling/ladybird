@@ -86,9 +86,10 @@ static void install_render_clock_host()
         if (!kit)
             return Layout::RustFFI::FfiClockPresent::Declined;
         // The main thread took the presenter back for frames of its own, which show what the tick laid out.
-        if (!kit->presentation->presenter->present_for_render_clock([&] { LocalNavigable::present_render_clock_frame(*kit); }))
+        bool presented = false;
+        if (!kit->presentation->presenter->present_for_render_clock([&] { presented = LocalNavigable::present_render_clock_frame(*kit); }))
             return Layout::RustFFI::FfiClockPresent::MainPresents;
-        return Layout::RustFFI::FfiClockPresent::Presented;
+        return presented ? Layout::RustFFI::FfiClockPresent::Presented : Layout::RustFFI::FfiClockPresent::Declined;
     });
     {
         auto& needs_main = render_clock_needs_main();

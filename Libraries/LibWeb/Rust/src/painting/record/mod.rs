@@ -34,7 +34,7 @@ use crate::layout::node_data::NodeSlotId;
 use crate::layout::node_data::{NodeFlag, NodeKind};
 use crate::painting::border_radii::BorderRadii;
 use crate::painting::display_list::builder::{PendingInlineClip, RecordedDisplayList};
-use crate::painting::display_list::commands::{ContextRef, DisplayListResourceId, SpatialNodeIndex};
+use crate::painting::display_list::commands::{ContextRef, SpatialNodeIndex};
 use crate::painting::display_list::device_pixels::DevicePixelConverter;
 use crate::painting::display_list::recorder::DisplayListRecorder;
 use crate::painting::hit_test::HitTestItem;
@@ -61,7 +61,7 @@ pub struct RecordingOutput {
     pub wheel_event_listener_state_generation: u64,
     pub is_identical_to_published_frame: bool,
     // The SVG-as-image renders this frame paints, by the display list it paints each with.
-    pub(crate) vector_images: std::collections::HashMap<DisplayListResourceId, vector_images::VectorImageRenderRequest>,
+    pub(crate) vector_images: vector_images::PaintedVectorImages,
     // The renders this frame painted as empty images because the main thread had not resolved
     // them. Their producers record again in the next frame, which the main thread resolves them for.
     pub(crate) missed_vector_images: std::collections::HashSet<vector_images::VectorImageRenderRequest>,

@@ -253,8 +253,10 @@ static void copy_referenced_resources_to(
     Compositing::DisplayListResourceStorage const& source,
     Compositing::DisplayListResourceSet const& referenced_resources)
 {
-    Compositing::DisplayListResourceSet empty_resource_set;
-    destination.apply_transaction(source.create_transaction(empty_resource_set, referenced_resources));
+    // Nothing is copied where the image's storage lacks a resource the render references: a recording that takes the
+    // render finds it incomplete, and paints an empty image.
+    if (auto transaction = source.create_transaction({}, referenced_resources); transaction.has_value())
+        destination.apply_transaction(transaction.release_value());
 }
 
 void SVGDecodedImageData::prune_cached_display_list_resources() const

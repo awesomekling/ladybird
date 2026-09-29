@@ -48,19 +48,25 @@ void NavigablePresenter::forget_compositor_display_list()
     m_compositor_display_list_command_resources = {};
 }
 
-CompositorFrame NavigablePresenter::build_frame(PresentationInputs& inputs, PresentationSource& source, Optional<PublishedDisplayList> published)
+Optional<CompositorFrame> NavigablePresenter::build_frame(PresentationInputs& inputs, PresentationSource& source, Optional<PublishedDisplayList> published)
 {
     auto& keyboard_scroll_state = inputs.keyboard_scroll_state;
     bool const recorded = published.has_value();
     bool const compositor_display_list_is_unchanged = recorded && m_compositor_display_list == published->display_list.ptr();
+    auto lacks_resources = [&] {
+        m_compositor_display_list_paint_config.clear();
+        return Optional<CompositorFrame> {};
+    };
 
     Optional<Compositing::AccumulatedVisualContextTree> visual_context_tree;
     Compositing::DisplayListResourceSet display_list_resources;
-    Compositing::DisplayListResourceTransaction resource_transaction;
+    Optional<Compositing::DisplayListResourceTransaction> resource_transaction;
     if (recorded && !compositor_display_list_is_unchanged) {
         visual_context_tree = source.visual_context_tree(m_resource_storage);
         display_list_resources = resources_to_hand_compositor(m_resource_storage, inputs.paint_command_cache_source_resources, published->command_resources, *visual_context_tree);
         resource_transaction = m_resource_storage.create_transaction(m_compositor_display_list_resources, display_list_resources);
+        if (!resource_transaction.has_value())
+            return lacks_resources();
     }
 
     auto visual_context_tree_needs_compositor_update = source.visual_context_tree_needs_compositor_update();
@@ -82,7 +88,7 @@ CompositorFrame NavigablePresenter::build_frame(PresentationInputs& inputs, Pres
         frame.display_list_update = CompositorFrame::DisplayListUpdate {
             .display_list = published->display_list,
             .visual_context_tree = visual_context_tree.release_value(),
-            .resource_transaction = move(resource_transaction),
+            .resource_transaction = resource_transaction.release_value(),
             .scroll_state_snapshot = move(scroll_state_snapshot),
         };
         m_compositor_visual_animation_count = frame.display_list_update->visual_context_tree.visual_animation_summary().count;
@@ -101,9 +107,11 @@ CompositorFrame NavigablePresenter::build_frame(PresentationInputs& inputs, Pres
             VERIFY(updated_visual_context_tree.structural_epoch() == m_compositor_display_list_visual_context_tree_structural_epoch);
             auto updated_display_list_resources = resources_to_hand_compositor(m_resource_storage, inputs.paint_command_cache_source_resources, m_compositor_display_list_command_resources, updated_visual_context_tree);
             auto updated_resource_transaction = m_resource_storage.create_transaction(m_compositor_display_list_resources, updated_display_list_resources);
+            if (!updated_resource_transaction.has_value())
+                return lacks_resources();
             frame.visual_context_tree_update = CompositorFrame::VisualContextTreeUpdate {
                 .visual_context_tree = move(updated_visual_context_tree),
-                .resource_transaction = move(updated_resource_transaction),
+                .resource_transaction = updated_resource_transaction.release_value(),
             };
             m_compositor_visual_animation_count = frame.visual_context_tree_update->visual_context_tree.visual_animation_summary().count;
             source.did_update_visual_context_tree_in_compositor();

@@ -252,11 +252,7 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
     // Each render lays out and records another document, which the main thread does.
     let mut resolved = crate::painting::record::vector_images::VectorImageDisplayLists::default();
     for request in painted {
-        let display_list = vector_images.resolve_vector_image_display_list(&main_thread, &request.to_ffi());
-        resolved.insert(
-            request,
-            crate::painting::display_list::commands::DisplayListResourceId(display_list),
-        );
+        resolved.insert(vector_images.resolve_vector_image_display_list(&main_thread, request));
     }
     // SAFETY: Guaranteed by the caller.
     unsafe {
