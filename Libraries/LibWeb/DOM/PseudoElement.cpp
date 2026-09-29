@@ -102,7 +102,8 @@ void SyntheticPseudoElement::clear_computed_style(RefPtr<CSS::ComputedValues con
             auto style_record = box.document().style_computer().intern_computed_style_inputs({ *m_originating_element, m_type }, *style_to_preserve_for_detachment);
             Layout::RustFFI::layout_arena_adopt_derived_node_style(box.arena(), box.slot(), style_record.value());
         } else {
-            Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(box.arena(), m_originating_element->style_node_id().value(), encode_generated_for(m_type));
+            Layout::RustFFI::FfiBoundBox const bound_box { m_originating_element->style_node_id().value(), encode_generated_for(m_type) };
+            Layout::RustFFI::layout_arena_pin_bound_box_style_records_for_detachment(box.arena(), &bound_box, 1);
         }
     }
     m_style_record = nullptr;

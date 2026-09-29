@@ -9,7 +9,7 @@
 //! layout tree, it reads from the rows the owner publishes (see [`super::row_reads`]).
 
 use super::LayoutNodeArena;
-use super::layout_node_arena::{HostPayment, LayoutUpdateMarksHandle};
+use super::layout_node_arena::{FfiBoundBox, HostPayment, LayoutUpdateMarksHandle};
 use super::node_data::{CompositorAnimationFrameKind, NodeFlag, NodeSlotId};
 use super::partial_relayout::FfiPossibleBoundaryUpdate;
 use super::tree_builder::FfiRemovedBoxPlace;
@@ -123,12 +123,9 @@ pub(crate) enum LayoutChange {
         node: NodeSlotId,
         attached: bool,
     },
-    /// The node left the document, and the box it is bound to, or that of its pseudo-element of kind `generated_for`,
-    /// keeps its style readable until it is freed.
-    PinBoundBoxStyleRecordForDetachment {
-        style_node: StyleNodeID,
-        generated_for: u8,
-    },
+    /// The nodes left the document, and each box, the one its node is bound to or that of its pseudo-element, keeps
+    /// its style readable until it is freed.
+    PinBoundBoxStyleRecordsForDetachment(Box<[FfiBoundBox]>),
     /// The row's DOM target took `style_record`, and the host applied its style to the row: see
     /// [`LayoutNodeArena::install_row_style`].
     InstallRowStyle {
@@ -322,10 +319,13 @@ impl LayoutChange {
                     arena.note_style_image_resources_attached(node, attached);
                 }
             }
-            Self::PinBoundBoxStyleRecordForDetachment {
-                style_node,
-                generated_for,
-            } => arena.pin_bound_box_style_record_for_detachment(style_node, generated_for),
+            Self::PinBoundBoxStyleRecordsForDetachment(boxes) => {
+                for bound in &boxes {
+                    if let Some(style_node) = StyleNodeID::from_raw(bound.style_node) {
+                        arena.pin_bound_box_style_record_for_detachment(style_node, bound.generated_for);
+                    }
+                }
+            }
             Self::InstallAnimationSample {
                 style_node,
                 style_record,
@@ -387,7 +387,7 @@ impl LayoutChange {
             | Self::SetRowImageObservers { .. }
             | Self::RowOwnsImageProvider { .. }
             | Self::SetStyleImageResourcesAttached { .. }
-            | Self::PinBoundBoxStyleRecordForDetachment { .. }
+            | Self::PinBoundBoxStyleRecordsForDetachment(_)
             | Self::AdoptOwnerRowStyle { .. }
             | Self::SetTableSpans { .. } => false,
         }
@@ -420,7 +420,7 @@ impl LayoutChange {
             | Self::SetIdentityInFocusedTextControl { .. }
             | Self::SetListOwnerHasStaleItemCounters { .. }
             | Self::RowOwnsImageProvider { .. }
-            | Self::PinBoundBoxStyleRecordForDetachment { .. }
+            | Self::PinBoundBoxStyleRecordsForDetachment(_)
             | Self::InstallRowStyle { .. }
             | Self::ReplaceRowStyleRecord { .. }
             | Self::AdoptDerivedNodeStyle { .. }

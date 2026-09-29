@@ -2459,7 +2459,8 @@ void Element::apply_display_none_change(CSS::StyleDrainScope const& scope, bool 
 
 void Element::clear_computed_styles_from_display_none_descendants(CSS::StyleDrainScope const& scope)
 {
-    for_each_shadow_including_descendant([&scope](auto& node) {
+    Vector<Layout::RustFFI::FfiBoundBox> detached_box_pins;
+    for_each_shadow_including_descendant([&scope, &detached_box_pins](auto& node) {
         auto* element = as_if<Element>(node);
         if (!element)
             return TraversalDecision::Continue;
@@ -2474,8 +2475,7 @@ void Element::clear_computed_styles_from_display_none_descendants(CSS::StyleDrai
 
         // The layout tree is torn down after the style transaction. Keep its style alive until then without
         // retaining the record as the descendant's current computed style.
-        if (auto* arena = element->document().layout_arena_handle())
-            Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(arena, element->style_node_id().value(), 0);
+        detached_box_pins.append({ element->style_node_id().value(), 0 });
         element->m_style_record = nullptr;
         element->m_installed_display_is_contents = false;
         element->m_installed_display_is_list_item = false;
@@ -2486,6 +2486,8 @@ void Element::clear_computed_styles_from_display_none_descendants(CSS::StyleDrai
         });
         return TraversalDecision::Continue;
     });
+    if (auto* arena = document().layout_arena_handle())
+        Layout::RustFFI::layout_arena_pin_bound_box_style_records_for_detachment(arena, detached_box_pins.data(), detached_box_pins.size());
     publish_anchor_names_in_engine(scope);
 }
 

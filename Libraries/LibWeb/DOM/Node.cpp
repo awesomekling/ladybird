@@ -1368,7 +1368,7 @@ public:
         // A node that never arrived in the style engine has no box.
         if (style_node.value() == 0)
             return;
-        m_boxes.append({ style_node, pseudo_element.has_value() ? encode_generated_for(*pseudo_element) : u8 { 0 } });
+        m_boxes.append({ style_node.value(), pseudo_element.has_value() ? encode_generated_for(*pseudo_element) : u8 { 0 } });
     }
 
     void pin(Document& document)
@@ -1393,18 +1393,12 @@ public:
     }
 
 private:
-    struct BoundBox {
-        CSS::StyleNodeID style_node;
-        u8 generated_for { 0 };
-    };
-
-    static void pin_in(void* arena, ReadonlySpan<BoundBox> boxes)
+    static void pin_in(void* arena, ReadonlySpan<Layout::RustFFI::FfiBoundBox> boxes)
     {
-        for (auto const& box : boxes)
-            Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(arena, box.style_node.value(), box.generated_for);
+        Layout::RustFFI::layout_arena_pin_bound_box_style_records_for_detachment(arena, boxes.data(), boxes.size());
     }
 
-    Vector<BoundBox> m_boxes;
+    Vector<Layout::RustFFI::FfiBoundBox> m_boxes;
 };
 
 // Pins the style record of every box `node` and its shadow-including descendants are bound to, for a subtree that
@@ -1713,6 +1707,10 @@ void Node::remove(bool suppress_observers)
 
     // 2. Assert: parent is non-null.
     VERIFY(parent);
+
+    // A removal writes the arena for each node it takes out (the identities it retires, the rows it detaches, the
+    // records it pins), which go to the render owner as one message.
+    Layout::ArenaChangeBatch const change_batch;
 
     document().flush_deferred_style_change_event();
     bool const was_connected = is_connected();
