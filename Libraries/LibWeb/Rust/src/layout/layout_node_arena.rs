@@ -2647,23 +2647,28 @@ impl LayoutNodeArena {
         self.append_leftover_payment(payment);
     }
 
-    /// Applies the style of the record `style_record` to a row, taking a style that holds no images: the host's pin
-    /// follows the record, an adoption left by a sample installed ahead is taken, and otherwise the record, its flags
-    /// and the anonymous descendants' inherited style are written. The host took the row's image observers as it sent
-    /// this. A record the engine no longer holds is one the row's node moved on from, which the host installs next.
+    /// Applies the style of the record `style_record`, which the row's DOM target took, to a row, taking a style that
+    /// holds no images: the row first moves to the record as [`Self::replace_row_style_record`] moves it, then the
+    /// host's pin follows the record, an adoption left by a sample installed ahead is taken, and otherwise the record,
+    /// its flags and the anonymous descendants' inherited style are written. The host took the row's image observers as
+    /// it sent this. A record the engine no longer holds is one the row's node moved on from, which the host installs
+    /// next.
     pub(crate) fn install_row_style(&self, node: NodeSlotId, style_record: u64) {
         if self.with_style_store(|engine| engine.style_record_payloads(style_record).is_none()) {
             return;
         }
+        let wrote_style = self.move_row_to_style_record(node, style_record);
         if style_record != self.node_style_record(node) {
             self.release_node_style_record_pin_for_host(node);
         }
         // Taking the adoption hands the host a pin of its own, so this comes after the old pin went.
         if !self.take_animation_adoption(node, style_record) {
-            if self.set_node_style(node, style_record) {
-                self.refresh_style_flags(node);
+            if !wrote_style {
+                if self.set_node_style(node, style_record) {
+                    self.refresh_style_flags(node);
+                }
+                self.enroll_node_for_svg_paint_resources_sync(node);
             }
-            self.enroll_node_for_svg_paint_resources_sync(node);
             self.set_node_flag(node, NodeFlag::HasAnimatedOpacityOrTransform, false);
             self.reinherit_anonymous_descendants(node);
         }
@@ -2680,10 +2685,17 @@ impl LayoutNodeArena {
     /// caches of the row and its ancestors reset if the move changes the row's layout-affecting style. A row holding a
     /// record the arena derived for it keeps it, as that record does not follow its DOM target's.
     pub(crate) fn replace_row_style_record(&self, node: NodeSlotId, style_record: u64) {
-        if self.node_style_record_is_pinned_by_arena(node)
-            || self.with_style_store(|engine| engine.style_record_payloads(style_record).is_none())
-        {
+        if self.with_style_store(|engine| engine.style_record_payloads(style_record).is_none()) {
             return;
+        }
+        self.move_row_to_style_record(node, style_record);
+    }
+
+    /// [`Self::replace_row_style_record`] of a record the engine holds. Answers whether it wrote the row's style, which
+    /// a row taking an adoption or holding a derived record does not.
+    fn move_row_to_style_record(&self, node: NodeSlotId, style_record: u64) -> bool {
+        if self.node_style_record_is_pinned_by_arena(node) {
+            return false;
         }
         let old_style_record = self.node_style_record(node);
         let keeps_record = old_style_record == style_record;
@@ -2694,7 +2706,8 @@ impl LayoutNodeArena {
             self.release_node_style_record_pin_for_host(node);
         }
         // Taking the adoption hands the host a pin of its own, so this comes after the old pin went.
-        if !self.take_animation_adoption(node, style_record) {
+        let wrote_style = !self.take_animation_adoption(node, style_record);
+        if wrote_style {
             // The old record stays alive for the comparison below.
             let _old_style = self.data(node).style.owner();
             let old_payloads = self.data(node).style.get().as_ptr();
@@ -2713,6 +2726,7 @@ impl LayoutNodeArena {
         if pinned_by_host != 0 {
             self.pin_node_style_record_for_host(node, style_record);
         }
+        wrote_style
     }
 
     /// Gives a row the record `record` the host derived for it from its DOM target's style, which the arena pins.

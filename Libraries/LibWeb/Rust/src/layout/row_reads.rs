@@ -858,8 +858,8 @@ pub unsafe extern "C" fn layout_arena_node_style_dependency_flags(arena: *mut c_
         .map_or(0, |record| record.dependency_flags)
 }
 
-/// Applies the style of the published record `style_record` names to the row `node`, taking a style that holds no
-/// images: see [`LayoutNodeArena::install_row_style`]. Answers the image observers the row let go of, which the host
+/// Moves the row `node` to its DOM target's record `style_record` names and applies its style, taking a style that holds
+/// no images: see [`LayoutNodeArena::install_row_style`]. Answers the image observers the row let go of, which the host
 /// deletes.
 ///
 /// # Safety
