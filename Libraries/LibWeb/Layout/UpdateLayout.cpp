@@ -312,15 +312,29 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     //     before layout_arena_update_layout returns, or once a submitted pass's frame is taken back.
 
     bool const may_submit_pass = pass_submission != LayoutPassSubmission::Wait;
+    // An update the main thread waits for offers the style transaction of its first round the round's layout: the
+    // render owner lays the document out right after the transaction, in the same job, where the transaction leaves
+    // nothing the layout reads. A round that renumbers list items or takes in top layer changes does that after its
+    // style, as ever.
+    if (!may_submit_pass && reason != UpdateLayoutReason::InspectDevToolsLayoutData && !m_created_for_appropriate_template_contents
+        && m_list_owners_pending_item_renumber.is_empty() && !render_inputs().has_pending_top_layer_change())
+        Layout::RustFFI::layout_arena_offer_first_round(arena);
     // The update's first round's style runs here, ahead of the update.
     update_style();
 
     LayoutRoundReading first_round;
-    read_layout_round(*this, first_round, [&] {
+    if (Layout::RustFFI::layout_arena_first_round_rode_style(arena)) {
+        // The round was read as its style was taken. What the rest of the style left for the tree goes to the next
+        // round, which the frame starts where it does.
         process_pending_list_item_renumbers();
         process_pending_top_layer_layout_changes();
-        return layout_update_document_facts();
-    });
+    } else {
+        read_layout_round(*this, first_round, [&] {
+            process_pending_list_item_renumbers();
+            process_pending_top_layer_layout_changes();
+            return layout_update_document_facts();
+        });
+    }
 
     Layout::RustFFI::FfiLayoutUpdateInputs inputs {
         .reason_is_inspect_devtools_layout_data = reason == UpdateLayoutReason::InspectDevToolsLayoutData,
