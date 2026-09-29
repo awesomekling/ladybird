@@ -368,7 +368,7 @@ impl<'a> PaintableCommit<'a> {
         }
         self.arena().set_committed_fragment_link(
             node,
-            link.clone(),
+            link,
             self.arena()
                 .epoch_of_geometry_laid_out_in_this_pass(self.arena().data(node)),
         );

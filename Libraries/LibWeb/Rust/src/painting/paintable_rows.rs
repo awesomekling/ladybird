@@ -897,20 +897,31 @@ impl PaintableRowStore {
         layout_slot_index: u32,
         layout_slot_generation: u8,
         geometry_epoch: Option<u32>,
-        link: fragment_tree::FragmentLink,
+        link: &fragment_tree::FragmentLink,
     ) {
         let mut slots = self.committed_fragment_links.borrow_mut();
         slots.grow_to(layout_slot_index as usize + 1);
+        let geometry_is_current = geometry_epoch.is_some();
+        let geometry_epoch = geometry_epoch.unwrap_or_default();
+        // A commit places most fragments again the way the row already holds them.
+        if slots.get(layout_slot_index as usize).is_some_and(|slot| {
+            slot.layout_slot_generation == layout_slot_generation
+                && slot.geometry_epoch == geometry_epoch
+                && slot.geometry_is_current == geometry_is_current
+                && slot
+                    .link()
+                    .is_some_and(|committed| link.places_same_fragment_identically_to(committed))
+        }) {
+            return;
+        }
         let mut slot = slots
             .row_mut(layout_slot_index as usize)
             .expect("the column grew to hold the slot");
-        let geometry_is_current = geometry_epoch.is_some();
-        let geometry_epoch = geometry_epoch.unwrap_or_default();
         // A link no published generation shares is overwritten in place.
         if slot.layout_slot_generation == layout_slot_generation
             && let Some(retained_link) = slot.link.as_mut().and_then(std::sync::Arc::get_mut)
         {
-            *retained_link = link;
+            retained_link.clone_from(link);
             slot.geometry_epoch = geometry_epoch;
             slot.geometry_is_current = geometry_is_current;
             return;
@@ -919,7 +930,7 @@ impl PaintableRowStore {
             layout_slot_generation,
             geometry_epoch,
             geometry_is_current,
-            link: Some(std::sync::Arc::new(link)),
+            link: Some(std::sync::Arc::new(link.clone())),
         };
     }
 

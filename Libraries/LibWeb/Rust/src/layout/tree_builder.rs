@@ -3145,7 +3145,7 @@ fn update_principal_node_after_entry(
                     && node_kind_is_box(new_data.kind.get())
                     && let Some(link) = arena.take_committed_fragment_link(old_layout_node)
                 {
-                    arena.set_committed_fragment_link(layout_node, link, None);
+                    arena.set_committed_fragment_link(layout_node, &link, None);
                 }
                 transfer_fragments_to_replacement_box(arena, old_layout_node, layout_node);
                 // The old layout node is still attached, and the preparation borrows the arena for
