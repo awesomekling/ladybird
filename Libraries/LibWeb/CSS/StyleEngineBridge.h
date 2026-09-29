@@ -162,7 +162,15 @@ public:
     void decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput&, StyleValueFFI::FfiTransitionAction*) const;
     // Remove the retained input identities for one pseudo-element kind and return its removal.
     [[nodiscard]] StyleRecordDelta remove_computed_pseudo(StyleNodeID node, u8 pseudo_kind);
-    void finish_sheet_rules_replacement(SheetID sheet);
+    // Replaces a sheet's rules with what `compile` publishes, as one unit: its two ends go to the engine the way the
+    // compiled rules do, so nothing another replacement sends can come between them.
+    template<typename Compile>
+    void replace_sheet_rules(SheetID sheet, Compile&& compile)
+    {
+        StyleEngineFFI::style_engine_begin_sheet_rules_replacement(rust_handle(), sheet.value());
+        compile();
+        StyleEngineFFI::style_engine_finish_sheet_rules_replacement(rust_handle(), sheet.value());
+    }
 
     // Interns one selector-mentioned name and returns its process-global atom, retained by this
     // document.

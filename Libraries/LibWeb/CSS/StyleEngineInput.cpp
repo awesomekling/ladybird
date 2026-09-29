@@ -2464,8 +2464,7 @@ static void detach_shared_compiled_style_sheet_now(SharedCompiledStyleSheet& she
     if (sheet.has_attachments())
         return;
 
-    style_engine.begin_sheet_rules_replacement(sheet.sheet_id());
-    style_engine.finish_sheet_rules_replacement(sheet.sheet_id());
+    style_engine.replace_sheet_rules(sheet.sheet_id(), [] { });
     auto& shared_compiled_style_sheets = style_computer.shared_compiled_style_sheets();
     shared_compiled_style_sheets.remove(sheet.key());
     if (shared_compiled_style_sheets.is_empty())
@@ -2676,10 +2675,9 @@ void record_stylesheet_rules_replaced(StyleSheetState& sheet)
         if (sheet_id == 0)
             return;
         auto& style_engine = style_computer.document().render_inputs_for_write().style_engine();
-        style_engine.begin_sheet_rules_replacement(sheet_id);
-        RuleCompilationContext context { style_engine, sheet_id, 0, document, style_computer };
-        compile_rules_into(context, sheet);
-        style_engine.finish_sheet_rules_replacement(sheet_id);
+        style_engine.replace_sheet_rules(sheet_id, [&] {
+            compile_rules_into({ style_engine, sheet_id, 0, document, style_computer }, sheet);
+        });
     });
 }
 

@@ -340,13 +340,6 @@ void StyleEngine::set_element_part_exposure(StyleNodeID node, StyleNodeID exposu
     record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementPartExposure, .value = 0, .node = node.value(), .parent = exposure.value(), .previous_sibling = 0, .facts = 0, .data = 0 });
 }
 
-void StyleEngine::finish_sheet_rules_replacement(SheetID sheet)
-{
-    publish_input([sheet](StyleInputScope const& input) {
-        StyleEngineFFI::style_engine_finish_sheet_rules_replacement(input.engine().rust_handle(), sheet.value());
-    });
-}
-
 static bool property_defines_a_css_transition(PropertyID property_id)
 {
     switch (property_id) {
