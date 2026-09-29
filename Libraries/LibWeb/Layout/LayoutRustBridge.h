@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Noncopyable.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/Optional.h>
 #include <AK/OwnPtr.h>
@@ -88,6 +89,18 @@ bool update_empty_line_box_fragment_flag_of_box(Painting::BoxSlot const& text_bo
 void publish_svg_attribute_facts(DOM::Element&);
 void publish_svg_style_references(DOM::Element&);
 void clear_svg_attribute_facts(DOM::Document&, CSS::StyleNodeID);
+
+// While one is alive, what the document thread writes of its layout arenas waits to go to the render owner together,
+// a few hundred changes to a message, rather than a message per change: the last goes as the outermost batch ends,
+// or ahead of anything else the thread sends the owner first.
+class ArenaChangeBatch {
+    AK_MAKE_NONCOPYABLE(ArenaChangeBatch);
+    AK_MAKE_NONMOVABLE(ArenaChangeBatch);
+
+public:
+    ArenaChangeBatch() { RustFFI::render_owner_open_change_batch(); }
+    ~ArenaChangeBatch() { RustFFI::render_owner_close_change_batch(); }
+};
 
 inline RustFFI::FfiSvgNumberPercentage to_ffi_number_percentage(SVG::NumberPercentage value)
 {

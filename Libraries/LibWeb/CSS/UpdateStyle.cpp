@@ -208,9 +208,8 @@ void StyleEffectDrain::install(DOM::Document& document, Function<void(StyleDrain
 {
     auto& style_engine = document.render_inputs_for_write().style_engine();
     // Declared first, so what the drain writes of the layout arena, row by row and as its marks are written through,
-    // goes to the render owner as one message once all of it has been written.
-    Layout::RustFFI::render_owner_open_change_batch();
-    ScopeGuard send_change_batch = [] { Layout::RustFFI::render_owner_close_change_batch(); };
+    // goes to the render owner in batches.
+    Layout::ArenaChangeBatch const change_batch;
     // Declared next, so the install's marks are written through once the rest of the drain has ended.
     DOM::InvalidationJournal::WriteThroughDeferral const write_through_deferral { document.invalidation_journal() };
     StyleDrainScope const scope { style_engine };

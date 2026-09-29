@@ -512,6 +512,8 @@ void InvalidationJournal::drain()
     if (is_empty() || m_draining)
         return;
     TemporaryChange draining { m_draining, true };
+    // The marks the drain writes through go to the render owner in batches, not one message each.
+    Layout::ArenaChangeBatch const change_batch;
 
     if (exchange(m_selection_states_are_stale, false))
         publish_selection_states();
