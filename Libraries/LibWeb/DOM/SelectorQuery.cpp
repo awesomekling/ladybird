@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Array.h>
 #include <LibGC/WeakInlines.h>
 #include <LibWeb/CSS/SelectorMatching.h>
 #include <LibWeb/DOM/Document.h>
@@ -14,6 +15,7 @@
 #include <LibWeb/DOM/StaticNodeList.h>
 #include <LibWeb/HTML/CustomElements/CustomStateSet.h>
 #include <LibWeb/HTML/HTMLHeadingElement.h>
+#include <LibWeb/Namespace.h>
 #include <LibWeb/SelectorRustFFI.h>
 
 namespace Web::DOM {
@@ -56,9 +58,6 @@ static bool pseudo_class_matching_is_covered_by_version_counters(CSS::PseudoClas
 SelectorQuery::SelectorQuery(CSS::SelectorList&& selectors)
     : m_selectors(move(selectors))
 {
-    m_rust_selectors.ensure_capacity(m_selectors.size());
-    for (auto const& selector : m_selectors)
-        m_rust_selectors.unchecked_append(&selector->rust_selector());
     m_matches_every_element = m_selectors.size() == 1
         && CSS::SelectorFFI::rust_selector_matches_every_element(&m_selectors.first()->rust_selector());
 
@@ -86,7 +85,29 @@ SelectorQuery::SelectorQuery(CSS::SelectorList&& selectors)
     }
 }
 
+SelectorQuery::~SelectorQuery()
+{
+    CSS::SelectorFFI::rust_dom_selector_program_destroy(m_program);
+}
+
+CSS::SelectorFFI::DomSelectorProgram const& SelectorQuery::program(Document const& document) const
+{
+    // A document is an HTML document or not for all its life, so a query recompiles only if it is used in both kinds.
+    if (m_program && m_program_is_for_html_document == document.is_html_document())
+        return *m_program;
+    CSS::SelectorFFI::rust_dom_selector_program_destroy(m_program);
+    Vector<CSS::SelectorFFI::RustSelector const*> selectors;
+    selectors.ensure_capacity(m_selectors.size());
+    for (auto const& selector : m_selectors)
+        selectors.unchecked_append(&selector->rust_selector());
+    m_program_is_for_html_document = document.is_html_document();
+    m_program = CSS::SelectorFFI::rust_dom_selector_program_create(selectors.data(), selectors.size(), m_program_is_for_html_document ? Namespace::HTML.raw_identity() : 0);
+    return *m_program;
+}
+
 namespace {
+
+#include <LibWeb/SelectorStateFactsGenerated.inc>
 
 // Every node crosses to the DOM matcher as a Node pointer, and an element is downcast from one where the matcher asks
 // about an element.
@@ -146,18 +167,24 @@ constexpr CSS::SelectorFFI::FfiDomSelectorCallbacks dom_selector_callbacks {
             .classes = reinterpret_cast<uintptr_t const*>(classes.data()),
             .class_count = classes.size(),
             .attribute_count = attribute_count,
-            .is_html_element = element.is_html_element(),
         };
     },
-    .parent_element = [](void const* element) { return node_to_ffi(element_from_ffi(element).parent_element().ptr()); },
-    .host_of_parent_shadow_root = [](void const* element) -> void const* {
-        if (auto const* shadow_root = as_if<ShadowRoot>(element_from_ffi(element).parent()))
-            return node_to_ffi(shadow_root->host());
-        return nullptr;
+    .parent = [](void const* pointer) -> void const* {
+        auto const& node = node_from_ffi(pointer);
+        if (node.is_shadow_root())
+            return nullptr;
+        auto const* parent = node.parent();
+        if (!parent || !(parent->is_element() || parent->is_shadow_root()))
+            return nullptr;
+        return node_to_ffi(parent);
     },
     .previous_element_sibling = [](void const* element) { return node_to_ffi(element_from_ffi(element).previous_element_sibling()); },
     .next_element_sibling = [](void const* element) { return node_to_ffi(element_from_ffi(element).next_element_sibling()); },
-    .first_element_child = [](void const* element) { return node_to_ffi(element_from_ffi(element).first_child_of_type<Element>()); },
+    .first_element_child = [](void const* node) { return node_to_ffi(node_from_ffi(node).first_child_of_type<Element>()); },
+    .first_element_sibling = [](void const* pointer) {
+        auto const& node = node_from_ffi(pointer);
+        auto const* parent = node.parent();
+        return node_to_ffi(parent ? parent->first_child_of_type<Element>() : &node); },
     .count_element_siblings = [](void const* pointer, CSS::SelectorFFI::FfiSiblingCount which) {
         using enum CSS::SelectorFFI::FfiSiblingCount;
         auto const& element = element_from_ffi(pointer);
@@ -189,20 +216,24 @@ constexpr CSS::SelectorFFI::FfiDomSelectorCallbacks dom_selector_callbacks {
         return nullptr;
     },
     .attribute_name_filter_bit = [](uintptr_t local_name) { return Element::attribute_name_filter_bit(Utf16FlyString::from_raw(local_name)); },
+    .shadow_root = [](void const* element) { return node_to_ffi(element_from_ffi(element).shadow_root().ptr()); },
+    .host = [](void const* shadow_root) { return node_to_ffi(static_cast<ShadowRoot const&>(node_from_ffi(shadow_root)).host()); },
     .id_or_class_equals_ignoring_ascii_case = [](void const* pointer, bool is_class, uintptr_t name_identity) {
         auto const& element = element_from_ffi(pointer);
         auto name = Utf16FlyString::from_raw(name_identity);
         if (!is_class)
             return element.id().has_value() && element.id()->equals_ignoring_ascii_case(name);
         return any_of(element.class_names(), [&](auto const& class_name) { return class_name.equals_ignoring_ascii_case(name); }); },
-    .matches_state = [](void const* element, u8 pseudo_class) { return SelectorMatching::element_matches_state(element_from_ffi(element), static_cast<CSS::PseudoClass>(pseudo_class)); },
+    .matches_state = [](void const* element, u8 state) { return SelectorMatching::element_matches_state(element_from_ffi(element), pseudo_classes_by_state_fact[state]); },
     .language = [](void const* element) -> CSS::SelectorFFI::FfiUtf16View {
         auto language = element_from_ffi(element).lang_view();
         if (!language.has_value())
             return {};
         return utf16_view_to_ffi(*language);
     },
-    .is_right_to_left = [](void const* element) { return element_from_ffi(element).directionality() == Element::Directionality::Rtl; },
+    .directionality = [](void const* element) {
+        auto const& directionality = element_from_ffi(element).directionality() == Element::Directionality::Rtl ? "rtl"_utf16_fly_string : "ltr"_utf16_fly_string;
+        return directionality.raw_identity(); },
     .heading_level = [](void const* element) -> u32 {
         auto const* heading = as_if<HTML::HTMLHeadingElement>(element_from_ffi(element));
         return heading ? heading->heading_level() : 0;
@@ -216,23 +247,23 @@ constexpr CSS::SelectorFFI::FfiDomSelectorCallbacks dom_selector_callbacks {
         return SelectorMatching::element_is_empty_ignoring_child(element, element); },
 };
 
-// A selector query as the DOM matcher takes it, made in the context of the tree `node` is in.
+// A selector query as the DOM matcher takes it, made in the context of the tree `node` is in and scoped to `scope`.
 class DomSelectorQuery {
 public:
-    DomSelectorQuery(Vector<CSS::SelectorFFI::RustSelector const*> const& selectors, Node const& node, Element const* scope)
+    DomSelectorQuery(CSS::SelectorFFI::DomSelectorProgram const& program, Node const& node, ParentNode const& scope)
     {
-        GC::Ptr<Element const> shadow_host;
-        if (auto const* shadow_root = as_if<ShadowRoot>(node.root()))
-            shadow_host = shadow_root->host();
         auto const& document = node.document();
+        // https://drafts.csswg.org/selectors-4/#scope-pseudo
+        // If the :scope elements are not explicitly specified, but the selector is scoped and the scoping root is an
+        // element, then :scope represents the scoping root; otherwise, it represents the root of the document
+        // (equivalent to :root).
+        auto const* scope_element = as_if<Element>(scope);
         m_query = {
-            .selectors = selectors.data(),
-            .selector_count = selectors.size(),
+            .program = &program,
             .callbacks = &dom_selector_callbacks,
-            .scope = node_to_ffi(scope),
-            .shadow_host = node_to_ffi(shadow_host.ptr()),
+            .scope = node_to_ffi(scope_element ? scope_element : document.document_element()),
+            .shadow_root = node_to_ffi(as_if<ShadowRoot>(node.root())),
             .document_element = node_to_ffi(document.document_element()),
-            .in_html_document = document.is_html_document(),
             .ids_and_classes_ignore_case = document.in_quirks_mode(),
         };
     }
@@ -284,12 +315,12 @@ bool SelectorQuery::matches(Element const& element, ParentNode const& scope) con
 {
     if (m_matches_every_element)
         return true;
-    return DomSelectorQuery { m_rust_selectors, element, as_if<Element>(scope) }.matches(element);
+    return DomSelectorQuery { program(element.document()), element, scope }.matches(element);
 }
 
 GC::Ptr<Element const> SelectorQuery::closest(Element const& element) const
 {
-    return DomSelectorQuery { m_rust_selectors, element, &element }.closest(element);
+    return DomSelectorQuery { program(element.document()), element, element }.closest(element);
 }
 
 // https://dom.spec.whatwg.org/#scope-match-a-selectors-string
@@ -311,7 +342,7 @@ GC::Ptr<Element> SelectorQuery::query_first(ParentNode& root) const
     if (m_matches_every_element)
         result = root.first_child_of_type<Element>();
     else
-        result = DomSelectorQuery { m_rust_selectors, root, as_if<Element>(root) }.first(root);
+        result = DomSelectorQuery { program(document), root, root }.first(root);
 
     if (m_is_result_cacheable) {
         Vector<GC::RawPtr<Element>> elements;
@@ -354,7 +385,7 @@ GC::Ref<NodeList> SelectorQuery::query_all(ParentNode& root) const
             return TraversalDecision::Continue;
         });
     } else {
-        DomSelectorQuery { m_rust_selectors, root, as_if<Element>(root) }.collect(root, elements);
+        DomSelectorQuery { program(document), root, root }.collect(root, elements);
     }
 
     auto node_list = create_node_list(elements);

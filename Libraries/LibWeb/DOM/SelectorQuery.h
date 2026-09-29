@@ -15,6 +15,12 @@
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/Forward.h>
 
+namespace Web::CSS::SelectorFFI {
+
+struct DomSelectorProgram;
+
+}
+
 namespace Web::DOM {
 
 // A selectors string parsed for use by querySelector(All), matches() and closest().
@@ -25,6 +31,8 @@ public:
     {
         return adopt_ref(*new SelectorQuery(move(selectors)));
     }
+
+    ~SelectorQuery();
 
     CSS::SelectorList const& selectors() const { return m_selectors; }
 
@@ -44,9 +52,12 @@ public:
 private:
     explicit SelectorQuery(CSS::SelectorList&&);
 
+    CSS::SelectorFFI::DomSelectorProgram const& program(Document const&) const;
+
     CSS::SelectorList m_selectors;
-    // The selectors as the DOM matcher takes them.
-    Vector<CSS::SelectorFFI::RustSelector const*> m_rust_selectors;
+    // The selectors compiled for the DOM matcher, when a query first needs them, for an HTML document or not.
+    mutable CSS::SelectorFFI::DomSelectorProgram* m_program { nullptr };
+    mutable bool m_program_is_for_html_document { false };
     mutable u64 m_last_use { 0 };
 
     // Whether the selector is a lone `*`, which every element matches: a query then collects the

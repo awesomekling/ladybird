@@ -45,6 +45,7 @@ use super::weak_pool::WeakPool;
 use smallvec::SmallVec;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::marker::PhantomData;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -715,9 +716,27 @@ impl SelectorPrefixPredicate {
     }
 }
 
+/// Whose names the atoms of a selector program are.
+///
+/// A program is evaluated against a subject whose storage is keyed by the same atoms, so the space is part of the
+/// program's type: a program compiled for one kind of storage cannot be run against another.
+pub trait AtomSpace: Default + PartialEq + Eq + Hash {}
+
+/// The style engine's atoms, which a document's style storage is keyed by.
+#[derive(Default, PartialEq, Eq, Hash)]
+pub struct DocumentAtoms;
+
+impl AtomSpace for DocumentAtoms {}
+
+/// A DOM query's own names, interned when the query is compiled and compared with the DOM's names by identity.
+#[derive(Default, PartialEq, Eq, Hash)]
+pub struct QueryAtoms;
+
+impl AtomSpace for QueryAtoms {}
+
 /// A compiled selector program: one rule's selector list.
 #[derive(Default, PartialEq, Eq, Hash)]
-pub struct SelectorProgram {
+pub struct SelectorProgram<A: AtomSpace = DocumentAtoms> {
     nodes: Vec<SelectorOp>,
     operands: Vec<SelectorNodeID>,
     text: Vec<u16>,
@@ -735,9 +754,10 @@ pub struct SelectorProgram {
     relation_target_blooms: Box<[u64]>,
     can_leave_scope: bool,
     subject_can_leave_scope: bool,
+    atoms: PhantomData<A>,
 }
 
-impl SelectorProgram {
+impl<A: AtomSpace> SelectorProgram<A> {
     pub(super) fn collect_atoms(&self, atoms: &mut HashSet<StyleAtomID>) -> u64 {
         let mut visited = 0_u64;
         let mut insert = |atom: StyleAtomID| {
@@ -912,8 +932,8 @@ impl SelectorProgram {
 /// Builds one selector program. C++ parses the selector text and drives this; the IR and its
 /// ordering are decided here, while specificity comes from the immutable compiled selector.
 #[derive(Default)]
-pub struct SelectorProgramBuilder {
-    program: SelectorProgram,
+pub struct SelectorProgramBuilder<A: AtomSpace = DocumentAtoms> {
+    program: SelectorProgram<A>,
 }
 
 impl SelectorProgramBuilder {
@@ -921,10 +941,12 @@ impl SelectorProgramBuilder {
     pub fn new() -> Self {
         Self::default()
     }
+}
 
+impl<A: AtomSpace> SelectorProgramBuilder<A> {
     /// The program as built so far, for a compiler that has to inspect what it just emitted.
     #[must_use]
-    pub fn program(&self) -> &SelectorProgram {
+    pub fn program(&self) -> &SelectorProgram<A> {
         &self.program
     }
 
@@ -1082,7 +1104,7 @@ impl SelectorProgramBuilder {
     }
 
     #[must_use]
-    pub fn finish(mut self) -> SelectorProgram {
+    pub fn finish(mut self) -> SelectorProgram<A> {
         self.program.cache_dispatch_metadata();
         for index in 0..self.program.entries.len() {
             let entry = &self.program.entries[index];
@@ -1124,7 +1146,7 @@ impl SelectorProgramBuilder {
     }
 }
 
-impl SelectorProgram {
+impl<A: AtomSpace> SelectorProgram<A> {
     fn cache_dispatch_metadata(&mut self) {
         // Only ancestor walks consult these blooms; other programs need no per-node array.
         let target_count = if self.nodes.iter().any(|node| matches!(node, SelectorOp::Ancestor(_))) {
@@ -1332,7 +1354,7 @@ impl SelectorProgram {
                 SelectorPrefixPredicate::And(operands.into_boxed_slice())
             }
         }
-        fn predicate(program: &SelectorProgram, node: SelectorNodeID) -> SelectorPrefixPredicate {
+        fn predicate<A: AtomSpace>(program: &SelectorProgram<A>, node: SelectorNodeID) -> SelectorPrefixPredicate {
             match program.node(node) {
                 SelectorOp::And { first, count } => conjunction(
                     program
@@ -3628,7 +3650,7 @@ struct RouteDescriptor<'a> {
     path: &'a [InverseStep],
 }
 
-impl SelectorProgram {
+impl<A: AtomSpace> SelectorProgram<A> {
     /// Walk one entry and report every semantic input it mentions, with the inverse path from that
     /// input to the entry's subjects.
     ///
@@ -4812,24 +4834,29 @@ pub struct MatchFactRow<'a> {
 impl<'a> ElementFeatures for MatchFactRow<'a> {
     type Attribute = (&'a StyleNodeFacts, super::index::AttributeFact);
 
+    #[inline]
     fn local_name_is(&self, name: StyleAtomID) -> bool {
         self.facts.tag_of(self.row) == name
     }
 
+    #[inline]
     fn namespace_is(&self, namespace: StyleAtomID) -> bool {
         self.facts.namespace_of(self.row) == namespace
     }
 
+    #[inline]
     fn has_id(&self, id: StyleAtomID) -> bool {
         self.facts.id_of(self.row) == id
     }
 
+    #[inline]
     fn has_class(&self, class: StyleAtomID) -> bool {
         self.facts.classes_of(self.row).contains(&class)
     }
 
     /// `[*|x]` names the attribute called `x` in each namespace the element carries it in, and they all publish the
     /// same any-namespace atom as their local name.
+    #[inline]
     fn attributes_named(
         &self,
         name: StyleAtomID,
@@ -5557,6 +5584,7 @@ impl<'a> MatchEvaluator<'a> {
         self
     }
 
+    #[inline]
     pub(super) fn match_scratch_capacity_bytes(&self) -> u64 {
         self.subject
             .match_workspace
@@ -5616,6 +5644,7 @@ impl<'a> MatchEvaluator<'a> {
     }
 
     /// Whether `node` matches one entry.
+    #[inline]
     pub fn matches_entry(
         &mut self,
         program: &SelectorProgram,
@@ -5663,6 +5692,7 @@ impl<'a> MatchEvaluator<'a> {
 
     /// Whether `node` matches one entry, reusing transitive relation answers from other nodes
     /// evaluated against the same selector program.
+    #[inline]
     pub fn matches_entry_for_program(
         &mut self,
         program_id: SelectorProgramID,
@@ -5680,6 +5710,7 @@ impl<'a> MatchEvaluator<'a> {
     /// Evaluate one entry without admitting its primitive and transitive relation answers to the
     /// shared program caches. Narrow exact comparisons consume the answer once, so they keep the
     /// workspace's positional geometry but avoid canonicalization and sparse-column traffic.
+    #[inline]
     pub(super) fn matches_entry_without_program_caches(
         &mut self,
         program: &SelectorProgram,
@@ -5692,6 +5723,7 @@ impl<'a> MatchEvaluator<'a> {
 
     /// Whether `node` matches one selector IR node. Routing's retained-witness check uses this to
     /// re-evaluate a simple query's compound on the one retained witness.
+    #[inline]
     pub(super) fn matches_selector_node(
         &mut self,
         program: &SelectorProgram,
@@ -5735,6 +5767,7 @@ impl<'a> MatchEvaluator<'a> {
     /// A node the fact store has no row for is a shadow root, which publishes nothing and answers
     /// no question about what it carries. That is not a rejection: a candidate filter that read it
     /// as one would abandon the whole document over `.wrap > .child` inside any shadow tree.
+    #[inline]
     #[must_use]
     pub fn node_cannot_carry_dispatch_key(&self, key: DispatchKey, node: StyleNodeID) -> bool {
         self.subject.row_of(node).is_ok_and(|row| {
@@ -5743,6 +5776,7 @@ impl<'a> MatchEvaluator<'a> {
         })
     }
 
+    #[inline]
     pub(super) fn indexed_sibling_position(
         &mut self,
         position: NthPosition,
@@ -5751,20 +5785,24 @@ impl<'a> MatchEvaluator<'a> {
         self.subject.indexed_sibling_position(position, node)
     }
 
+    #[inline]
     pub(super) fn row_of(&self, node: StyleNodeID) -> Result<MatchFactRow<'a>, Incomplete> {
         self.subject.row_of(node)
     }
 
+    #[inline]
     pub(super) fn serves_only_resident_rows(&self) -> bool {
         self.subject.serves_only_resident_rows()
     }
 }
 
 impl<'a> EngineSubject<'a> {
+    #[inline]
     fn parent_of(&self, node: StyleNodeID) -> Option<StyleNodeID> {
         self.tree().parent(node)
     }
 
+    #[inline]
     fn children_of(&self, parent: StyleNodeID) -> SiblingChildren<'a> {
         match self.transaction_fact_view {
             Some((view, side)) => view.children_of(self.tree, side, parent),
@@ -5904,6 +5942,7 @@ impl<'a> EngineSubject<'a> {
         })))
     }
 
+    #[inline]
     pub(super) fn row_of(&self, node: StyleNodeID) -> Result<MatchFactRow<'a>, Incomplete> {
         let row = match self.transaction_fact_view {
             Some((view, side)) => view.row_of(side, self.facts, node),
@@ -5915,6 +5954,7 @@ impl<'a> EngineSubject<'a> {
 
     /// Whether every row this evaluator serves comes from the resident arrangement. Only a
     /// before-side view with retained before rows can serve a row from somewhere else.
+    #[inline]
     pub(super) fn serves_only_resident_rows(&self) -> bool {
         match self.transaction_fact_view {
             Some((view, TransactionFactSide::Before)) => view.before.is_none(),
@@ -5952,6 +5992,7 @@ pub struct EngineTree<'a> {
 impl SelectorTree for EngineTree<'_> {
     type Node = StyleNodeID;
 
+    #[inline]
     fn parent(self, node: StyleNodeID) -> Option<StyleNodeID> {
         self.transaction_fact_view.map_or_else(
             || self.tree.parent(node),
@@ -5959,6 +6000,7 @@ impl SelectorTree for EngineTree<'_> {
         )
     }
 
+    #[inline]
     fn previous_sibling(self, node: StyleNodeID) -> Option<StyleNodeID> {
         self.transaction_fact_view.map_or_else(
             || self.tree.previous_element_sibling(node),
@@ -5966,6 +6008,7 @@ impl SelectorTree for EngineTree<'_> {
         )
     }
 
+    #[inline]
     fn next_sibling(self, node: StyleNodeID) -> Option<StyleNodeID> {
         self.transaction_fact_view.map_or_else(
             || self.tree.next_element_sibling(node),
@@ -5973,6 +6016,7 @@ impl SelectorTree for EngineTree<'_> {
         )
     }
 
+    #[inline]
     fn first_child(self, parent: StyleNodeID) -> Option<StyleNodeID> {
         match self.transaction_fact_view {
             Some((view, side)) => view.children_of(self.tree, side, parent).next(),
@@ -5980,24 +6024,29 @@ impl SelectorTree for EngineTree<'_> {
         }
     }
 
+    #[inline]
     fn first_sibling(self, node: StyleNodeID) -> StyleNodeID {
         self.parent(node)
             .and_then(|parent| self.first_child(parent))
             .unwrap_or(node)
     }
 
+    #[inline]
     fn live_parent(self, node: StyleNodeID) -> Option<StyleNodeID> {
         self.tree.parent(node)
     }
 
+    #[inline]
     fn shadow_root_of(self, host: StyleNodeID) -> Option<StyleNodeID> {
         self.tree.shadow_root_of(host)
     }
 
+    #[inline]
     fn host_of(self, shadow_root: StyleNodeID) -> Option<StyleNodeID> {
         self.tree.host_of(shadow_root)
     }
 
+    #[inline]
     fn for_each_on_axis(
         self,
         axis: RelativeAxis,
@@ -6008,16 +6057,19 @@ impl SelectorTree for EngineTree<'_> {
         candidate_witnesses(axis, below_the_axis, anchor, self.tree, visit);
     }
 
+    #[inline]
     fn assigned_slot_of(self, node: StyleNodeID) -> Option<StyleNodeID> {
         self.tree.assigned_slot_of(node)
     }
 
+    #[inline]
     fn shadow_host_of(self, node: StyleNodeID) -> Option<StyleNodeID> {
         self.tree.shadow_host_of(node)
     }
 }
 
 impl<'a> SelectorSubject for EngineSubject<'a> {
+    type Atoms = DocumentAtoms;
     type Node = StyleNodeID;
     type Tree = EngineTree<'a>;
     type Row = MatchFactRow<'a>;
@@ -6030,6 +6082,7 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
     type Counters = Counters;
     type PrefixSlot = PrecedingSiblingParentID;
 
+    #[inline]
     fn tree(&self) -> EngineTree<'a> {
         EngineTree {
             tree: self.tree,
@@ -6037,23 +6090,28 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
         }
     }
 
+    #[inline]
     fn row(&mut self, node: StyleNodeID) -> Result<MatchFactRow<'a>, Incomplete> {
         self.row_of(node)
     }
 
+    #[inline]
     fn features(&self, row: MatchFactRow<'a>) -> MatchFactRow<'a> {
         row
     }
 
+    #[inline]
     fn same_type(&self, row: MatchFactRow<'a>, other: MatchFactRow<'a>) -> bool {
         row.facts.tag_of(row.row) == other.facts.tag_of(other.row)
             && row.facts.namespace_of(row.row) == other.facts.namespace_of(other.row)
     }
 
+    #[inline]
     fn attribute_value_atom(&self, (_, attribute): (&'a StyleNodeFacts, super::index::AttributeFact)) -> StyleAtomID {
         attribute.value
     }
 
+    #[inline]
     fn attribute_value_text(
         &self,
         (facts, attribute): (&'a StyleNodeFacts, super::index::AttributeFact),
@@ -6061,26 +6119,32 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
         facts.text_of(attribute).map(TokenizerInput::Utf16)
     }
 
+    #[inline]
     fn has_state(&self, row: MatchFactRow<'a>, fact: StateFact) -> bool {
         row.facts.states_of(row.row).contains(fact)
     }
 
+    #[inline]
     fn language_tag(&self, row: MatchFactRow<'a>) -> Cow<'_, [u16]> {
         Cow::Borrowed(row.facts.language_tag_of(row.row))
     }
 
+    #[inline]
     fn directionality_is(&self, row: MatchFactRow<'a>, direction: StyleAtomID) -> bool {
         row.facts.directionality_of(row.row) == direction
     }
 
+    #[inline]
     fn has_custom_state(&self, row: MatchFactRow<'a>, state: StyleAtomID) -> bool {
         row.facts.custom_states_of(row.row).contains(&state)
     }
 
+    #[inline]
     fn heading_level(&self, row: MatchFactRow<'a>) -> u8 {
         row.facts.heading_level_of(row.row)
     }
 
+    #[inline]
     fn is_empty(&mut self, node: StyleNodeID) -> Result<bool, Incomplete> {
         // Element children are style nodes and the tree answers for them. A text or comment child is
         // not, so the element publishes whether it holds one.
@@ -6088,14 +6152,17 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
         Ok(self.tree.first_element_child(node).is_none() && !row.facts.has_text_content_of(row.row))
     }
 
+    #[inline]
     fn is_root(&self, node: StyleNodeID) -> bool {
         self.parent_of(node).is_none()
     }
 
+    #[inline]
     fn is_node(&self, node: StyleNodeID, named: StyleNodeID) -> bool {
         node == named
     }
 
+    #[inline]
     fn has_part(&self, row: MatchFactRow<'a>, part: StyleAtomID) -> bool {
         row.facts.parts_of(row.row).contains(&part)
     }
@@ -6125,6 +6192,7 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
     }
 
     /// A row facts cannot answer for yet is never prejudged.
+    #[inline]
     fn may_match(&self, program: &SelectorProgram, compound: SelectorNodeID, node: StyleNodeID) -> bool {
         let required = program.relation_target_bloom(compound);
         if required == 0 {
@@ -6138,6 +6206,7 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
 
     /// Answers are kept per compiled program, so only an evaluation that names its program and binds
     /// no scope, anchor or shadow root may share them.
+    #[inline]
     fn remembers_relations(&self, bindings: &SelectorBindings<StyleNodeID>) -> bool {
         self.match_workspace.is_some()
             && self.transitive_relation_program.is_some()
@@ -6146,6 +6215,7 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
             && bindings.scope_shadow_root.is_none()
     }
 
+    #[inline]
     fn relation_answer(&self, _program: &SelectorProgram, relation: SelectorNodeID, node: StyleNodeID) -> Option<bool> {
         let (workspace, side) = self.match_workspace.as_ref()?;
         match workspace
@@ -6158,6 +6228,7 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
         }
     }
 
+    #[inline]
     fn record_relation_answer(
         &mut self,
         _program: &SelectorProgram,
@@ -6172,6 +6243,7 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
         }
     }
 
+    #[inline]
     fn preceding_sibling_prefix(
         &mut self,
         _program: &SelectorProgram,
@@ -6185,6 +6257,7 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
         Some(RememberedPrefix { slot, prefix })
     }
 
+    #[inline]
     fn record_preceding_sibling_prefix(
         &mut self,
         _program: &SelectorProgram,
@@ -6200,6 +6273,7 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
         }
     }
 
+    #[inline]
     fn positional_answer(&self, position: NthPosition, node: StyleNodeID) -> Option<bool> {
         if self.positional_index_policy != PositionalIndexPolicy::All {
             return None;
@@ -6208,6 +6282,7 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
         workspace.positional_answer(position, node, *side)
     }
 
+    #[inline]
     fn record_positional_answer(&mut self, position: NthPosition, node: StyleNodeID, answer: bool) {
         if self.positional_index_policy == PositionalIndexPolicy::All
             && let Some((workspace, side)) = self.match_workspace.as_mut()
@@ -6216,6 +6291,7 @@ impl<'a> SelectorSubject for EngineSubject<'a> {
         }
     }
 
+    #[inline]
     fn sibling_index(&mut self, position: NthPosition, node: StyleNodeID) -> Result<Option<i64>, Incomplete> {
         if position.step == 0 && self.positional_index_policy != PositionalIndexPolicy::All {
             return Ok(None);
@@ -6601,7 +6677,7 @@ mod tests {
 
     #[test]
     fn selector_program_atom_roots_cover_every_operator_payload() {
-        let program = SelectorProgram {
+        let program: SelectorProgram = SelectorProgram {
             nodes: vec![
                 SelectorOp::Feature(FeatureTest::TagName(TagTest {
                     written: StyleAtomID(1),
