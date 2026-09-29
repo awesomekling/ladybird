@@ -6,6 +6,7 @@
 
 #include <AK/AnyOf.h>
 #include <AK/HashTable.h>
+#include <AK/NeverDestroyed.h>
 #include <AK/QuickSort.h>
 #include <AK/ScopeGuard.h>
 #include <AK/TemporaryChange.h>
@@ -205,18 +206,18 @@ static void apply_layout_tree_rebuild_after_style_change(DOM::Element& element, 
 }
 
 // The storage of the drain that ended last, which the next one fills again rather than growing its own from nothing.
-static Vector<StyleEffectDrain::RenderEffect> s_spare_render_effects;
+static NeverDestroyed<Vector<StyleEffectDrain::RenderEffect>> s_spare_render_effects;
 
 StyleEffectDrain::StyleEffectDrain()
-    : m_render_effects(move(s_spare_render_effects))
+    : m_render_effects(move(*s_spare_render_effects))
 {
 }
 
 StyleEffectDrain::~StyleEffectDrain()
 {
     m_render_effects.clear_with_capacity();
-    if (m_render_effects.capacity() > s_spare_render_effects.capacity())
-        s_spare_render_effects = move(m_render_effects);
+    if (m_render_effects.capacity() > s_spare_render_effects->capacity())
+        *s_spare_render_effects = move(m_render_effects);
 }
 
 void StyleEffectDrain::install(DOM::Document& document, Function<void(StyleDrainScope const&)> const& install)
