@@ -640,10 +640,37 @@ pub(crate) fn prepare_root_background_and_overflow(
     (background_source_changed, clamped)
 }
 
-/// [`prepare_root_background_and_overflow`] with the root background source the arena's tree derives.
-pub(crate) fn root_background_and_overflow(arena: &mut LayoutNodeArena) -> (bool, Vec<(NodeSlotId, CssPixelPoint)>) {
+/// How far one pass of preparing for rendering got.
+pub(crate) enum RenderingPreparation {
+    /// The document is prepared.
+    Prepared(FfiRenderingPreparationOutcome),
+    /// The new overflow clamped the scroll offsets of these boxes, which the document thread stores before the owner
+    /// finishes the preparation, given whether the root background source changed.
+    ClampedScrollOffsets {
+        background_source_changed: bool,
+        clamped: Vec<(NodeSlotId, CssPixelPoint)>,
+    },
+}
+
+/// Prepares the root background and the scrollable overflow, and finishes preparing for rendering where the new
+/// overflow clamped no scroll offset, which it almost never does.
+pub(crate) fn prepare_for_rendering(
+    arena: &mut LayoutNodeArena,
+    visual_context_update_pending: bool,
+) -> RenderingPreparation {
     let root_background_source = crate::layout::root_background_source(arena);
-    prepare_root_background_and_overflow(arena, root_background_source)
+    let (background_source_changed, clamped) = prepare_root_background_and_overflow(arena, root_background_source);
+    if clamped.is_empty() {
+        return RenderingPreparation::Prepared(finish_rendering_preparation(
+            arena,
+            background_source_changed,
+            visual_context_update_pending,
+        ));
+    }
+    RenderingPreparation::ClampedScrollOffsets {
+        background_source_changed,
+        clamped,
+    }
 }
 
 /// The render half of preparing for rendering after the scroll offset handover: takes what the
@@ -4287,6 +4314,21 @@ mod tests {
             arena.paint_state().borrow().visual_context.dirty_boxes.boxes[&viewport]
                 .contains(VisualContextBoxDirtyKind::ScrollableOverflowFlipped)
         );
+    }
+
+    /// Overflow that clamps no scroll offset leaves the document thread nothing to store before the preparation
+    /// finishes, so one pass prepares it.
+    #[test]
+    fn preparing_for_rendering_takes_one_pass_where_nothing_is_clamped() {
+        let mut arena = LayoutNodeArena::new();
+        let viewport = arena.allocate_for_test().slot;
+        arena.write_shape(viewport).set_kind(NodeKind::Viewport);
+        arena.populate_paintable_row(viewport);
+        arena.scrollable_overflow.viewport.set(Some(viewport));
+        assert!(matches!(
+            super::prepare_for_rendering(&mut arena, false),
+            super::RenderingPreparation::Prepared(_)
+        ));
     }
 
     #[test]
