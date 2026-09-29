@@ -6399,26 +6399,33 @@ pub unsafe extern "C" fn layout_arena_set_node_dom_paint_facts(arena: *mut c_voi
     unsafe { super::layout_changes::send(arena, LayoutChange::SetNodeDomPaintFacts { node: id, facts }) };
 }
 
-/// Pins the style record of the box the element or text node with `style_node` is bound to, or of the box of its
-/// pseudo-element of kind `generated_for`, so that the box keeps its style readable once the node has left the
-/// document. A text box has no record of its own.
+/// The box of the element or text node with `style_node`, or of its pseudo-element of kind `generated_for` where that
+/// is not zero.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct FfiBoundBox {
+    pub style_node: u32,
+    pub generated_for: u8,
+}
+
+/// Pins the style record of each of `boxes`, so that the box keeps its style readable once its node has left the
+/// document. A text box has no record of its own. The boxes of a subtree go as one change.
 ///
 /// # Safety
 ///
-/// `arena` must be a live handle on the document thread.
+/// `arena` must be a live handle on the document thread, and `boxes` must point to `count` boxes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_pin_bound_box_style_record_for_detachment(
+pub unsafe extern "C" fn layout_arena_pin_bound_box_style_records_for_detachment(
     arena: *mut c_void,
-    style_node: u32,
-    generated_for: u8,
+    boxes: *const FfiBoundBox,
+    count: usize,
 ) {
-    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+    if count == 0 {
         return;
-    };
-    let change = LayoutChange::PinBoundBoxStyleRecordForDetachment {
-        style_node,
-        generated_for,
-    };
+    }
+    // SAFETY: Guaranteed by the caller.
+    let boxes = unsafe { std::slice::from_raw_parts(boxes, count) };
+    let change = LayoutChange::PinBoundBoxStyleRecordsForDetachment(boxes.into());
     // SAFETY: Guaranteed by the caller.
     unsafe { super::layout_changes::send(arena, change) };
 }
