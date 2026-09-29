@@ -2770,7 +2770,7 @@ void record_stylesheet_attached(StyleSheetState& sheet, DOM::Node& document_or_s
 // the sheet object the way an author sheet's does; they are held here, per document, alongside the
 // sheets they name. The user sheet is rebuilt rather than edited when content blockers change, so
 // the set is compared by identity and re-attached whole when it differs.
-void record_non_author_stylesheets(DOM::Document& document)
+RecordedNonAuthorSheets record_non_author_stylesheets(DOM::Document& document)
 {
     auto& style_computer = document.style_computer();
     auto& style_scope = document.style_scope();
@@ -2797,11 +2797,11 @@ void record_non_author_stylesheets(DOM::Document& document)
         return true;
     };
     if (recorded_sheets_match())
-        return;
+        return {};
 
     document.flush_deferred_style_change_event();
     if (recorded_sheets_match())
-        return;
+        return {};
 
     HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::StyleUserAgentSheets };
     auto& style_engine = style_computer.document().render_inputs_for_write().style_engine();
@@ -2829,6 +2829,7 @@ void record_non_author_stylesheets(DOM::Document& document)
         compile_rules_into(context, *sheets[index]);
         recorded.append({ sheets[index], sheet_id });
     }
+    return {};
 }
 
 static StyleSheetState* owning_engine_sheet(StyleSheetState& sheet)

@@ -17,6 +17,12 @@
 #include <LibWebCommon/Page/PageId.h>
 #include <LibWebCommon/Page/QueuedInputEvent.h>
 
+namespace Web::CSS {
+
+class RecordedNonAuthorSheets;
+
+}
+
 namespace Web::SVG {
 
 class SVGDecodedImageData final : public HTML::DecodedImageData {
@@ -59,7 +65,7 @@ public:
     CSS::PreferredColorScheme color_scheme() const { return m_color_scheme; }
 
 private:
-    SVGDecodedImageData(GC::Ref<Page>, GC::Ref<SVGPageClient>, GC::Ref<DOM::Document>, GC::Ref<SVG::SVGSVGElement>);
+    SVGDecodedImageData(GC::Ref<Page>, GC::Ref<SVGPageClient>, GC::Ref<DOM::Document>, GC::Ref<SVG::SVGSVGElement>, CSS::RecordedNonAuthorSheets);
 
     CSS::SizeWithAspectRatio const& natural_size() const;
     RefPtr<Gfx::PaintingSurface> render_to_surface(Gfx::IntSize) const;

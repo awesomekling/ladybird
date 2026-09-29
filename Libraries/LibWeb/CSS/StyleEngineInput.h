@@ -268,9 +268,20 @@ WEB_API void record_element_emptiness_changed(DOM::Element&, DOM::Node const& ch
 WEB_API bool can_record_element_state_change(DOM::Element&);
 WEB_API void record_element_state_changed(DOM::Element&, PseudoClass, bool new_value);
 
+class RecordedNonAuthorSheets;
+
 // Called before each style flush. The user-agent and user origins have no sheet list to announce
 // themselves from, so the engine is told about them from here.
-WEB_API void record_non_author_stylesheets(DOM::Document&);
+WEB_API RecordedNonAuthorSheets record_non_author_stylesheets(DOM::Document&);
+
+// That a document's user-agent and user sheets are recorded with its style engine, which only
+// record_non_author_stylesheets() tells. A document that is styled long after it is built takes it
+// as it is built, so that the render owner publishes the sheets' rules as it idles.
+class RecordedNonAuthorSheets {
+private:
+    friend RecordedNonAuthorSheets record_non_author_stylesheets(DOM::Document&);
+    RecordedNonAuthorSheets() = default;
+};
 
 // Called once a sheet has taken its place in the sheet list, so its successor is known.
 WEB_API void record_stylesheet_attached(StyleSheetState&, DOM::Node& document_or_shadow_root, StyleSheetState* before);
