@@ -43,8 +43,8 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 mod main_thread_entries;
@@ -1159,10 +1159,12 @@ pub(crate) struct LayoutNodeArena {
     /// The viewport the last layout tree build placed, invalid once that box is freed.
     layout_root: Cell<NodeSlotId>,
     /// The layout tree's state as the document thread reads it, without reaching the arena (see
-    /// [`LayoutTreeState`]): republished wherever what it is read from changes, with the count of its publications.
+    /// [`LayoutTreeState`]): republished wherever what it is read from changes.
     published_layout_tree_state: AtomicU64,
-    /// How many times the arena published the layout tree's state, held publications included.
-    layout_tree_states_published: Cell<u32>,
+    /// The layout tree's state a display tick published last, which the document thread publishes as it adopts the
+    /// tick ([`HeldPublication::publish_on_adoption`]), unless the arena published one of its own since, which takes
+    /// it out. The lock keeps the thread's adoption and the arena's publication one after the other.
+    held_layout_tree_state: Mutex<Option<LayoutTreeState>>,
     /// The rows as the document thread reads them, without reaching the arena (see
     /// [`super::row_reads`]).
     pub(super) published_rows: super::row_reads::RowSnapshotSlot,
@@ -1340,8 +1342,8 @@ impl LayoutNodeArena {
             active_layout_pass_depth: Cell::new(0),
             fragment_cache_epoch_changed_during_layout_pass: Cell::new(false),
             layout_root: Cell::new(NodeSlotId::INVALID),
-            published_layout_tree_state: AtomicU64::new(LayoutTreeState::default().pack(0)),
-            layout_tree_states_published: Cell::new(0),
+            published_layout_tree_state: AtomicU64::new(LayoutTreeState::default().pack()),
+            held_layout_tree_state: Mutex::new(None),
             published_rows: Default::default(),
             rows_published: 0,
             held: None,
@@ -2994,12 +2996,13 @@ impl LayoutNodeArena {
             laid_out: self.layout_is_up_to_date(false),
             needs_full_layout_tree_update: self.needs_full_layout_tree_update(),
         };
-        let sequence = self.layout_tree_states_published.get().wrapping_add(1);
-        self.layout_tree_states_published.set(sequence);
-        let packed = state.pack(sequence);
-        match &self.held {
-            Some(held) => held.layout_tree_state.set(Some(HeldLayoutTreeState(packed))),
-            None => self.published_layout_tree_state.store(packed, Ordering::Release),
+        let mut held = lock_held_layout_tree_state(&self.held_layout_tree_state);
+        if self.held.is_some() {
+            *held = Some(state);
+        } else {
+            // What a tick held is older than this: nothing is left for the thread to adopt over it.
+            *held = None;
+            self.published_layout_tree_state.store(state.pack(), Ordering::Release);
         }
     }
 
@@ -7050,12 +7053,9 @@ impl Default for LayoutTreeState {
 impl LayoutTreeState {
     const LAID_OUT: u64 = 1 << 32;
     const NEEDS_FULL_LAYOUT_TREE_UPDATE: u64 = 1 << 33;
-    /// Where a packed state keeps the low bits of the count of the arena's publications it was published as.
-    const SEQUENCE_SHIFT: u32 = 34;
 
-    /// The state, as the arena's `sequence`th publication of it.
-    fn pack(self, sequence: u32) -> u64 {
-        let mut packed = u64::from(self.root.index) | (u64::from(sequence) << Self::SEQUENCE_SHIFT);
+    fn pack(self) -> u64 {
+        let mut packed = u64::from(self.root.index);
         if self.laid_out {
             packed |= Self::LAID_OUT;
         }
@@ -7083,27 +7083,16 @@ impl LayoutTreeState {
             needs_full_layout_tree_update: packed & Self::NEEDS_FULL_LAYOUT_TREE_UPDATE != 0,
         }
     }
-
-    /// Whether the packed state `packed` was published after `than`.
-    fn published_later(packed: u64, than: u64) -> bool {
-        let publications_between = (packed >> Self::SEQUENCE_SHIFT).wrapping_sub(than >> Self::SEQUENCE_SHIFT)
-            & (u64::MAX >> Self::SEQUENCE_SHIFT);
-        publications_between != 0 && publications_between <= u64::MAX >> (Self::SEQUENCE_SHIFT + 1)
-    }
 }
 
 /// What a display tick published of the arena while it ran beside the document thread's task, which only the thread's
-/// adoption of the tick publishes where it reads ([`Self::publish_on_adoption`]).
+/// adoption of the tick publishes where it reads ([`Self::publish_on_adoption`]): its rows here, its layout tree's
+/// state in the arena ([`LayoutNodeArena::held_layout_tree_state`]).
 #[derive(Default)]
 pub(crate) struct HeldPublication {
     /// The rows the tick published last.
     rows: Option<Arc<super::row_reads::RowSnapshot>>,
-    /// The layout tree's state the tick published last.
-    layout_tree_state: Cell<Option<HeldLayoutTreeState>>,
 }
-
-/// A packed [`LayoutTreeState`] a display tick published, which nothing but its adoption reads.
-struct HeldLayoutTreeState(u64);
 
 impl HeldPublication {
     /// Takes what a later tick published in over what this holds.
@@ -7111,13 +7100,10 @@ impl HeldPublication {
         if later.rows.is_some() {
             self.rows = later.rows;
         }
-        if let Some(state) = later.layout_tree_state.into_inner() {
-            self.layout_tree_state.set(Some(state));
-        }
     }
 
     /// Publishes what the ticks held where the document thread reading the arena `handle` names reads, as it adopts
-    /// them between its tasks, unless the arena published something later since.
+    /// them between its tasks.
     ///
     /// # Safety
     ///
@@ -7127,17 +7113,26 @@ impl HeldPublication {
             // SAFETY: Guaranteed by the caller.
             unsafe { HostTables::beside_frame(handle) }.adopted_rows.publish(rows);
         }
-        let Some(HeldLayoutTreeState(held)) = self.layout_tree_state.into_inner() else {
-            return;
+        // SAFETY: Guaranteed by the caller. The projections reach a lock and an atomic, borrowing nothing of the arena
+        // beside them.
+        let (held, published) = unsafe {
+            let arena = handle.cast::<LayoutNodeArena>();
+            (
+                &*std::ptr::addr_of!((*arena).held_layout_tree_state),
+                &*std::ptr::addr_of!((*arena).published_layout_tree_state),
+            )
         };
-        // SAFETY: Guaranteed by the caller. The projection reads and writes an atomic, borrowing nothing of the arena
-        // beside it.
-        let published =
-            unsafe { &*std::ptr::addr_of!((*handle.cast::<LayoutNodeArena>()).published_layout_tree_state) };
-        let _ = published.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-            LayoutTreeState::published_later(held, current).then_some(held)
-        });
+        if let Some(state) = lock_held_layout_tree_state(held).take() {
+            published.store(state.pack(), Ordering::Release);
+        }
     }
+}
+
+fn lock_held_layout_tree_state(
+    held: &Mutex<Option<LayoutTreeState>>,
+) -> std::sync::MutexGuard<'_, Option<LayoutTreeState>> {
+    // A state is written whole under the lock, so a panic elsewhere leaves nothing half written.
+    held.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// What a sync of the enrolled content takes from the arena ahead of a pass: what each enrolled
@@ -7288,21 +7283,6 @@ mod tests {
     use crate::layout::node_data::{NodeConstructionFacts, NodeFlag, NodeKind, NodeSlotId};
     use crate::layout::{CssPixels, fragment_tree, used_values};
     use std::ffi::c_void;
-
-    #[test]
-    fn a_held_layout_tree_state_is_adopted_only_over_earlier_ones() {
-        use crate::layout::layout_node_arena::LayoutTreeState;
-        let packed = |sequence| LayoutTreeState::default().pack(sequence);
-        assert!(LayoutTreeState::published_later(packed(2), packed(1)));
-        assert!(!LayoutTreeState::published_later(packed(1), packed(2)));
-        assert!(!LayoutTreeState::published_later(packed(1), packed(1)));
-        // The count wraps in the bits a packed state keeps of it.
-        assert!(LayoutTreeState::published_later(packed(1 << 30), packed((1 << 30) - 1)));
-        assert!(LayoutTreeState::published_later(
-            packed(u32::MAX.wrapping_add(1)),
-            packed(u32::MAX)
-        ));
-    }
 
     fn test_construction_facts() -> NodeConstructionFacts {
         test_construction_facts_with_kind(NodeKind::Box)
