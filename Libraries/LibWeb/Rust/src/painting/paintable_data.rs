@@ -150,11 +150,9 @@ pub const SELECTION_STATE_START_AND_END: u8 = 3;
 pub const SELECTION_STATE_FULL: u8 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
 pub enum PaintableRowResetKind {
-    Recommitted = 0,
-    Cleared = 1,
-    Freed = 2,
+    Cleared,
+    Freed,
 }
 
 pub use crate::layout::inline_content::{FragmentRecord, GlyphRunRecord, InlineBoxPieceRecord};

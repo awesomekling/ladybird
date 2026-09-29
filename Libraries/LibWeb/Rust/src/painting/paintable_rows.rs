@@ -354,18 +354,14 @@ mod tests {
     }
 }
 
-/// The document's callback for a reset row: the row, how it was reset, and whether it is the row the
-/// document's viewport is bound to.
-pub(crate) type ChromeStateCallback = (
-    *mut c_void,
-    unsafe extern "C" fn(*mut c_void, NodeSlotId, PaintableRowResetKind, bool),
-);
+/// The document's callback for rows a payment reset, and whether the row its viewport is bound to was recommitted among
+/// them.
+pub(crate) type ChromeStateCallback = (*mut c_void, unsafe extern "C" fn(*mut c_void, bool));
 
 #[derive(Clone, Copy)]
 pub(crate) struct PaintableRowReset {
     slot: NodeSlotId,
     kind: PaintableRowResetKind,
-    notifies_chrome_state: bool,
 }
 
 impl PaintableRowReset {
@@ -373,15 +369,29 @@ impl PaintableRowReset {
     pub(crate) fn freed_row(&self) -> Option<NodeSlotId> {
         (self.kind == PaintableRowResetKind::Freed).then_some(self.slot)
     }
+}
 
-    /// Tells the document about the reset, where `viewport_row` is the row its viewport is bound to
-    /// now, which the arena knows without the document asking it once for every reset row.
-    pub(crate) fn invoke_callback_on_main_thread(
-        self,
-        main_thread: &crate::stage::MainThread,
-        viewport_row: NodeSlotId,
-    ) {
-        if !self.notifies_chrome_state {
+/// What a payment tells the document of the rows it reset: that some were, and whether the row its viewport is bound to
+/// was recommitted. Which rows is for the document's chrome widgets to tell by their rows' reset versions, so a commit
+/// that resets every row of the document tells it once, not once per row.
+#[derive(Default)]
+pub(crate) struct RowResetsForHost {
+    rows_reset: bool,
+    viewport_row_recommitted: bool,
+}
+
+impl RowResetsForHost {
+    pub(crate) fn note_reset(&mut self) {
+        self.rows_reset = true;
+    }
+
+    pub(crate) fn note_viewport_row_recommitted(&mut self) {
+        self.rows_reset = true;
+        self.viewport_row_recommitted = true;
+    }
+
+    pub(crate) fn tell(self, main_thread: &crate::stage::MainThread) {
+        if !self.rows_reset {
             return;
         }
         if let Some((context, callback)) = main_thread
@@ -389,7 +399,7 @@ impl PaintableRowReset {
             .and_then(|host_tables| host_tables.chrome_state_callback.get())
         {
             // SAFETY: Registration and unregistration keep the callback context live.
-            unsafe { callback(context, self.slot, self.kind, self.slot == viewport_row) };
+            unsafe { callback(context, self.viewport_row_recommitted) };
         }
     }
 }
@@ -502,9 +512,6 @@ pub(crate) struct PaintableRowStore {
     absolute_rect_memo: RefCell<Vec<Option<(NodeSlotId, u64, crate::css::css_pixels::CssPixelRect)>>>,
     absolute_rect_memo_epoch: Cell<u64>,
     committed_fragment_links: RefCell<CowColumn<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>>,
-    /// Whether the chrome listens for paintable row resets. The callback itself is in the host
-    /// tables, which only the main thread reaches.
-    chrome_state_listens: Cell<bool>,
     layout_commit_generation: Cell<u64>,
     scroll_offsets: ScrollOffsetColumn,
     image_map_areas: ImageMapAreaColumn,
@@ -710,12 +717,6 @@ where
                 stack.push(first_child);
             }
         }
-    }
-
-    pub(crate) fn prepare_paintable_row_recommit_notification(&self, id: NodeSlotId) -> PaintableRowReset {
-        assert!(self.paintable_row_is_populated(id));
-        self.arena
-            .prepare_paintable_row_reset(id, PaintableRowResetKind::Recommitted)
     }
 }
 
@@ -1047,10 +1048,6 @@ impl LayoutNodeArena {
         PaintableRows { arena: self }
     }
 
-    pub(crate) fn set_chrome_state_listens(&self, listens: bool) {
-        self.paintable_rows.chrome_state_listens.set(listens);
-    }
-
     pub(crate) fn with_committed_fragment_link<R>(
         &self,
         node: NodeSlotId,
@@ -1075,11 +1072,7 @@ impl LayoutNodeArena {
     }
 
     fn prepare_paintable_row_reset(&self, slot: NodeSlotId, kind: PaintableRowResetKind) -> PaintableRowReset {
-        PaintableRowReset {
-            slot,
-            kind,
-            notifies_chrome_state: self.paintable_rows.chrome_state_listens.get(),
-        }
+        PaintableRowReset { slot, kind }
     }
 
     pub(crate) fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {

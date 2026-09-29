@@ -55,7 +55,7 @@ pub struct FfiCommitMessage {
 /// Host notifications contain no arena borrows. Dispatch them only after the
 /// mutation phase returns, since C++ can reenter Rust to read or update paint state.
 pub(crate) struct CommitNotifications {
-    row_resets: Vec<crate::painting::paintable_rows::PaintableRowReset>,
+    row_resets: crate::painting::paintable_rows::RowResetsForHost,
     messages: Vec<FfiCommitMessage>,
     /// The commit gave a navigable container viewport another size: the navigable it hosts lays
     /// itself out again at that size, and paints after the container's document.
@@ -88,17 +88,9 @@ impl CommitNotifications {
     /// # Safety
     ///
     /// The host must keep the document and node shells alive until these synchronous
-    /// notifications return. No mutable arena borrow may be active. `viewport_row` is the row the
-    /// document's viewport is bound to.
-    pub(crate) unsafe fn notify_host(
-        self,
-        main_thread: &crate::stage::MainThread,
-        host: &LayoutHost,
-        viewport_row: NodeSlotId,
-    ) {
-        for reset in self.row_resets {
-            reset.invoke_callback_on_main_thread(main_thread, viewport_row);
-        }
+    /// notifications return. No mutable arena borrow may be active.
+    pub(crate) unsafe fn notify_host(self, main_thread: &crate::stage::MainThread, host: &LayoutHost) {
+        self.row_resets.tell(main_thread);
         if !self.messages.is_empty() {
             unsafe { host.deliver_commit_messages(main_thread, &self.messages) };
         }
@@ -264,7 +256,7 @@ pub(crate) fn commit_replacing(
     // what derives from the commit before either writes them in place.
     paintables.arena().finish_layout_style_snapshot_commit();
     CommitNotifications {
-        row_resets: paintables.take_row_reset_notifications(),
+        row_resets: paintables.take_row_resets(),
         messages,
         resized_a_hosted_navigable,
     }

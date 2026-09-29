@@ -2675,7 +2675,6 @@ impl DeferredLayoutCommitHostHalf {
         CommitPayment {
             payment,
             notifications,
-            viewport_row: arena.bound_viewport_row(),
             traced_nodes: arena.layout_trace().take_nodes_to_name(),
         }
     }
@@ -2686,8 +2685,6 @@ impl DeferredLayoutCommitHostHalf {
 pub(crate) struct CommitPayment {
     payment: crate::layout::layout_node_arena::HostPayment,
     notifications: commit::CommitNotifications,
-    /// The viewport's row as the commit left it, which the row resets it tells the host of name.
-    viewport_row: NodeSlotId,
     /// The DOM nodes the layout trace named since the commit before, which the host names while they are live.
     traced_nodes: crate::layout::trace::TracedNodes,
 }
@@ -2702,13 +2699,12 @@ impl CommitPayment {
         let Self {
             payment,
             notifications,
-            viewport_row,
             traced_nodes,
         } = self;
         crate::layout::trace::name_traced_nodes(main_thread, traced_nodes);
         payment.pay(main_thread);
         // SAFETY: The host and shells remain live, and no arena borrow is active.
-        unsafe { notifications.notify_host(main_thread, &LayoutHost::of(main_thread), viewport_row) };
+        unsafe { notifications.notify_host(main_thread, &LayoutHost::of(main_thread)) };
     }
 }
 

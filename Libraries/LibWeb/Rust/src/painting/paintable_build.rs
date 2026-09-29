@@ -76,7 +76,7 @@ pub(crate) struct PaintableCommit<'a> {
     /// The navigable container viewports the commit reached, with the content size each was
     /// committed with before, if it had a row.
     committed_navigable_container_viewports: Vec<(NodeSlotId, Option<used_values::FfiCssPixelSize>)>,
-    row_reset_notifications: Vec<crate::painting::paintable_rows::PaintableRowReset>,
+    row_resets: crate::painting::paintable_rows::RowResetsForHost,
     overflow_invalidated_boxes: crate::fast_hash::FastSet<NodeSlotId>,
 }
 
@@ -87,7 +87,7 @@ impl<'a> PaintableCommit<'a> {
             arena,
             is_full_layout,
             committed_navigable_container_viewports: Vec::new(),
-            row_reset_notifications: Vec::new(),
+            row_resets: Default::default(),
             overflow_invalidated_boxes: Default::default(),
         }
     }
@@ -138,7 +138,7 @@ impl<'a> PaintableCommit<'a> {
                         .prepare_paintable_row_cleared_reset(node)
                         .expect("live row for node could not be cleared")
                 };
-                self.row_reset_notifications.push(reset);
+                self.row_resets.note_reset();
                 self.arena_mut().paintable_row_cleared(reset);
             }
             return PreparedPaintable {
@@ -178,11 +178,11 @@ impl<'a> PaintableCommit<'a> {
             }
         }
         if row_existed_before_this_commit {
-            let notification = self
-                .arena()
-                .paintable_rows()
-                .prepare_paintable_row_recommit_notification(node);
-            self.row_reset_notifications.push(notification);
+            if node_kind == NodeKind::Viewport {
+                self.row_resets.note_viewport_row_recommitted();
+            } else {
+                self.row_resets.note_reset();
+            }
         }
         let arena = self.arena_mut();
         if row_existed_before_this_commit {
@@ -207,8 +207,8 @@ impl<'a> PaintableCommit<'a> {
         }
     }
 
-    pub(crate) fn take_row_reset_notifications(&mut self) -> Vec<crate::painting::paintable_rows::PaintableRowReset> {
-        std::mem::take(&mut self.row_reset_notifications)
+    pub(crate) fn take_row_resets(&mut self) -> crate::painting::paintable_rows::RowResetsForHost {
+        std::mem::take(&mut self.row_resets)
     }
 
     pub(crate) fn committed_navigable_container_viewports(

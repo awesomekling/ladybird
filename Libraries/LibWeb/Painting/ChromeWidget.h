@@ -75,7 +75,8 @@ public:
     NonnullRefPtr<Scrollbar> get_or_create_scrollbar(DOM::Document&, Compositing::RustFFI::NodeSlotId, ScrollDirection);
     RefPtr<ResizeHandle> resize_handle(Compositing::RustFFI::NodeSlotId) const;
     NonnullRefPtr<ResizeHandle> get_or_create_resize_handle(DOM::Document&, Compositing::RustFFI::NodeSlotId);
-    void drop_widgets_for_slot(Compositing::RustFFI::NodeSlotId);
+    // Drops the widgets of the rows that were reset since they were made.
+    void drop_widgets_of_reset_rows();
     void clear();
 
 private:
