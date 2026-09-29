@@ -5352,7 +5352,7 @@ impl LayoutNodeArena {
     pub(crate) fn set_committed_fragment_link(
         &self,
         node: NodeSlotId,
-        link: super::fragment_tree::FragmentLink,
+        link: &super::fragment_tree::FragmentLink,
         geometry_epoch: Option<u32>,
     ) {
         let data = self.write_shape(node);
@@ -7566,7 +7566,7 @@ mod tests {
             let data = arena.data(node);
             arena.set_committed_fragment_link(
                 node,
-                test_fragment_link(node),
+                &test_fragment_link(node),
                 arena.epoch_of_geometry_laid_out_in_this_pass(data),
             );
         };
@@ -7579,7 +7579,7 @@ mod tests {
         assert_eq!(current(&arena), Some(node));
 
         let moved = arena.take_committed_fragment_link(node).unwrap();
-        arena.set_committed_fragment_link(node, moved, None);
+        arena.set_committed_fragment_link(node, &moved, None);
         assert_eq!(current(&arena), None);
 
         arena.begin_active_layout_pass();
@@ -7924,7 +7924,7 @@ mod tests {
         let inputs = test_abspos_layout_inputs();
         let mut link = test_fragment_link(allocation.slot);
         link.abspos_layout_inputs = Some(inputs);
-        arena.set_committed_fragment_link(allocation.slot, link, None);
+        arena.set_committed_fragment_link(allocation.slot, &link, None);
         assert!(arena.committed_fragment_link(arena.data(allocation.slot)).is_some());
         assert_eq!(
             arena.saved_abspos_layout_inputs(arena.data(allocation.slot)),
@@ -7952,13 +7952,13 @@ mod tests {
         let mut link = test_fragment_link(old.slot);
         link.abspos_layout_inputs = Some(inputs);
         let retained_fragment = link.fragment.clone();
-        arena.set_committed_fragment_link(old.slot, link, None);
+        arena.set_committed_fragment_link(old.slot, &link, None);
 
         let moved = arena
             .take_committed_fragment_link(old.slot)
             .expect("old slot must retain its committed fragment");
         assert!(std::sync::Arc::ptr_eq(&moved.fragment, &retained_fragment));
-        arena.set_committed_fragment_link(new.slot, moved, None);
+        arena.set_committed_fragment_link(new.slot, &moved, None);
 
         assert!(arena.committed_fragment_link(arena.data(old.slot)).is_none());
         assert_eq!(arena.saved_abspos_layout_inputs(arena.data(old.slot)), None);
@@ -7967,7 +7967,7 @@ mod tests {
             .committed_fragment_link(arena.data(new.slot))
             .expect("new slot must receive the committed fragment");
         assert!(std::sync::Arc::ptr_eq(&moved.fragment, &retained_fragment));
-        arena.set_committed_fragment_link(new.slot, test_fragment_link(new.slot), None);
+        arena.set_committed_fragment_link(new.slot, &test_fragment_link(new.slot), None);
         assert_eq!(arena.saved_abspos_layout_inputs(arena.data(new.slot)), None);
         arena.free_subtree(old.slot).invoke_callbacks();
         arena.free_subtree(new.slot).invoke_callbacks();
@@ -7982,10 +7982,10 @@ mod tests {
         arena.populate_paintable_row(node);
         let mut link = test_fragment_link(node);
         link.inset_left = CssPixels::from_integer(10);
-        arena.set_committed_fragment_link(node, link.clone(), None);
+        arena.set_committed_fragment_link(node, &link, None);
         arena.publish_paintable_rows();
         link.inset_left = CssPixels::from_integer(20);
-        arena.set_committed_fragment_link(node, link, None);
+        arena.set_committed_fragment_link(node, &link, None);
 
         let published_inset_left =
             |arena: &LayoutNodeArena| arena.published_fragment_link_for_test(node).map(|link| link.inset_left);
