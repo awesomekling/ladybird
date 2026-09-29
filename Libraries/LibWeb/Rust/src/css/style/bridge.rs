@@ -2331,7 +2331,7 @@ pub unsafe extern "C" fn style_engine_apply_transaction(
     let grant = StyleNodeGrant::of(transaction);
     // SAFETY: Guaranteed by the caller.
     let input = unsafe { InputForPass::take_from(transaction) };
-    engine.send(StyleChange::Inputs(input));
+    engine.send(StyleChange::Inputs(Box::new(input)));
     if !grant.is_empty() {
         crate::css::style::owner_calls::ask(
             handle,
@@ -6625,7 +6625,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     let grant = unsafe { input.as_ref() }.map_or_else(StyleNodeGrant::default, StyleNodeGrant::of);
     // SAFETY: As above. The owner applies the input first, as it reaches the engine for the transaction.
     if let Some(input) = unsafe { InputForPass::handed_over(input, install_feedback) } {
-        engine.send(StyleChange::Inputs(input));
+        engine.send(StyleChange::Inputs(Box::new(input)));
     }
     // SAFETY: Guaranteed by the caller.
     let render_half = render_half.applies.then(|| unsafe {
@@ -7037,7 +7037,7 @@ pub(crate) unsafe fn prepare_style_pass(
     // The input waits for the pass, or a read the main thread makes before the pass runs, to apply it first.
     // SAFETY: Guaranteed by the caller.
     if let Some(input) = unsafe { InputForPass::handed_over(input, install_feedback) } {
-        engine.send(StyleChange::Inputs(input));
+        engine.send(StyleChange::Inputs(Box::new(input)));
     }
     let (snapshot, timeline_samples) = *prepared;
     StylePassJob {

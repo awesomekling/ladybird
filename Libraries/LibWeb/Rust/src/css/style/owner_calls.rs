@@ -318,12 +318,12 @@ impl EngineChange {
 
 /// A write the main thread makes to its document's style engine, which waits in the engine's home for whoever reaches
 /// the engine next to apply first ([`StyleEngineInputHandle::send`]), in the order the main thread made it.
-#[allow(clippy::large_enum_variant)]
 pub(crate) enum StyleChange {
     /// The style inputs the host recorded since the last transaction: DOM tree insertions, removals and moves, element
     /// arrivals, class, ID and attribute features, element states, inline style and presentational hint declarations,
     /// and the host facts they read. The engine applies them as one batch, which is how its invalidation sees them.
-    Inputs(InputForPass),
+    /// Boxed, as there is one per transaction and a drain sends several engine changes per row beside it.
+    Inputs(Box<InputForPass>),
     Engine(EngineChange),
 }
 

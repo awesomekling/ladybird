@@ -185,10 +185,18 @@ struct Exchange {
     /// What the main thread wrote beside a style pass, which no reach takes until the pass's drain has ended: the pass's
     /// output waits in the engine for the drain, and what the main thread wrote beside it goes behind the drain's own.
     beside_pass: Vec<(StyleChange, PendingFacts)>,
+    /// An empty vector the last reach applied the changes of, which takes the place of the next changes a reach takes.
+    spare: Vec<(StyleChange, PendingFacts)>,
     /// What the engine held as whoever reached it last was done, which the main thread has not adopted yet. Whoever
     /// reaches the engine takes it back as it begins, and leaves it again with its own as it is done, so the main
     /// thread never adopts news older than a change it no longer finds unapplied.
     news: Option<EngineNews>,
+}
+
+impl Exchange {
+    /// The most changes the spare vector keeps room for: a drain of a few thousand rows, which sends a few changes per
+    /// row.
+    const SPARE_CAPACITY: usize = 16 * 1024;
 }
 
 // What the exchange holds moves between the main thread and whoever reaches the engine.
@@ -227,9 +235,18 @@ impl StyleEngineHome {
     /// Applies to `engine` what the main thread wrote to it since it was last reached, by whoever reaches it now.
     fn apply_unapplied(&self, engine: &mut StyleEngine) {
         // Taken whole, as applying a change may reach the engine's handle again, and the main thread sends on meanwhile.
-        let changes = std::mem::take(&mut self.exchange().unapplied);
-        for (change, leaves) in changes {
+        let mut changes = {
+            let mut exchange = self.exchange();
+            let spare = std::mem::take(&mut exchange.spare);
+            std::mem::replace(&mut exchange.unapplied, spare)
+        };
+        for (change, leaves) in changes.drain(..) {
             change.apply(engine, leaves);
+        }
+        // The emptied vector is what the main thread sends into next, so that a drain's sends do not grow one from
+        // nothing again, unless a rare large drain left it too large to keep.
+        if changes.capacity() <= Exchange::SPARE_CAPACITY {
+            self.exchange().spare = changes;
         }
     }
 
