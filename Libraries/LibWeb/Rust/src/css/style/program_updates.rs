@@ -714,10 +714,13 @@ impl StyleEngineState {
     /// position. The parsed CSSOM objects are new, but an unchanged semantic rule does not become a
     /// departure followed by an arrival merely because the whole sheet was reparsed.
     pub fn begin_sheet_rules_replacement(&mut self, sheet: SheetID, counters: &mut Counters) {
-        assert!(
-            self.host.sheet_rule_replacement.is_none(),
-            "stylesheet replacements do not nest"
-        );
+        // The host replaces a sheet's rules as one unit, so one that is still open here lost its end on the way:
+        // it ends now, before the next one begins.
+        if let Some(open) = self.host.sheet_rule_replacement.as_ref() {
+            debug_assert!(false, "stylesheet replacements do not nest");
+            let (open, declaration_block) = (open.sheet, self.retained.next_declaration_block_version());
+            self.finish_sheet_rules_replacement(open, declaration_block, counters);
+        }
         if let Some(slot) = self
             .host
             .program_staging

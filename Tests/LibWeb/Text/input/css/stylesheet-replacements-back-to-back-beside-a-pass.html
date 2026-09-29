@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<style id="style"></style>
+<div id="target">target</div>
+<div id="others"></div>
+<script src="../include.js"></script>
+<script>
+    // A replaced sheet's rules go to the engine as one unit. Replacements made back to back, while the style
+    // pass of an earlier change may still be running, must not interleave: the last one decides the style.
+    asyncTest(async done => {
+        const style = document.getElementById("style");
+        const target = document.getElementById("target");
+        const others = document.getElementById("others");
+        for (let i = 0; i < 200; ++i) {
+            const child = document.createElement("span");
+            child.textContent = i;
+            others.appendChild(child);
+        }
+        const adopted = new CSSStyleSheet();
+        document.adoptedStyleSheets = [adopted];
+
+        let ok = true;
+        // Right after load, the first frame's pass may still be running while these arrive.
+        for (let i = 0; i < 50; ++i) {
+            style.innerText = `#target { width: ${i}px; } :has(:yakthonk) { color: red; }`;
+            adopted.replaceSync(`#target { height: ${i}px; }`);
+        }
+        if (getComputedStyle(target).width !== "49px" || getComputedStyle(target).height !== "49px")
+            ok = false;
+        for (let frame = 0; frame < 30; ++frame) {
+            for (let round = 0; round < 8; ++round) {
+                // Dirty style so a pass has something to do beside the replacements.
+                others.className = `c${frame}-${round}`;
+                for (const child of others.children)
+                    child.style.width = `${frame + round}px`;
+                style.innerText = `#target { width: ${frame * 10 + round}px; } :has(:yakthonk) { color: red; }`;
+                adopted.replaceSync(`#target { height: ${frame * 10 + round}px; } span { margin-left: ${round}px; }`);
+                if (round % 3 === 0)
+                    target.offsetWidth;
+            }
+            const computed = getComputedStyle(target);
+            if (computed.width !== `${frame * 10 + 7}px` || computed.height !== `${frame * 10 + 7}px`) {
+                println(`frame ${frame}: width ${computed.width}, height ${computed.height}`);
+                ok = false;
+            }
+            await animationFrame();
+        }
+        println(`style follows the last replacement: ${ok ? "PASS" : "FAIL"}`);
+        done();
+    });
+</script>
