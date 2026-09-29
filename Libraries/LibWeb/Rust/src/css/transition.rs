@@ -442,18 +442,22 @@ pub(crate) fn decide_transitions(
         },
         unsafe { before_style_view.animated_overlay.as_ref() },
     );
-    // Only an element's own record inherits from its inheritance parent.
+    // Only an element's own record inherits from its inheritance parent. Whether an ancestor
+    // animates is asked once, by the first property the record inherits.
     let target = (target_key & 0xff == u64::from(u8::MAX))
         .then(|| crate::css::style::tree::StyleNodeID::from_raw((target_key >> 8) as u32))
         .flatten();
+    let mut animated_chain = None;
     for (property, action) in properties.iter_mut().zip(actions.iter_mut()) {
         let inherited_animation = target
             .filter(|_| {
-                after_overlay
-                    .and_then(|overlay| overlay.get(property.property_id))
-                    .is_none_or(|entry| !entry.inherited)
+                after_table.is_inherited(property.property_id)
+                    && after_overlay
+                        .and_then(|overlay| overlay.get(property.property_id))
+                        .is_none_or(|entry| !entry.inherited)
             })
-            .and_then(|target| engine.inherited_animated_value(target, after_table, property.property_id));
+            .and_then(|target| *animated_chain.get_or_insert_with(|| engine.animated_inheritance_chain(target)))
+            .and_then(|chain| chain.inherited_animated_value(after_table, property.property_id));
         let values_originate_from_current_color =
             prepare_transition_values(before_style, after_table, after_overlay, inherited_animation, property);
         *action = decide_transition(context, property, values_originate_from_current_color);
