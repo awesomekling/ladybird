@@ -402,9 +402,15 @@ impl DocumentAtoms {
         reclaimable
     }
 
+    /// A sweep marks everything live whatever it reclaims, so the next one waits until the table has doubled: its cost
+    /// spreads over as many new atoms as this one left live.
+    fn schedule_next_sweep(&mut self) {
+        self.sweep_at = (2 * (self.raw.len() + self.qualified.len())).max(256);
+    }
+
     pub(super) fn finish_sweep(&mut self, reclaimable: &[StyleAtomID]) -> Vec<ReclaimedStyleAtom> {
         if reclaimable.is_empty() {
-            self.sweep_at = self.raw.len() + self.qualified.len() + 256;
+            self.schedule_next_sweep();
             return Vec::new();
         }
         let reclaimable = reclaimable.iter().copied().collect::<HashSet<_>>();
@@ -443,7 +449,7 @@ impl DocumentAtoms {
             }
         }
 
-        self.sweep_at = self.raw.len() + self.qualified.len() + 256;
+        self.schedule_next_sweep();
         let mut reclaimed = raw
             .into_iter()
             .map(|(raw, atom)| ReclaimedStyleAtom {
