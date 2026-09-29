@@ -640,6 +640,12 @@ static void apply_style_to_box(Painting::BoxSlot const& box, CSS::PublishedStyle
     auto released_image_observers = adopt_own_if_nonnull(static_cast<Painting::StyleImageObserverSet*>(send_row_style(box.arena(), box.slot(), style_record.handle())));
     auto dom_node = box.dom_node();
     did_update_box_style_record(box, dom_node.ptr(), style_record.payloads());
+    // The owner applies no row whose records hold images, nor one whose box paints from facts its style moves: a row
+    // that adopts the owner's record keeps the paint facts it has.
+    if (row_style == RowStyle::AdoptOwners) {
+        ASSERT(!released_image_observers);
+        return;
+    }
     if (has_flag(style_record.dependency_flags(), CSS::StyleRecordDependencyFlag::HoldsImageValues)) {
         attach_style_resources_to_box(box);
         return;

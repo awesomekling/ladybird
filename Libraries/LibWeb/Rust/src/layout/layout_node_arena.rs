@@ -2386,10 +2386,11 @@ impl LayoutNodeArena {
                 continue;
             }
             // Replaced content, form controls, list items, tables and SVG take facts from their
-            // element the host publishes as it styles them.
+            // element the host publishes as it styles them. A navigable container's facts are its
+            // content navigable's, which no style moves.
             if !matches!(
                 self.data(slot).kind.get(),
-                NodeKind::Box | NodeKind::BlockContainer | NodeKind::InlineNode
+                NodeKind::Box | NodeKind::BlockContainer | NodeKind::InlineNode | NodeKind::NavigableContainerViewport
             ) || self.node_style_record_is_pinned_by_arena(slot)
             {
                 return Err(FfiFlightStyleDecline::LayoutNode);
