@@ -611,6 +611,7 @@ impl RetainedState {
             remembered.settle(self.program.version(), self.winner_groups.generation());
             let hash = RememberedCompactions::hash_of(all);
             if let Some(remembered) = remembered.get(hash, all) {
+                self.publish_container_verdicts(node, Vec::new());
                 self.publish_winner_states(effects, node, &remembered.states, counters);
                 if let Some(keep) = &remembered.keep {
                     // The key holds every match, so the remembered decisions line up with the list; were one missing,

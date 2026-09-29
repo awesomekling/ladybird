@@ -728,10 +728,7 @@ impl RetainedState {
             .release(MemoryCategory::BatchScratch, traversal.match_workspace_bytes);
         self.memory
             .release(MemoryCategory::BatchScratch, traversal.dispatch_workspace_bytes);
-        self.memory.release(
-            MemoryCategory::BatchScratch,
-            traversal.cascade_compaction_workspace_bytes,
-        );
+        traversal.cascade_compaction_workspace_memory.release();
         let mut caches = self.prefix_caches.borrow_mut();
         caches.states.release();
         caches.answers.release(&mut self.match_answers);

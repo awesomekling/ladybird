@@ -3386,9 +3386,9 @@ fn a_repeated_match_list_publishes_what_its_first_compaction_decided() {
     let losing = add_target_rule(&mut engine, StyleSheetObjectID(1), StyleAtomID(200));
     let lower = add_target_rule(&mut engine, StyleSheetObjectID(2), StyleAtomID(201));
     let later = add_target_rule(&mut engine, StyleSheetObjectID(3), StyleAtomID(202));
-    engine.set_rule_declared_properties(losing, &[(1, false)], true);
-    engine.set_rule_declared_properties(lower, &[(1, false), (2, false)], true);
-    engine.set_rule_declared_properties(later, &[(1, false)], true);
+    engine.set_rule_declared_properties(losing, &[(1, false)]);
+    engine.set_rule_declared_properties(lower, &[(1, false), (2, false)]);
+    engine.set_rule_declared_properties(later, &[(1, false)]);
     commit_test_setup(&mut engine);
     let matches_of = |engine: &StyleEngine, node| {
         vec![
