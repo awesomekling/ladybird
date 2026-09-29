@@ -1586,8 +1586,8 @@ impl StyleEngineState {
 ///
 /// # Safety
 /// `arena` must be the arena of a render state the owner just created, which links no engine and outlives this one,
-/// `pins` must come from [`style_record_host_pins_create`] and outlive the engine, and `recording_stream` must be
-/// valid for a write.
+/// `pins` must be a live table from [`style_record_host_pins_create`], which the engine holds too, and `recording_stream`
+/// must be valid for a write.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_create(
     arena: *mut c_void,
@@ -1611,10 +1611,10 @@ pub unsafe extern "C" fn style_engine_create(
         }
     });
     // SAFETY: Guaranteed by the caller.
-    let handle = unsafe { super::host_pins::HostPinsHandle::new(pins.cast()) };
+    let pins = unsafe { super::host_pins::HostPinTable::from_host(pins.cast()) };
     engine
         .computed_group_sets
-        .lend_host_pins(super::host_pins::HostPinsLend::Lent(handle));
+        .lend_host_pins(super::host_pins::HostPins::new(pins));
     if let Some(resolve) = resolve {
         engine.host.font_resolver = Some(super::font_resolution::FontResolverHost::new(resolve));
         engine.retained.font_resolution = Some(super::font_resolution::FontResolutionCache::default());
@@ -1625,18 +1625,21 @@ pub unsafe extern "C" fn style_engine_create(
     unsafe { StyleEngineHandle::create(engine, arena) }.into_ffi()
 }
 
-/// Creates the document thread's style-record pin table. See [`super::host_pins`].
+/// Creates the document thread's style-record pin table, and its hold of it. See [`super::host_pins`].
 #[unsafe(no_mangle)]
 pub extern "C" fn style_record_host_pins_create() -> *mut c_void {
-    Box::into_raw(Box::<super::host_pins::HostStyleRecordPins>::default()).cast()
+    super::host_pins::HostPinTable::default().into_host().cast_mut().cast()
 }
 
+/// Drops the document thread's hold of its pin table. The engine it was lent to, and the arena linking that engine,
+/// hold it until they go too.
+///
 /// # Safety
-/// `pins` must come from [`style_record_host_pins_create`], and the engine it was lent to must
-/// already be destroyed.
+/// `pins` must come from [`style_record_host_pins_create`], and the document thread must not reach it again.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_record_host_pins_destroy(pins: *mut c_void) {
-    drop(unsafe { Box::from_raw(pins.cast::<super::host_pins::HostStyleRecordPins>()) });
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::host_pins::HostPinTable::release_host(pins.cast_const().cast()) };
 }
 
 /// Pins a style record for the document thread's readers. Enters no engine, so it never waits for

@@ -25,7 +25,7 @@ use super::cascade::CascadeStateID;
 use super::column::BitColumn;
 use super::fast_hash::FastMap as HashMap;
 use super::fast_hash::fast_hasher;
-use super::host_pins::HostPinsLend;
+use super::host_pins::{HostPins, HostPinsLend};
 use super::intern_table::InternIdentity;
 use super::intern_table::InternTable;
 use super::memory::MemoryCategory;
@@ -826,7 +826,7 @@ pub struct ComputedGroupSets {
     style_record_column: Vec<Option<StyleRecordID>>,
     base_style_record_pins: HashMap<StyleRecordID, u64>,
     /// The document thread's pins, as far as the engine may read them now.
-    host_pins: HostPinsLend,
+    host_pins: HostPins,
     /// Where the payloads of records the engine let go of come back to, when a reader dropped them
     /// on another thread.
     payloads_home: Arc<StylePayloadsHome>,
@@ -880,7 +880,7 @@ impl Default for ComputedGroupSets {
             published_style_records: Vec::new(),
             style_record_column: Vec::new(),
             base_style_record_pins: HashMap::default(),
-            host_pins: HostPinsLend::default(),
+            host_pins: HostPins::default(),
             payloads_home: Arc::default(),
             columns: PublishedComputedColumns::default(),
             animation_overlay_slots: Vec::new(),
@@ -2104,7 +2104,6 @@ impl ComputedGroupSets {
     /// pinning it beside a pass in flight, or holds it as published: then the slot is retired until
     /// the host lets go of it.
     fn reclaim_or_retire_animation_overlay_slot(&mut self, slot: u32) {
-        let host_pins = self.host_pins;
         let record = self.animation_overlay_slots[slot as usize]
             .as_mut()
             .expect("animation-overlay slot is live");
@@ -2113,7 +2112,7 @@ impl ComputedGroupSets {
         if record.is_retired {
             return;
         }
-        if host_pins.may_pin(record.final_style_record.raw()) || record.is_held_as_published() {
+        if self.host_pins.may_pin(record.final_style_record.raw()) || record.is_held_as_published() {
             record.is_retired = true;
             self.retired_animation_overlay_slots.push(slot);
             return;
@@ -2126,7 +2125,6 @@ impl ComputedGroupSets {
         if self.retired_animation_overlay_slots.is_empty() || self.host_pins.defers_reclamation() {
             return;
         }
-        let host_pins = self.host_pins;
         for slot in std::mem::take(&mut self.retired_animation_overlay_slots) {
             let record = self.animation_overlay_slots[slot as usize]
                 .as_mut()
@@ -2137,7 +2135,7 @@ impl ComputedGroupSets {
                 record.is_retired = false;
                 continue;
             }
-            if host_pins.may_pin(record.final_style_record.raw()) || record.is_held_as_published() {
+            if self.host_pins.may_pin(record.final_style_record.raw()) || record.is_held_as_published() {
                 self.retired_animation_overlay_slots.push(slot);
                 continue;
             }
@@ -2151,33 +2149,36 @@ impl ComputedGroupSets {
 
     /// Lends the document thread's pin table to the engine, whenever the document thread waits on
     /// it from now on.
-    pub(crate) fn lend_host_pins(&mut self, host_pins: HostPinsLend) {
+    pub(crate) fn lend_host_pins(&mut self, host_pins: HostPins) {
         self.host_pins = host_pins;
     }
 
     /// The document thread's pin table, for its readers outside the engine to pin in.
-    pub(crate) fn host_pins_handle(&self) -> Option<super::host_pins::HostPinsHandle> {
-        self.host_pins.handle()
+    pub(crate) fn host_pin_table(&self) -> Option<&super::host_pins::HostPinTable> {
+        self.host_pins.table()
     }
 
     /// Stops lending the host's pins while a pass runs beside the document thread.
     pub(crate) fn begin_pass_beside_host_pins(&mut self) {
-        self.host_pins = self.host_pins.beside_flight();
+        self.host_pins.lend_beside();
     }
 
     /// Lends the host's pins again once the document thread has taken the pass back, and reclaims
     /// what the pass retired that the host does not pin.
     pub(crate) fn finish_pass_beside_host_pins(&mut self) {
-        self.host_pins = self.host_pins.taken_back();
+        self.host_pins.restore(HostPinsLend::Lent);
         self.reclaim_retired_animation_overlays();
     }
 
     /// Stops lending the host's pins while the engine runs beside the document thread, and returns how they were lent,
     /// which [`Self::lend_host_pins`] lends them as again once it no longer does.
     pub(crate) fn lend_host_pins_beside(&mut self) -> HostPinsLend {
-        let lend = self.host_pins;
-        self.host_pins = lend.beside_flight();
-        lend
+        self.host_pins.lend_beside()
+    }
+
+    /// Lends the host's pins as [`Self::lend_host_pins_beside`] found them.
+    pub(crate) fn restore_host_pins(&mut self, lend: HostPinsLend) {
+        self.host_pins.restore(lend);
     }
 
     fn update_animation_overlay(
@@ -3640,7 +3641,7 @@ impl ComputedGroupSets {
                     mark_style_record(identity);
                 }
             }
-            if let Some(host_pins) = self.host_pins.table() {
+            if let Some(host_pins) = self.host_pins.lent_table() {
                 host_pins.for_each_pinned(|raw| {
                     let record = FinalStyleRecordID(raw);
                     if let Some(identity) = record.base_record()
@@ -4746,11 +4747,9 @@ mod tests {
         assert_eq!(sets.live_animation_overlay_records(), 0);
     }
 
-    fn host_pins_lent_to(sets: &mut ComputedGroupSets) -> Box<super::super::host_pins::HostStyleRecordPins> {
-        let mut pins = Box::<super::super::host_pins::HostStyleRecordPins>::default();
-        // SAFETY: The table outlives each test's engine state.
-        let handle = unsafe { super::super::host_pins::HostPinsHandle::new(&raw mut *pins) };
-        sets.lend_host_pins(super::super::host_pins::HostPinsLend::Lent(handle));
+    fn host_pins_lent_to(sets: &mut ComputedGroupSets) -> super::super::host_pins::HostPinTable {
+        let pins = super::super::host_pins::HostPinTable::default();
+        sets.lend_host_pins(HostPins::new(pins.clone()));
         pins
     }
 
@@ -4767,7 +4766,7 @@ mod tests {
         let first = sets.publish_unowned(Some(target), &[], 0, 0, first_metadata);
 
         // The host's pin keeps the record from being rewritten in place.
-        pins.pin(first.style_record_identity.raw());
+        pins.host().pin(first.style_record_identity.raw());
         let mut second_metadata = metadata(0, 0, 0);
         second_metadata.animation_overlay_identity = 2;
         second_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
@@ -4776,7 +4775,7 @@ mod tests {
         assert!(sets.style_record_is_held(first.style_record_identity.raw()));
 
         // Releasing the pin changes nothing in the engine until it reads the table again.
-        pins.unpin(first.style_record_identity.raw());
+        pins.host().unpin(first.style_record_identity.raw());
         assert!(sets.style_record_is_held(first.style_record_identity.raw()));
         sets.reclaim_retired_animation_overlays();
         assert!(!sets.style_record_is_held(first.style_record_identity.raw()));
@@ -4878,10 +4877,10 @@ mod tests {
         let first_record = first.style_record_identity.raw();
 
         // The host pins the overlay, the node moves off it, and the engine pins the retired slot.
-        pins.pin(first_record);
+        pins.host().pin(first_record);
         let second = sets.publish_unowned(Some(target), &[], 0, 0, metadata(0, 0, 0));
         sets.pin_style_record(first_record);
-        pins.unpin(first_record);
+        pins.host().unpin(first_record);
         // The engine's last unpin leaves the retired slot to the sweep over retired slots.
         sets.unpin_style_record(first_record);
         assert!(sets.style_record_is_held(first_record));
@@ -4907,14 +4906,14 @@ mod tests {
         sets.begin_pass_beside_host_pins();
         // The pass moves the node off the overlay; the host pins it beside the pass, unseen.
         let second = sets.publish_unowned(Some(target), &[], 0, 0, metadata(0, 0, 0));
-        pins.pin(first.style_record_identity.raw());
+        pins.host().pin(first.style_record_identity.raw());
         // Nor does the pass sweep a base record the host may have pinned.
         assert!(sets.reclaim_unreachable_if_needed().is_none());
         sets.finish_pass_beside_host_pins();
         assert!(sets.style_record_is_held(first.style_record_identity.raw()));
         assert!(sets.style_record_is_held(unowned.style_record_identity.raw()));
 
-        pins.unpin(first.style_record_identity.raw());
+        pins.host().unpin(first.style_record_identity.raw());
         sets.reclaim_retired_animation_overlays();
         assert!(!sets.style_record_is_held(first.style_record_identity.raw()));
         assert!(sets.style_record_is_held(second.style_record_identity.raw()));
@@ -4941,7 +4940,7 @@ mod tests {
         sets.next_reclamation_after = 0;
 
         // The node leaves the tree while the pin its box takes waits for the frame in flight.
-        pins.begin_pin_waiting_for_frame();
+        pins.host().begin_pin_waiting_for_frame();
         sets.remove(node);
         assert!(sets.reclaim_unreachable_if_needed().is_none());
         sets.reclaim_retired_animation_overlays();
@@ -4949,14 +4948,14 @@ mod tests {
         assert!(sets.style_record_is_held(unowned));
 
         // The pin lands, and holds the overlay once the engine reads the table again.
-        pins.pin(overlay);
-        pins.end_pin_waiting_for_frame();
+        pins.host().pin(overlay);
+        pins.host().end_pin_waiting_for_frame();
         sets.reclaim_retired_animation_overlays();
         assert!(sets.reclaim_unreachable_if_needed().is_some());
         assert!(sets.style_record_is_held(overlay));
         assert!(!sets.style_record_is_held(unowned));
 
-        pins.unpin(overlay);
+        pins.host().unpin(overlay);
         sets.reclaim_retired_animation_overlays();
         assert!(!sets.style_record_is_held(overlay));
         assert_eq!(sets.live_animation_overlay_records(), 0);
@@ -4968,11 +4967,11 @@ mod tests {
         let pins = host_pins_lent_to(&mut sets);
         let pinned = sets.publish_unowned(None, &[], 0, 1, metadata(0, 0, 0));
         let unpinned = sets.publish_unowned(None, &[], 0, 2, metadata(0, 0, 0));
-        pins.pin(pinned.style_record_identity.raw());
+        pins.host().pin(pinned.style_record_identity.raw());
         sets.reclaim_unreachable();
         assert!(sets.style_record_is_held(pinned.style_record_identity.raw()));
         assert!(!sets.style_record_is_held(unpinned.style_record_identity.raw()));
-        pins.unpin(pinned.style_record_identity.raw());
+        pins.host().unpin(pinned.style_record_identity.raw());
         sets.reclaim_unreachable();
         assert!(!sets.style_record_is_held(pinned.style_record_identity.raw()));
     }

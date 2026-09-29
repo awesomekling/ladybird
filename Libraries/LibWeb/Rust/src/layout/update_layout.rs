@@ -762,11 +762,10 @@ unsafe fn run_job(
     // The rounds reach the style engine the arena links as the owner: what the main thread sent the engine goes in
     // first, and what the rounds leave in it goes to the main thread once they are done.
     // SAFETY: Guaranteed by the caller.
-    let engine = unsafe { &*state }.arena().style_engine_handle();
-    match engine.is_null() {
-        true => run_in_state(),
+    match unsafe { &*state }.arena().hold_style_engine() {
+        None => run_in_state(),
         // SAFETY: As above.
-        false => unsafe { engine.reach_on_owner(owner, |_| run_in_state()) },
+        Some(engine) => unsafe { engine.reach_on_owner(owner, |_| run_in_state()) },
     }
 }
 

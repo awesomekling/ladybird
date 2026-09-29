@@ -15,7 +15,7 @@
 //! it too ([`StyleEngineLink`]), until the render owner applies the unlink.
 //!
 //! The engine is reached by the render owner, which holds the document's render state
-//! ([`StyleEngineHandle::reach_on_owner`], which only the owner's [`crate::render_owner::Owner`] can call), by a stage
+//! ([`StyleEngineLink::reach_on_owner`], which only the owner's [`crate::render_owner::Owner`] can call), by a stage
 //! it is lent to, or by the thread that owns it with its render state ([`OwnedStyleEngine`]). The main thread waits for
 //! the engine before what it sends the render owner. With the engine home it goes on at once. With the engine lent it
 //! waits for the stage that holds it and nothing else, unless the stage will still owe the frame it runs in its
@@ -260,6 +260,57 @@ pub(crate) struct StyleEngineLink(std::mem::ManuallyDrop<Arc<StyleEngineHome>>);
 impl StyleEngineLink {
     pub(crate) fn handle(&self) -> StyleEngineHandle {
         StyleEngineHandle(Arc::as_ptr(&self.0).cast_mut().cast())
+    }
+
+    /// Another hold of the engine, for a reach of the owner's to hold for as long as it reaches it.
+    pub(crate) fn hold(&self) -> Self {
+        Self(std::mem::ManuallyDrop::new(Arc::clone(&self.0)))
+    }
+
+    /// As the render `owner`, in a unit it runs with the render state of the engine's document: runs `run` with the
+    /// engine, which whatever `run` calls reaches through the handle too. The owner takes no loan: it holds the
+    /// document's render state. The main thread may run meanwhile: it only sends the engine changes and adopts what
+    /// the reach leaves it, through the home's exchange.
+    ///
+    /// # Safety
+    ///
+    /// The link must be of a document whose render state the owner holds.
+    pub(crate) unsafe fn reach_on_owner<T>(
+        &self,
+        _owner: &crate::render_owner::Owner,
+        run: impl FnOnce(&mut StyleEngine) -> T,
+    ) -> T {
+        let engine = self.0.engine.as_ptr();
+        // SAFETY: Guaranteed by the caller; the owner runs one unit at a time, so nothing else on its thread reaches
+        // the engine.
+        unsafe { reach_on_this_thread(self.handle().address(), engine, run) }
+    }
+
+    /// As [`Self::reach_on_owner`], in a unit the main thread does not wait for (a display tick): the main thread pins
+    /// and unpins its host's records beside the whole reach, applying what it sent the engine included, so the engine
+    /// does not read its pins until the reach ends.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::reach_on_owner`].
+    pub(crate) unsafe fn reach_on_owner_beside_main<T>(
+        &self,
+        _owner: &crate::render_owner::Owner,
+        run: impl FnOnce(&mut StyleEngine) -> T,
+    ) -> T {
+        /// Lends the host's pins as they were once the reach ends, or unwinds.
+        struct RestoreHostPins(*mut StyleEngine, super::host_pins::HostPinsLend);
+        impl Drop for RestoreHostPins {
+            fn drop(&mut self) {
+                // SAFETY: The reach has ended: nothing else borrows the engine.
+                unsafe { &mut *self.0 }.restore_host_pins(self.1);
+            }
+        }
+        let engine = self.0.engine.as_ptr();
+        // SAFETY: Guaranteed by the caller; nothing on the owner's thread reaches the engine yet.
+        let _restore = RestoreHostPins(engine, unsafe { &mut *engine }.lend_host_pins_beside());
+        // SAFETY: As for `reach_on_owner`.
+        unsafe { reach_on_this_thread(self.handle().address(), engine, run) }
     }
 }
 
@@ -663,52 +714,6 @@ impl StyleEngineHandle {
         drop(unsafe { Arc::from_raw(self.0.cast::<StyleEngineHome>().cast_const()) });
     }
 
-    /// As the render `owner`, in a unit it runs with the render state of the engine's document: runs `run` with the
-    /// engine, which whatever `run` calls reaches through the handle too. The owner takes no loan: it holds the
-    /// document's render state. The main thread may run meanwhile: it only sends the engine changes and adopts what
-    /// the reach leaves it, through the home's exchange.
-    ///
-    /// # Safety
-    ///
-    /// The handle must name a live engine of a document whose render state the owner holds.
-    pub(crate) unsafe fn reach_on_owner<T>(
-        self,
-        _owner: &crate::render_owner::Owner,
-        run: impl FnOnce(&mut StyleEngine) -> T,
-    ) -> T {
-        let engine = self.home().engine.as_ptr();
-        // SAFETY: Guaranteed by the caller; the owner runs one unit at a time, so nothing else on its thread reaches
-        // the engine.
-        unsafe { reach_on_this_thread(self.address(), engine, run) }
-    }
-
-    /// As [`Self::reach_on_owner`], in a unit the main thread does not wait for (a display tick): the main thread pins
-    /// and unpins its host's records beside the whole reach, applying what it sent the engine included, so the engine
-    /// does not read its pins until the reach ends.
-    ///
-    /// # Safety
-    ///
-    /// As for [`Self::reach_on_owner`].
-    pub(crate) unsafe fn reach_on_owner_beside_main<T>(
-        self,
-        _owner: &crate::render_owner::Owner,
-        run: impl FnOnce(&mut StyleEngine) -> T,
-    ) -> T {
-        /// Lends the host's pins as they were once the reach ends, or unwinds.
-        struct RestoreHostPins(*mut StyleEngine, super::host_pins::HostPinsLend);
-        impl Drop for RestoreHostPins {
-            fn drop(&mut self) {
-                // SAFETY: The reach has ended: nothing else borrows the engine.
-                unsafe { &mut *self.0 }.restore_host_pins(self.1);
-            }
-        }
-        let engine = self.home().engine.as_ptr();
-        // SAFETY: Guaranteed by the caller; nothing on the owner's thread reaches the engine yet.
-        let _restore = RestoreHostPins(engine, unsafe { &mut *engine }.lend_host_pins_beside());
-        // SAFETY: As for `reach_on_owner`.
-        unsafe { reach_on_this_thread(self.address(), engine, run) }
-    }
-
     /// What the engine holds for its next style transaction, as whoever last reached it left it, with what the main
     /// thread sent it since. On the main thread.
     pub(crate) fn pending_facts(self) -> PendingFacts {
@@ -938,20 +943,24 @@ mod tests {
 
     #[test]
     fn a_reach_beside_the_main_thread_never_reads_its_pins() {
-        use super::super::host_pins::{HostPinsHandle, HostPinsLend, HostStyleRecordPins};
-        let is_beside = |lend| matches!(lend, HostPinsLend::BesideFlight(_));
+        use super::super::host_pins::{HostPinTable, HostPins, HostPinsLend};
+        let is_beside = |lend| lend == HostPinsLend::BesideFlight;
         let (mut engine, handle) = test_engine();
-        let mut pins = Box::<HostStyleRecordPins>::default();
-        // SAFETY: The table outlives the engine's use of it in this test.
-        let pins_handle = unsafe { HostPinsHandle::new(&raw mut *pins) };
         engine
             .engine()
             .computed_group_sets
-            .lend_host_pins(HostPinsLend::Lent(pins_handle));
+            .lend_host_pins(HostPins::new(HostPinTable::default()));
+        // SAFETY: The handle holds the home, which the test's hold joins.
+        let link = unsafe {
+            Arc::increment_strong_count(handle.0.cast::<StyleEngineHome>().cast_const());
+            StyleEngineLink(std::mem::ManuallyDrop::new(Arc::from_raw(
+                handle.0.cast::<StyleEngineHome>().cast_const(),
+            )))
+        };
         crate::render_owner::do_owner_work_here(|owner| {
             // SAFETY: The test is the owner, and holds the engine.
             unsafe {
-                handle.reach_on_owner_beside_main(owner, |engine| {
+                link.reach_on_owner_beside_main(owner, |engine| {
                     // A clock tick within the reach stops lending the pins, and lends them as it found them after.
                     let lend = engine.lend_host_pins_beside();
                     assert!(is_beside(lend));
@@ -963,10 +972,7 @@ mod tests {
             }
         });
         let lend = engine.engine().lend_host_pins_beside();
-        assert!(
-            matches!(lend, HostPinsLend::Lent(_)),
-            "the pins are lent again once the reach ends"
-        );
+        assert_eq!(lend, HostPinsLend::Lent, "the pins are lent again once the reach ends");
     }
 
     #[test]

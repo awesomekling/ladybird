@@ -411,8 +411,8 @@ impl LayoutStyle {
 impl StyleEngine {
     /// The document thread's style-record pin table, which the layout arena pins its host's
     /// records in without entering the engine.
-    pub(crate) fn host_style_record_pins(&self) -> Option<super::host_pins::HostPinsHandle> {
-        self.computed_group_sets.host_pins_handle()
+    pub(crate) fn host_style_record_pins(&self) -> Option<&super::host_pins::HostPinTable> {
+        self.computed_group_sets.host_pin_table()
     }
 
     /// Stops lending the host's pins to the engine while it runs beside the main thread (a clock tick, lent the engine
@@ -425,7 +425,7 @@ impl StyleEngine {
     /// Lends the host's pins as [`Self::lend_host_pins_beside`] found them: a reach beside the main thread may nest in
     /// another.
     pub(crate) fn restore_host_pins(&mut self, lend: super::host_pins::HostPinsLend) {
-        self.computed_group_sets.lend_host_pins(lend);
+        self.computed_group_sets.restore_host_pins(lend);
     }
 
     pub(crate) fn pin_layout_style_record(&mut self, record: u64) {

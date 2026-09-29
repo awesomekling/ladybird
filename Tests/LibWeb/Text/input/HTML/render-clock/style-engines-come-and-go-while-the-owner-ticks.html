@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // Frames whose documents animate and restyle come and go, each document's style engine collected at once, while the
+    // render clock ticks the page's animation and the owner takes in what the frames' documents sent it beside them.
+    // The owner holds what it reaches of an engine, and the engine its document thread's pin table, until it lets go.
+    const frameDocument = `<!DOCTYPE html>
+<style>
+    .cell { width: 10px; height: 10px; animation: spin 1s linear infinite; }
+    .cell.wide { width: 20px; color: green; }
+    @keyframes spin { from { opacity: 0.2; } to { opacity: 1; } }
+</style>
+<body></body>`;
+
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        // Some frames first, until the page's animation has a clock.
+        for (let frames = 0; frames < 10 || (frames < 600 && !internals.renderClockTicks(document)); ++frames)
+            await new Promise(resolve => requestAnimationFrame(resolve));
+
+        const documents = [];
+        for (let round = 0; round < 20; ++round) {
+            const iframe = document.createElement("iframe");
+            iframe.srcdoc = frameDocument;
+            const loaded = new Promise(resolve => (iframe.onload = resolve));
+            document.body.append(iframe);
+            await loaded;
+
+            const inner = iframe.contentDocument;
+            documents.push(new WeakRef(inner));
+            for (let i = 0; i < 100; ++i) {
+                const cell = inner.createElement("div");
+                cell.className = "cell";
+                inner.body.append(cell);
+            }
+            // The frame's rows are laid out and pinned, then restyled: the owner takes in what is sent as it idles.
+            inner.body.offsetWidth;
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            for (const cell of inner.querySelectorAll(".cell"))
+                cell.classList.toggle("wide", round % 2 === 0);
+            box.style.height = `${20 + round}px`;
+
+            // Its document goes, and its engine with it, with the restyle still on the way to the owner.
+            iframe.remove();
+            internals.gc();
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        internals.gc();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        // A document the collector still finds on the stack may stay: most go, each with its engine.
+        println(`the frames' documents were collected: ${documents.filter(weak => !weak.deref()).length >= 15}`);
+        println(`the page still lays out: ${box.getBoundingClientRect().height === 39}`);
+        done();
+    });
+</script>

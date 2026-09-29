@@ -238,9 +238,9 @@ impl ArenaChange {
     }
 
     /// The engine the change links the arena to, which applying it reaches.
-    fn linked_engine(&self) -> Option<crate::css::style::StyleEngineHandle> {
+    fn linked_engine(&self) -> Option<crate::layout::StyleEngineLink> {
         match self {
-            ArenaChange::LinkStyleEngine(link) => Some(link.handle()),
+            ArenaChange::LinkStyleEngine(link) => Some(link.hold()),
             _ => None,
         }
     }
@@ -330,11 +330,11 @@ enum EngineReach<'a> {
 impl EngineReach<'_> {
     fn reach<T>(
         &mut self,
-        engine: crate::css::style::StyleEngineHandle,
+        engine: &crate::layout::StyleEngineLink,
         run: impl FnOnce(&mut crate::css::style::StyleEngine) -> T,
     ) -> T {
         match self {
-            // SAFETY: The engine is the document's, which the arena that links it keeps alive.
+            // SAFETY: The engine is the document's, whose render state the owner holds.
             Self::Owner(owner) => unsafe { engine.reach_on_owner(owner, run) },
             // SAFETY: As above.
             Self::OwnerBesideMain(owner) => unsafe { engine.reach_on_owner_beside_main(owner, run) },
@@ -401,7 +401,7 @@ impl RenderState {
         let engine = changes
             .iter()
             .find_map(ArenaChange::linked_engine)
-            .unwrap_or_else(|| self.style_engine());
+            .or_else(|| self.arena.arena().hold_style_engine());
         let face_owner = std::ptr::from_mut::<ArenaHandle>(&mut self.arena) as u64;
         // A display tick that ran after the host took what the clock's ticks left installed samples the host has not
         // taken: what it did not adopt before goes with a later drop.
@@ -423,16 +423,18 @@ impl RenderState {
                 }
             }
         };
-        if engine.is_null() {
-            apply(arena, None);
-        } else {
-            // The faces what the main thread wrote to the engine wants are this document's, whichever document's unit
-            // the owner serves the changes beside.
-            let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(face_owner);
-            reach.reach(engine, |engine| apply(arena, Some(engine)));
+        match &engine {
+            None => apply(arena, None),
+            Some(engine) => {
+                // The faces what the main thread wrote to the engine wants are this document's, whichever document's
+                // unit the owner serves the changes beside.
+                let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(face_owner);
+                reach.reach(engine, |engine| apply(arena, Some(engine)));
+            }
         }
         // The engine the arena no longer links goes away, if the main thread let go of it, once its reach has ended.
         drop(unlinked);
+        drop(engine);
         arena.note_changes_taken_in(self.changes.received_through);
     }
 
@@ -444,14 +446,13 @@ impl RenderState {
         self.apply_changes(EngineReach::Owner(owner));
         match query {
             Query::Engine(query) => {
-                let engine = self.style_engine();
-                if engine.is_null() {
+                let Some(engine) = self.arena.arena().hold_style_engine() else {
                     debug_assert!(
                         false,
                         "the owner answers the engine queries of a document with an engine"
                     );
                     return Answer::left_to_host(Query::Engine(query));
-                }
+                };
                 // The faces a read's style computation wants are this document's.
                 let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(std::ptr::from_mut::<ArenaHandle>(
                     &mut self.arena,
@@ -465,8 +466,9 @@ impl RenderState {
         }
     }
 
-    /// The document's style engine, which the arena links (null before it links one). The units the owner runs for the
-    /// document reach it through [`crate::css::style::StyleEngineHandle::reach_on_owner`].
+    /// The document's style engine, which the arena links (null before it links one), for what the owner tells of it
+    /// without reaching it. The units the owner runs reach it through a hold of the arena's link
+    /// ([`crate::layout::StyleEngineLink::reach_on_owner`]).
     fn style_engine(&self) -> crate::css::style::StyleEngineHandle {
         self.arena.arena().style_engine_handle()
     }
@@ -747,11 +749,10 @@ impl Answer {
     /// thread, as a question may read the engine (the source of a text's rendered text, the counter styles of generated
     /// content). The document thread waits for the answer.
     fn of_state_reaching_engine(owner: &Owner, query: Query, state: &mut ArenaHandle) -> Self {
-        let engine = state.arena().style_engine_handle();
-        if engine.is_null() {
+        let Some(engine) = state.arena().hold_style_engine() else {
             return Self::of_state(query, state);
-        }
-        // SAFETY: The engine is the document's, which the arena that links it keeps alive.
+        };
+        // SAFETY: The engine is the document's, whose render state the owner holds.
         unsafe { engine.reach_on_owner(owner, |_| Self::of_state(query, state)) }
     }
 
@@ -1098,8 +1099,9 @@ pub(crate) fn take_in_sent_changes() {
             }
             state.apply_changes(EngineReach::OwnerBesideMain(&owner));
             // What the main thread sent the engine with no arena change beside it, a reach of the engine applies.
-            let engine = state.style_engine();
-            if !engine.is_null() && engine.has_unapplied_changes() {
+            if let Some(engine) = state.arena.arena().hold_style_engine()
+                && engine.handle().has_unapplied_changes()
+            {
                 // SAFETY: The engine is the document's, whose render state the owner holds.
                 unsafe { engine.reach_on_owner_beside_main(&owner, |_| ()) };
             }
@@ -1125,9 +1127,9 @@ fn with_state<R>(document: DocumentId, operation: impl FnOnce(&mut RenderState) 
     })
 }
 
-/// On the owner thread: the style engine the arena of `document`'s render state links.
-pub(crate) fn style_engine_of(document: DocumentId) -> Option<crate::css::style::StyleEngineHandle> {
-    with_state(document, |state| state.style_engine())
+/// On the owner thread: a hold of the style engine the arena of `document`'s render state links.
+pub(crate) fn style_engine_of(document: DocumentId) -> Option<crate::layout::StyleEngineLink> {
+    with_state(document, |state| state.arena.arena().hold_style_engine()).flatten()
 }
 
 /// On the owner thread: runs `operation` on the clock slot of `document`'s render state, leaving its arena alone.
@@ -1550,22 +1552,16 @@ fn run_style_on_owner(
     // The state's changes, the link to its engine among them, go in before the engine is read.
     let reached = with_state(document, |state| {
         let state_handle = state.state_for_waiting_thread(owner);
-        (state.style_engine(), state_handle)
+        (state.arena.arena().hold_style_engine(), state_handle)
     });
-    let Some((engine, state)) = reached else {
+    let Some((Some(engine), state)) = reached else {
         debug_assert!(
             false,
             "the owner runs the style transaction of a document with an engine"
         );
         return crate::css::style::bridge::OwnerStyleTransactionView::unanswered();
     };
-    let view = if engine.is_null() {
-        debug_assert!(
-            false,
-            "the owner runs the style transaction of a document with an engine"
-        );
-        crate::css::style::bridge::OwnerStyleTransactionView::unanswered()
-    } else {
+    let view = {
         // The faces the transaction wants are this document's, for its layout end to request, whichever document's
         // update the owner serves the transaction beside.
         let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
