@@ -4837,13 +4837,13 @@ mod tests {
             .raw();
         let snapshots = LayoutStyleSnapshotStore::default();
         let mut commit = LayoutStyleSnapshotCommit::default();
-        commit.begin(1);
+        snapshots.begin_layout_commit(&mut commit, 1);
         commit.push(
             node,
             crate::layout::used_values::FfiCssPixelSize::default(),
             true,
             crate::css::css_enums::writing_mode::HORIZONTAL_TB,
-            sets.publish_style_record(committed),
+            &crate::layout::tree_shape::StyleCell::holding(sets.publish_style_record(committed)),
         );
         snapshots.finish_layout_commit(&mut commit);
         let current = publish_owned(&mut sets, target, &owned_payloads(3), owned_longhand_table())

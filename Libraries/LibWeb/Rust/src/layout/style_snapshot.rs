@@ -13,6 +13,7 @@
 
 use crate::css::style::published_record::PublishedStyleRecord;
 use crate::css::style::tree::StyleNodeID;
+use crate::layout::tree_shape::StyleCell;
 use crate::layout::used_values::FfiCssPixelSize;
 use crate::layout::{LayoutNodeArena, node_data::NodeSlotId};
 use std::ffi::c_void;
@@ -65,6 +66,23 @@ impl SnapshotGeneration {
         Some(self.rows[index].get_or_insert_default())
     }
 
+    /// Whether the node's row already reads `geometry`, committed with the style at `style_address`.
+    fn holds(&self, geometry: &CommittedGeometry, style_address: usize) -> bool {
+        let Some(row) = self.row(geometry.node) else {
+            return false;
+        };
+        let committed_style_address = geometry
+            .node
+            .element_index()
+            .and_then(|index| self.committed_styles.get(index as usize)?.as_ref())
+            .map_or(0, |style| Arc::as_ptr(style).addr());
+        row.content_width_raw == geometry.content_width_raw
+            && row.content_height_raw == geometry.content_height_raw
+            && row.has_committed_box == geometry.has_committed_box
+            && row.writing_mode == geometry.writing_mode
+            && committed_style_address == style_address
+    }
+
     fn set_committed_style(&mut self, node: StyleNodeID, style: Option<Arc<PublishedStyleRecord>>) {
         let Some(index) = node.element_index().map(|index| index as usize) else {
             return;
@@ -92,26 +110,21 @@ pub(crate) struct CommittedGeometry {
 #[derive(Default)]
 pub(crate) struct LayoutStyleSnapshotCommit {
     layout_commit_generation: Option<u64>,
+    /// The generation published when the commit began. Only the arena's commits write it, so a row
+    /// it already holds as the commit would write it is left out. It is let go of before the commit
+    /// is applied, so that applying it does not copy the generation.
+    published: Option<Arc<SnapshotGeneration>>,
     rows: Vec<CommittedGeometry>,
 }
 
 impl LayoutStyleSnapshotCommit {
-    pub(crate) fn begin(&mut self, generation: u64) {
-        debug_assert!(
-            self.layout_commit_generation.is_none(),
-            "layout snapshot commit began inside another"
-        );
-        self.layout_commit_generation = Some(generation);
-        self.rows.clear();
-    }
-
     pub(crate) fn push(
         &mut self,
         node: StyleNodeID,
         size: FfiCssPixelSize,
         has_committed_box: bool,
         writing_mode: u8,
-        style: Option<Arc<PublishedStyleRecord>>,
+        style: &StyleCell,
     ) {
         debug_assert!(
             self.layout_commit_generation.is_some(),
@@ -121,14 +134,23 @@ impl LayoutStyleSnapshotCommit {
             node.element_index().is_some(),
             "layout snapshot geometry published for a text node"
         );
-        self.rows.push(CommittedGeometry {
+        let mut geometry = CommittedGeometry {
             node,
             content_width_raw: size.width.raw_value(),
             content_height_raw: size.height.raw_value(),
-            style,
+            style: None,
             has_committed_box,
             writing_mode,
-        });
+        };
+        if self
+            .published
+            .as_ref()
+            .is_some_and(|published| published.holds(&geometry, style.owner_address()))
+        {
+            return;
+        }
+        geometry.style = style.owner();
+        self.rows.push(geometry);
     }
 }
 
@@ -138,8 +160,22 @@ pub(crate) struct LayoutStyleSnapshotStore {
 }
 
 impl LayoutStyleSnapshotStore {
+    /// Begins a commit of the rows of generation `generation`, compared with the generation published now.
+    pub(crate) fn begin_layout_commit(&self, commit: &mut LayoutStyleSnapshotCommit, generation: u64) {
+        debug_assert!(
+            commit.layout_commit_generation.is_none(),
+            "layout snapshot commit began inside another"
+        );
+        commit.layout_commit_generation = Some(generation);
+        commit.published = Some(Arc::clone(
+            &self.published.read().unwrap_or_else(std::sync::PoisonError::into_inner),
+        ));
+        commit.rows.clear();
+    }
+
     /// Applies a commit's rows to the published generation, leaving the commit empty for the next.
     pub(crate) fn finish_layout_commit(&self, commit: &mut LayoutStyleSnapshotCommit) {
+        commit.published = None;
         let Some(generation) = commit.layout_commit_generation.take() else {
             debug_assert!(false, "layout snapshot commit finished without beginning");
             commit.rows.clear();
@@ -220,9 +256,10 @@ impl LayoutStyleSnapshotStore {
 
 impl LayoutNodeArena {
     pub(crate) fn begin_layout_style_snapshot_commit(&self) {
-        self.layout_style_snapshot_commit
-            .borrow_mut()
-            .begin(self.layout_commit_generation());
+        self.layout_style_snapshots.begin_layout_commit(
+            &mut self.layout_style_snapshot_commit.borrow_mut(),
+            self.layout_commit_generation(),
+        );
     }
 
     /// Gathers the node's row for the style snapshot. `laid_out_content_size` is the content size of
@@ -264,7 +301,7 @@ impl LayoutNodeArena {
             size,
             has_committed_box,
             writing_mode,
-            self.data(node).style.owner(),
+            &self.data(node).style,
         );
     }
 
@@ -315,7 +352,7 @@ mod tests {
         let store = LayoutStyleSnapshotStore::default();
         let node = StyleNodeID::element(1);
         let mut commit = LayoutStyleSnapshotCommit::default();
-        commit.begin(7);
+        store.begin_layout_commit(&mut commit, 7);
         commit.push(
             node,
             FfiCssPixelSize {
@@ -324,7 +361,7 @@ mod tests {
             },
             true,
             crate::css::css_enums::writing_mode::HORIZONTAL_TB,
-            None,
+            &StyleCell::new(),
         );
         assert!(store.row(node).is_none());
         store.finish_layout_commit(&mut commit);
@@ -345,13 +382,13 @@ mod tests {
         let store = LayoutStyleSnapshotStore::default();
         let node = StyleNodeID::element(1);
         let mut commit = LayoutStyleSnapshotCommit::default();
-        commit.begin(3);
+        store.begin_layout_commit(&mut commit, 3);
         commit.push(
             node,
             FfiCssPixelSize::default(),
             true,
             crate::css::css_enums::writing_mode::HORIZONTAL_TB,
-            None,
+            &StyleCell::new(),
         );
         store.finish_layout_commit(&mut commit);
         store.publish_scroll_states(&[FfiLayoutStyleScrollState {
@@ -366,5 +403,35 @@ mod tests {
         assert_eq!((row.stuck, row.snapped, row.scrollable, row.scrolled), (1, 2, 4, 8));
         store.retire(&[node]);
         assert!(store.row(node).is_none());
+    }
+
+    #[test]
+    fn a_commit_writes_only_the_rows_it_changes() {
+        let store = LayoutStyleSnapshotStore::default();
+        let (kept, resized) = (StyleNodeID::element(1), StyleNodeID::element(2));
+        let commit_widths = |generation, widths: &[(StyleNodeID, i32)]| {
+            let mut commit = LayoutStyleSnapshotCommit::default();
+            store.begin_layout_commit(&mut commit, generation);
+            for &(node, width) in widths {
+                let size = FfiCssPixelSize {
+                    width: CssPixels::from_raw(width),
+                    height: CssPixels::from_raw(0),
+                };
+                commit.push(
+                    node,
+                    size,
+                    true,
+                    crate::css::css_enums::writing_mode::HORIZONTAL_TB,
+                    &StyleCell::new(),
+                );
+            }
+            let written = commit.rows.len();
+            store.finish_layout_commit(&mut commit);
+            written
+        };
+        assert_eq!(commit_widths(1, &[(kept, 10), (resized, 20)]), 2);
+        assert_eq!(commit_widths(2, &[(kept, 10), (resized, 30)]), 1);
+        assert_eq!(store.row(kept).map(|row| row.content_width_raw), Some(10));
+        assert_eq!(store.row(resized).map(|row| row.content_width_raw), Some(30));
     }
 }

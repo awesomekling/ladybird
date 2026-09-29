@@ -74,6 +74,11 @@ impl StyleCell {
         Self(Cell::new(None))
     }
 
+    #[cfg(test)]
+    pub(crate) fn holding(record: Option<Arc<PublishedStyleRecord>>) -> Self {
+        Self(Cell::new(record))
+    }
+
     /// The row's payload pointer array, or null for a row without style.
     #[inline]
     pub(crate) fn get(&self) -> StylePayloadsRef {
@@ -89,7 +94,7 @@ impl StyleCell {
         self.with_owner(|owner| owner.cloned())
     }
 
-    fn owner_address(&self) -> usize {
+    pub(crate) fn owner_address(&self) -> usize {
         self.with_owner(|owner| owner.map_or(0, |record| Arc::as_ptr(record).addr()))
     }
 
