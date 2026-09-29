@@ -38,11 +38,11 @@
 mod devtools;
 
 use crate::css::style::tree::StyleNodeID;
+use crate::fast_hash::FastMap as HashMap;
 use crate::layout::node_data::{NodeKind, NodeSlotId};
 use crate::layout::{ArenaHandle, FfiCssPixelRect, LayoutNodeArena};
 use crate::painting::geometry_read::GeometryRead;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -972,21 +972,21 @@ pub(crate) fn between_units(message: ToOwner, running: DocumentId, deferred: &[O
 
 thread_local! {
     // On the owner thread, the render state of each document it owns.
-    static STATES: RefCell<HashMap<DocumentId, RenderState>> = RefCell::new(HashMap::new());
+    static STATES: RefCell<HashMap<DocumentId, RenderState>> = RefCell::default();
     // On the owner thread, the documents whose rendering update the document thread recalled before the update began,
     // which the update ends at its first unit.
-    static RECALLED: RefCell<std::collections::HashSet<DocumentId>> = RefCell::new(std::collections::HashSet::new());
+    static RECALLED: RefCell<crate::fast_hash::FastSet<DocumentId>> = RefCell::default();
     // On a document thread, the number of the last change it sent for each document, and of the last one that alters the
     // rows the owner publishes.
-    static SENT_THROUGH: RefCell<HashMap<DocumentId, SentChanges>> = RefCell::new(HashMap::new());
+    static SENT_THROUGH: RefCell<HashMap<DocumentId, SentChanges>> = RefCell::default();
     // On a document thread, the number of the last change it sent for each document ahead of a unit or question that
     // reaches the document's arena, which the owner applies every change it received before.
-    static TAKEN_IN_THROUGH: RefCell<HashMap<DocumentId, ChangeSeq>> = RefCell::new(HashMap::new());
+    static TAKEN_IN_THROUGH: RefCell<HashMap<DocumentId, ChangeSeq>> = RefCell::default();
     // On a document thread, the changes it sent that wait to go to the owner together.
     static HELD: RefCell<HeldChanges> = RefCell::new(HeldChanges::default());
     // On a document thread, the address of each document's arena it created, which names the frame in flight of the
     // document: nothing reaches the arena through it.
-    static FRAME_KEYS: RefCell<HashMap<DocumentId, usize>> = RefCell::new(HashMap::new());
+    static FRAME_KEYS: RefCell<HashMap<DocumentId, usize>> = RefCell::default();
 }
 
 /// Handles `message`, on the owner thread. A panic in handling it ends that message, not the owner: a document thread
