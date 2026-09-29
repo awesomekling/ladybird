@@ -395,7 +395,7 @@ impl RetainedState {
             dispatch_workspace: DispatchCandidateWorkspace::default(),
             dispatch_workspace_bytes: 0,
             cascade_compaction_workspace: ordering::CascadeCompactionWorkspace::default(),
-            cascade_compaction_workspace_bytes: 0,
+            cascade_compaction_workspace_memory: MemoryLease::new(MemoryCategory::BatchScratch),
         }));
     }
 
@@ -432,10 +432,7 @@ impl RetainedState {
             .release(MemoryCategory::BatchScratch, traversal.match_workspace_bytes);
         self.memory
             .release(MemoryCategory::BatchScratch, traversal.dispatch_workspace_bytes);
-        self.memory.release(
-            MemoryCategory::BatchScratch,
-            traversal.cascade_compaction_workspace_bytes,
-        );
+        traversal.cascade_compaction_workspace_memory.release();
         let released_cascade_payload_bytes = self.match_answers.sweep_unreferenced();
         self.retained_match_answers
             .release_swept_cascade_payloads(released_cascade_payload_bytes);
@@ -489,7 +486,7 @@ impl RetainedState {
             dispatch_workspace: DispatchCandidateWorkspace::default(),
             dispatch_workspace_bytes: 0,
             cascade_compaction_workspace: ordering::CascadeCompactionWorkspace::default(),
-            cascade_compaction_workspace_bytes: 0,
+            cascade_compaction_workspace_memory: MemoryLease::new(MemoryCategory::BatchScratch),
         })
     }
 
@@ -589,7 +586,7 @@ impl RetainedState {
             dispatch_workspace: DispatchCandidateWorkspace::default(),
             dispatch_workspace_bytes: 0,
             cascade_compaction_workspace: ordering::CascadeCompactionWorkspace::default(),
-            cascade_compaction_workspace_bytes: 0,
+            cascade_compaction_workspace_memory: MemoryLease::new(MemoryCategory::BatchScratch),
         }));
     }
 
@@ -705,10 +702,7 @@ impl RetainedState {
                 .release(MemoryCategory::BatchScratch, traversal.match_workspace_bytes);
             self.memory
                 .release(MemoryCategory::BatchScratch, traversal.dispatch_workspace_bytes);
-            self.memory.release(
-                MemoryCategory::BatchScratch,
-                traversal.cascade_compaction_workspace_bytes,
-            );
+            traversal.cascade_compaction_workspace_memory.release();
             self.discard_published_match_answers();
             self.finish_memory_evaluation_loop();
         }
@@ -734,10 +728,7 @@ impl RetainedState {
             .release(MemoryCategory::BatchScratch, traversal.match_workspace_bytes);
         self.memory
             .release(MemoryCategory::BatchScratch, traversal.dispatch_workspace_bytes);
-        self.memory.release(
-            MemoryCategory::BatchScratch,
-            traversal.cascade_compaction_workspace_bytes,
-        );
+        traversal.cascade_compaction_workspace_memory.release();
         let mut caches = self.prefix_caches.borrow_mut();
         caches.states.release();
         caches.answers.release(&mut self.match_answers);
@@ -4906,12 +4897,11 @@ impl RetainedState {
                 dispatch_workspace_bytes - traversal.dispatch_workspace_bytes,
             );
             traversal.dispatch_workspace_bytes = dispatch_workspace_bytes;
-            let cascade_compaction_workspace_bytes = traversal.cascade_compaction_workspace.capacity_bytes();
-            self.memory.reserve_required(
-                MemoryCategory::BatchScratch,
-                cascade_compaction_workspace_bytes - traversal.cascade_compaction_workspace_bytes,
+            // The workspace forgets the compactions it remembers once they fill it, so it can shrink.
+            traversal.cascade_compaction_workspace_memory.resize_required_to(
+                &mut self.memory,
+                traversal.cascade_compaction_workspace.capacity_bytes(),
             );
-            traversal.cascade_compaction_workspace_bytes = cascade_compaction_workspace_bytes;
             if let Ok(matches) = &all {
                 if let Some(retained_match_answer) = retained_match_answer {
                     self.remember_prepared_retained_match_answer_with_effects(
