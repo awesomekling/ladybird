@@ -810,12 +810,24 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     if (decided && !decided->has_before_change_style)
         return {};
 
+    // OPTIMIZATION: Without a transition or a provisional state to end, the only action a step can take is a start. A
+    //               `transition: all` names every longhand, and most restyles of such an element start nothing,
+    //               which the step the pass decided says without the transition-property list being read again.
+    auto existing_property_ids = abstract_element.element().property_ids_with_existing_transitions(abstract_element.pseudo_element());
+    auto const has_provisional_states = has_provisional_transition_states(abstract_element);
+    auto const decided_starts_nothing = [&] {
+        ReadonlySpan<StyleEngineFFI::FfiTransitionStepAction> actions { decided->actions, decided->action_count };
+        return all_of(actions, [](auto const& action) { return static_cast<StyleValueFFI::FfiTransitionActionKind>(action.kind) == StyleValueFFI::FfiTransitionActionKind::None; });
+    };
+    if (decided && existing_property_ids.is_empty() && !has_provisional_states && decided_starts_nothing()) {
+        ASSERT(transition_step_names_each_property(*decided, abstract_element.element().property_ids_with_matching_transition_property_entry(abstract_element.pseudo_element()), existing_property_ids));
+        return {};
+    }
     // OPTIMIZATION: The two lists `start_needed_transitions` decides over, plus this element's own
     //               provisional states. With none of them there is nothing to decide, and the
     //               after-change style need not be reconstructed at all.
     auto matching_property_ids = abstract_element.element().property_ids_with_matching_transition_property_entry(abstract_element.pseudo_element());
-    auto existing_property_ids = abstract_element.element().property_ids_with_existing_transitions(abstract_element.pseudo_element());
-    if (matching_property_ids.is_empty() && existing_property_ids.is_empty() && !has_provisional_transition_states(abstract_element))
+    if (matching_property_ids.is_empty() && existing_property_ids.is_empty() && !has_provisional_states)
         return {};
     // A step the pass decided names each property of the two lists. One that does not was decided
     // over state that moved before the row was installed, and the step is decided again here.
@@ -823,13 +835,6 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     ASSERT(decided_names_each_property);
     if (!decided_names_each_property)
         decided = nullptr;
-    // OPTIMIZATION: Without a transition or a provisional state to end, the only action a step can take is a start. A
-    //               `transition: all` names every longhand, and most restyles of such an element start nothing.
-    if (decided && existing_property_ids.is_empty() && !has_provisional_transition_states(abstract_element)) {
-        ReadonlySpan<StyleEngineFFI::FfiTransitionStepAction> actions { decided->actions, decided->action_count };
-        if (all_of(actions, [](auto const& action) { return static_cast<StyleValueFFI::FfiTransitionActionKind>(action.kind) == StyleValueFFI::FfiTransitionActionKind::None; }))
-            return {};
-    }
 
     if (!decided) {
         if (auto baseline = scope.engine().transition_baseline(abstract_element.element().style_node_id(), pseudo_element_to_ffi(abstract_element.pseudo_element()))) {
