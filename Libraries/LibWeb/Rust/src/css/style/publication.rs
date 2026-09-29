@@ -835,13 +835,13 @@ impl RetainedState {
             current_environment,
             RootFontInputs::from_document(&inputs),
             self.monospace_cohort_key(node, state),
-            self.element_reads(node, None, state, current_environment),
+            self.element_reads(node, None, state, written, current_environment),
         );
         // The row takes another node's record whole, so its plan is decided from that record's
         // own longhands rather than from a drive of this node's; a record holding none is no
         // cohort for a row that owes a plan, which drives its own instead.
         if let Some((new_style_record, cohort_explicitly_inherited_groups, animation_plan)) = (container_unit_mask == 0
-            && self.state_custom_condition_usage(node, state) == 0
+            && written.custom_condition_usage == 0
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && !derived_beneath_a_composition
             && (!has_registered_declarations || !full_drive))
@@ -1721,7 +1721,7 @@ impl RetainedState {
             .and_then(|(parent, parent_record)| self.cold_record_parent(node, parent, parent_record, state))
             .map(|parent| ColdRecordKey {
                 monospace_recascaded_font_size: self.monospace_cohort_key(node, state),
-                element_reads: self.element_reads(node, None, state, parent_environment),
+                element_reads: self.element_reads(node, None, state, written, parent_environment),
                 parent,
                 previous_style_record: 0,
                 generation: cascade_state.0,
@@ -1801,7 +1801,7 @@ impl RetainedState {
             .and_then(|(parent, parent_record)| self.cold_record_parent(node, parent, parent_record, state))
             .map(|parent| ColdRecordKey {
                 monospace_recascaded_font_size: self.monospace_cohort_key(node, state),
-                element_reads: self.element_reads(node, None, state, environment),
+                element_reads: self.element_reads(node, None, state, written, environment),
                 parent,
                 previous_style_record: 0,
                 generation: cascade_state.0,
@@ -2239,10 +2239,10 @@ impl RetainedState {
         node: StyleNodeID,
         pseudo_kind: Option<u8>,
         state: CascadeStateID,
+        written: StateWrittenFacts,
         environment: u64,
     ) -> ElementReads {
         use std::hash::{Hash, Hasher};
-        let written = self.state_written_facts(node, state);
         // Random bases and container units are the element's own: a record reading either is no one else's.
         let mut reads_element = false;
         let mut reads_tree_counting = written.has_written_tree_counting;
@@ -2756,7 +2756,13 @@ impl RetainedState {
                 .cold_record_parent(node, parent, parent_record, cascade_state.1)
                 .map(|parent| ColdRecordKey {
                     monospace_recascaded_font_size: self.monospace_cohort_key(node, cascade_state.1),
-                    element_reads: self.element_reads(node, None, cascade_state.1, environment),
+                    element_reads: self.element_reads(
+                        node,
+                        None,
+                        cascade_state.1,
+                        self.state_written_facts(node, cascade_state.1),
+                        environment,
+                    ),
                     parent,
                     previous_style_record: old_style_record.raw(),
                     generation: cascade_state.0,
@@ -3368,7 +3374,13 @@ impl RetainedState {
         let swap_eligible = self.computed_group_sets.node_inherited_group_swap_eligible(node);
         let key = ColdRecordKey {
             monospace_recascaded_font_size: self.monospace_cohort_key(node, cascade_state.1),
-            element_reads: self.element_reads(node, None, cascade_state.1, custom_property_environment),
+            element_reads: self.element_reads(
+                node,
+                None,
+                cascade_state.1,
+                self.state_written_facts(node, cascade_state.1),
+                custom_property_environment,
+            ),
             parent,
             previous_style_record: previous_style_record.map_or(0, computed::FinalStyleRecordID::raw),
             generation: cascade_state.0,
@@ -3621,13 +3633,6 @@ impl RetainedState {
     /// from it reads the node's custom-property environment.
     pub(super) fn state_has_substitutions(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
         self.state_written_facts(node, state).has_substitutions
-    }
-
-    /// The condition and function dependencies of ordinary winners, including longhands that
-    /// carry a pending shorthand substitution. The host uses these bits to schedule reactions
-    /// when a function definition or one of the condition inputs changes.
-    pub(super) fn state_custom_condition_usage(&self, node: StyleNodeID, state: CascadeStateID) -> u8 {
-        self.state_written_facts(node, state).custom_condition_usage
     }
 
     pub(super) fn state_container_unit_mask(&self, node: StyleNodeID, state: CascadeStateID) -> u8 {
@@ -5417,7 +5422,7 @@ pub(super) struct WrittenValueChecks {
     substitution: WrittenSubstitution,
     /// Written with `attr()`.
     reads_attributes: bool,
-    /// What `state_custom_condition_usage` reads: `if()`, `inherit()` and dashed functions.
+    /// What [`StateWrittenFacts::custom_condition_usage`] gathers: `if()`, `inherit()` and dashed functions.
     custom_condition_usage: u8,
     container_relative_length_unit_mask: u8,
     uses_tree_counting_function: bool,
@@ -5504,6 +5509,9 @@ pub(super) struct StateWrittenFacts {
     /// Of the longhand winners, whether any substitutes, and whether any reads attributes.
     pub(super) has_substitutions: bool,
     pub(super) reads_attributes: bool,
+    /// The condition and function dependencies of ordinary winners, including longhands that carry a pending
+    /// shorthand substitution. The host uses these bits to schedule reactions when a function definition or one of
+    /// the condition inputs changes.
     pub(super) custom_condition_usage: u8,
     /// Of every winner.
     pub(super) container_relative_length_unit_mask: u8,

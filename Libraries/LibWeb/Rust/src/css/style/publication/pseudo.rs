@@ -474,7 +474,13 @@ impl RetainedState {
                         custom_property_registration_generation: inputs.custom_property_registration_generation,
                         root_font_inputs: RootFontInputs::from_document(&inputs),
                         element_reads: state.map_or_else(ElementReads::default, |state| {
-                            self.element_reads(node, Some(kind), state, environment)
+                            self.element_reads(
+                                node,
+                                Some(kind),
+                                state,
+                                self.state_written_facts(node, state),
+                                environment,
+                            )
                         }),
                     }),
             );
