@@ -344,14 +344,19 @@ struct ChangeQueue {
 }
 
 impl ChangeQueue {
-    fn receive(&mut self, seq: ChangeSeq, change: ArenaChange) {
+    /// Receives changes `first`, `first + 1`, ...
+    fn receive(&mut self, first: ChangeSeq, changes: Vec<ArenaChange>) {
         debug_assert_eq!(
-            seq.0,
+            first.0,
             self.received_through.0 + 1,
             "a document's changes reach the owner in order"
         );
-        self.received_through = seq;
-        self.pending.push(change);
+        self.received_through = ChangeSeq(first.0 + changes.len() as u64 - 1);
+        if self.pending.is_empty() {
+            self.pending = changes;
+        } else {
+            self.pending.extend(changes);
+        }
     }
 }
 
@@ -942,6 +947,8 @@ thread_local! {
     // On a document thread, the number of the last change it sent for each document ahead of a unit or question that
     // reaches the document's arena, which the owner applies every change it received before.
     static TAKEN_IN_THROUGH: RefCell<HashMap<DocumentId, ChangeSeq>> = RefCell::new(HashMap::new());
+    // On a document thread, the changes it sent that wait to go to the owner together.
+    static HELD: RefCell<HeldChanges> = RefCell::new(HeldChanges::default());
     // On a document thread, the address of each document's arena it created, which names the frame in flight of the
     // document: nothing reaches the arena through it.
     static FRAME_KEYS: RefCell<HashMap<DocumentId, usize>> = RefCell::new(HashMap::new());
@@ -981,11 +988,7 @@ fn handle_message(owner: &Owner, message: ToOwner) {
             changes,
         } => {
             // The changes of a document with no state have nothing to change: they are dropped.
-            with_state(document, |state| {
-                for (index, change) in changes.into_iter().enumerate() {
-                    state.changes.receive(ChangeSeq(first.0 + index as u64), change);
-                }
-            });
+            with_state(document, |state| state.changes.receive(first, changes));
         }
         ToOwner::RenderingUpdate {
             document,
@@ -1182,7 +1185,7 @@ pub(crate) fn destroy_document(document: DocumentId) {
 }
 
 /// Sends the arena write `change` for `document`, which the owner applies before the next unit or query that reaches
-/// the arena.
+/// the arena. Inside a change batch ([`render_owner_open_change_batch`]), the change waits to go with the rest of it.
 pub(crate) fn send_arena_change(document: DocumentId, change: ArenaChange) -> ChangeSeq {
     let alters_published_rows = change.alters_published_rows();
     let seq = SENT_THROUGH.with_borrow_mut(|sent| {
@@ -1193,12 +1196,68 @@ pub(crate) fn send_arena_change(document: DocumentId, change: ArenaChange) -> Ch
         }
         sent.through
     });
-    send(ToOwner::Changes {
-        document,
-        first: seq,
-        changes: vec![change],
+    // What the thread holds of another document goes first, so the owner receives every change in the order sent.
+    if HELD.with_borrow(|held| !held.changes.is_empty() && held.document != document) {
+        send_held_changes();
+    }
+    let batch_is_open = HELD.with_borrow_mut(|held| {
+        if held.changes.is_empty() {
+            held.document = document;
+            held.first = seq;
+        }
+        held.changes.push(change);
+        held.open_batches > 0
     });
+    if !batch_is_open {
+        send_held_changes();
+    }
     seq
+}
+
+/// The arena changes a document thread sent that wait to go to the owner together: all of `document`, numbered from
+/// `first` on.
+#[derive(Default)]
+struct HeldChanges {
+    /// How many change batches are open on the thread.
+    open_batches: u32,
+    document: DocumentId,
+    first: ChangeSeq,
+    changes: Vec<ArenaChange>,
+}
+
+/// Sends the owner what the calling document thread holds, as one message.
+fn send_held_changes() {
+    let held = HELD.with_borrow_mut(|held| {
+        (!held.changes.is_empty()).then(|| (held.document, held.first, std::mem::take(&mut held.changes)))
+    });
+    if let Some((document, first, changes)) = held {
+        send(ToOwner::Changes {
+            document,
+            first,
+            changes,
+        });
+    }
+}
+
+/// Opens a change batch on the calling document thread: until the outermost batch closes, the arena changes the
+/// thread sends wait, and go to the owner as one message as it closes, or ahead of any other message the thread sends
+/// before. A drain that writes a change per row sends one message, not one per row.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_owner_open_change_batch() {
+    HELD.with_borrow_mut(|held| held.open_batches += 1);
+}
+
+/// Closes the change batch [`render_owner_open_change_batch`] opened last on the calling thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_owner_close_change_batch() {
+    let outermost = HELD.with_borrow_mut(|held| {
+        debug_assert!(held.open_batches > 0, "a change batch closed that was never opened");
+        held.open_batches = held.open_batches.saturating_sub(1);
+        held.open_batches == 0
+    });
+    if outermost {
+        send_held_changes();
+    }
 }
 
 /// Whether the owner takes in change `seq` the calling document thread sent for `document` before anything it asks of
@@ -1207,9 +1266,10 @@ pub(crate) fn taken_in_before_next_arena_reach(document: DocumentId, seq: Change
     TAKEN_IN_THROUGH.with_borrow(|taken_in| taken_in.get(&document).is_some_and(|through| *through >= seq))
 }
 
-/// On a document thread, as it sends the owner `message`: where the message reaches its document's arena, the owner
-/// takes in every change the thread sent before it first.
+/// On a document thread, as it sends the owner `message`: the changes it holds go first, and where the message reaches
+/// its document's arena, the owner takes in every change the thread sent before it first.
 pub(crate) fn note_sending(message: &ToOwner) {
+    send_held_changes();
     if message.reaches_arena() {
         let document = message.document();
         let through = sent_through(document);
