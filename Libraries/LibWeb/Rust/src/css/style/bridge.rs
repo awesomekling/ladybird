@@ -4709,7 +4709,7 @@ pub(crate) struct HomeAnswers {
     /// published it or as the owner published one since.
     compositions_of_taken_samples: HashMap<StyleNodeID, u64>,
     /// What the owner decided of each pseudo-element row's counter styles, with the record the row moved to.
-    content_counter_style_verdicts: HashMap<(StyleNodeID, u8), (u64, u8)>,
+    content_counter_style_verdicts: super::drain_table::HandedTable<(StyleNodeID, u8), (u64, u8)>,
     pub(crate) deferred_inputs: DeferredInputs,
     /// The custom-property environments elements and their synthetic pseudo-elements hold.
     pub(crate) environments: HeldEnvironments,
@@ -4744,7 +4744,7 @@ pub(crate) struct EngineNews {
     compositions_published: Vec<(StyleNodeID, u64)>,
     container_effects: Option<HashMap<StyleNodeID, super::container_queries::ContainerVerdict>>,
     rows_sampled: Option<HashMap<StyleNodeID, FfiRowSampledInPass>>,
-    content_counter_style_verdicts: Option<HashMap<(StyleNodeID, u8), (u64, u8)>>,
+    content_counter_style_verdicts: super::drain_table::HandedTable<(StyleNodeID, u8), (u64, u8)>,
     applied_reactions_held: bool,
     deferred_inputs: Option<HashMap<StyleNodeID, (u8, u8)>>,
     environments: Vec<(StyleNodeID, Option<HeldEnvironment>)>,
@@ -4807,9 +4807,8 @@ impl EngineNews {
         if engine.retained.container_effects_for_host.take_moved() {
             self.container_effects = Some((*engine.retained.container_effects_for_host).clone());
         }
-        if engine.host.content_counter_style_verdicts.take_moved() {
-            self.content_counter_style_verdicts = Some((*engine.host.content_counter_style_verdicts).clone());
-        }
+        self.content_counter_style_verdicts
+            .follow(std::mem::take(&mut engine.host.content_counter_style_verdicts));
         if engine.retained.rows_sampled_in_pass.take_moved() {
             let rows: Vec<_> = engine
                 .retained
@@ -5189,9 +5188,8 @@ impl HomeAnswers {
                 *held = composition;
             }
         }
-        if let Some(verdicts) = news.content_counter_style_verdicts {
-            self.content_counter_style_verdicts = verdicts;
-        }
+        self.content_counter_style_verdicts
+            .follow(news.content_counter_style_verdicts);
         self.deferred_inputs
             .adopt(news.applied_reactions_held, news.deferred_inputs);
         self.environments.adopt(
@@ -6947,11 +6945,7 @@ fn note_content_counter_style_verdicts(engine: &mut StyleEngine, arena: &crate::
         .collect();
     // The arena reaches the engine to read the rows' records, so the answer is not borrowed meanwhile.
     decide_content_counter_styles(arena, &mut verdicts);
-    let table = &mut engine.host.content_counter_style_verdicts;
-    table.clear();
-    for (row, verdict) in verdicts {
-        table.insert(row, verdict);
-    }
+    engine.host.content_counter_style_verdicts.replace(verdicts);
 }
 
 /// A pseudo-element row, named by its element and its kind, with the record it moved to and what the owner decides of
