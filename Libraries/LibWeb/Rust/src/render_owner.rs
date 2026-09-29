@@ -13,7 +13,7 @@
 //! - a change: owned `Send` data, fire and forget. An [`ArenaChange`], numbered per document ([`ChangeSeq`]), the
 //!   owner queues and applies, in order, as soon as it idles ([`take_in_sent_changes`]), or at the next point that
 //!   needs it: a unit of a rendering update, or a query. A write to the style engine waits in the engine's home, and
-//!   whoever reaches the engine next applies it first.
+//!   whoever reaches the engine next applies it first: the owner as it idles, if nothing else does before.
 //! - a [`RenderingUpdate`]: the stages of a frame, which the owner runs as units ([`FrameUnit`]) and answers with
 //!   the frame's news ([`crate::frame_news`]), the typed results the main thread adopts where it takes the frame in.
 //! - a [`Query`]: a question about the document as of the changes sent before it, answered in one round trip
@@ -1055,6 +1055,12 @@ pub(crate) fn take_in_sent_changes() {
                 continue;
             }
             state.apply_changes(EngineReach::OwnerBesideMain(&owner));
+            // What the main thread sent the engine with no arena change beside it, a reach of the engine applies.
+            let engine = state.style_engine();
+            if !engine.is_null() && engine.has_unapplied_changes() {
+                // SAFETY: The engine is the document's, whose render state the owner holds.
+                unsafe { engine.reach_on_owner_beside_main(&owner, |_| ()) };
+            }
         }
     });
 }
