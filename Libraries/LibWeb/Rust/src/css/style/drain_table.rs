@@ -77,6 +77,52 @@ impl<K: Eq + Hash, V> DrainTable<K, V> {
     }
 }
 
+/// A table the engine writes for the host's drain and never reads, which it hands its home by moving it: a table the
+/// engine started over replaces the home's, and what the engine wrote into it since goes into the home's.
+pub(crate) struct HandedTable<K, V> {
+    entries: HashMap<K, V>,
+    replaces: bool,
+}
+
+impl<K, V> Default for HandedTable<K, V> {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::default(),
+            replaces: false,
+        }
+    }
+}
+
+impl<K, V> Deref for HandedTable<K, V> {
+    type Target = HashMap<K, V>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
+impl<K: Eq + Hash, V> HandedTable<K, V> {
+    /// Starts the table over with `entries`.
+    pub(crate) fn replace(&mut self, entries: impl IntoIterator<Item = (K, V)>) {
+        self.entries.clear();
+        self.entries.extend(entries);
+        self.replaces = true;
+    }
+
+    pub(crate) fn insert(&mut self, key: K, value: V) {
+        self.entries.insert(key, value);
+    }
+
+    /// Follows `later`, what was written to the table since.
+    pub(crate) fn follow(&mut self, later: Self) {
+        if later.replaces {
+            *self = later;
+        } else {
+            self.entries.extend(later.entries);
+        }
+    }
+}
+
 /// A table whose writes the engine's home follows key by key: each write names its key, and whoever reaches the engine
 /// hands the home what the table holds now under each key written as it is done with the engine.
 pub(crate) struct FollowedTable<K, V> {
