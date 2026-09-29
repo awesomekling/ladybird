@@ -1159,16 +1159,18 @@ pub(crate) struct LayoutNodeArena {
     /// The viewport the last layout tree build placed, invalid once that box is freed.
     layout_root: Cell<NodeSlotId>,
     /// The layout tree's state as the document thread reads it, without reaching the arena (see
-    /// [`LayoutTreeState`]): republished wherever what it is read from changes.
+    /// [`LayoutTreeState`]): republished wherever what it is read from changes, with the count of its publications.
     published_layout_tree_state: AtomicU64,
+    /// How many times the arena published the layout tree's state, held publications included.
+    layout_tree_states_published: Cell<u32>,
     /// The rows as the document thread reads them, without reaching the arena (see
     /// [`super::row_reads`]).
     pub(super) published_rows: super::row_reads::RowSnapshotSlot,
     /// How many rows the arena published.
     rows_published: u64,
-    /// While a display tick runs over the arena, the rows it published, if any, which the document thread reads once it
-    /// adopts the tick rather than beside the task it runs (see [`Self::hold_published_rows`]).
-    held_rows: Option<Option<Arc<super::row_reads::RowSnapshot>>>,
+    /// While a display tick runs over the arena, what it published, which the document thread reads once it adopts the
+    /// tick rather than beside the task it runs (see [`Self::hold_publications`]).
+    held: Option<HeldPublication>,
     /// The last change of the document thread's the arena took in, which the rows it publishes include.
     changes_taken_in: crate::render_owner::ChangeSeq,
     /// The subtree roots the last layout tree build rebuilt, waiting for the partial relayout
@@ -1338,10 +1340,11 @@ impl LayoutNodeArena {
             active_layout_pass_depth: Cell::new(0),
             fragment_cache_epoch_changed_during_layout_pass: Cell::new(false),
             layout_root: Cell::new(NodeSlotId::INVALID),
-            published_layout_tree_state: AtomicU64::new(LayoutTreeState::default().pack()),
+            published_layout_tree_state: AtomicU64::new(LayoutTreeState::default().pack(0)),
+            layout_tree_states_published: Cell::new(0),
             published_rows: Default::default(),
             rows_published: 0,
-            held_rows: None,
+            held: None,
             changes_taken_in: Default::default(),
             pending_rebuilt_subtree_roots: RefCell::new(Vec::new()),
             pending_layout_tree_update_escaped_rebuild_roots: Cell::new(false),
@@ -1943,23 +1946,24 @@ impl LayoutNodeArena {
     }
 
     fn publish(&mut self, rows: Arc<super::row_reads::RowSnapshot>) {
-        match &mut self.held_rows {
-            Some(held) => *held = Some(rows),
+        match &mut self.held {
+            Some(held) => held.rows = Some(rows),
             None => self.published_rows.publish(rows),
         }
     }
 
-    /// Keeps the rows the arena publishes from now on from the document thread, for a display tick that runs beside
-    /// its task: they are the tick's to hand it ([`Self::take_held_rows`]).
-    pub(crate) fn hold_published_rows(&mut self) {
-        debug_assert!(self.held_rows.is_none(), "one display tick holds the rows at a time");
-        self.held_rows = Some(None);
+    /// Keeps what the arena publishes from now on, its rows and its layout tree's state, from the document thread, for
+    /// a display tick that runs beside its task: it is the tick's to hand the thread as it adopts the tick
+    /// ([`Self::take_held_publication`]).
+    pub(crate) fn hold_publications(&mut self) {
+        debug_assert!(self.held.is_none(), "one display tick holds the publications at a time");
+        self.held = Some(HeldPublication::default());
     }
 
-    /// Publishes rows where the document thread reads them again, and returns those the arena published since it held
-    /// them, if any.
-    pub(crate) fn take_held_rows(&mut self) -> Option<Arc<super::row_reads::RowSnapshot>> {
-        self.held_rows.take().flatten()
+    /// Publishes where the document thread reads again, and returns what the arena published since it held its
+    /// publications.
+    pub(crate) fn take_held_publication(&mut self) -> HeldPublication {
+        self.held.take().unwrap_or_default()
     }
 
     /// Republishes the rows published last without their paintable rows, which lets a writer that runs while nothing
@@ -1980,7 +1984,7 @@ impl LayoutNodeArena {
     /// unit writes in place the chunks nothing else holds rather than copying them for rows nothing reads. A display
     /// tick that holds the rows publishes them for itself.
     pub(crate) fn let_go_of_rows_while_document_thread_waits(&mut self) {
-        if self.held_rows.is_none() {
+        if self.held.is_none() {
             self.published_rows.let_go();
             self.release_published_paintable_rows();
         }
@@ -1995,9 +1999,9 @@ impl LayoutNodeArena {
     /// The rows the arena published last, for a snapshot of its own to share: none in a unit that let go of them
     /// ([`Self::let_go_of_rows_while_document_thread_waits`]) until it publishes again.
     pub(crate) fn published_rows(&self) -> Arc<super::row_reads::RowSnapshot> {
-        match &self.held_rows {
-            Some(Some(held)) => Arc::clone(held),
-            _ => self.published_rows.shared_on_owner(),
+        match self.held.as_ref().and_then(|held| held.rows.as_ref()) {
+            Some(held) => Arc::clone(held),
+            None => self.published_rows.shared_on_owner(),
         }
     }
 
@@ -2980,15 +2984,23 @@ impl LayoutNodeArena {
         self.publish_layout_tree_state();
     }
 
-    /// Publishes the layout tree's state for the document thread to read. Whatever writes the root, its layout update
-    /// mark, the full tree update flag or the partial relayout boundary roots calls this.
+    /// Publishes the layout tree's state for the document thread to read, or holds it for the display tick that holds
+    /// the arena's publications: the thread's view of the tree changes only between its tasks, never between a check
+    /// of it and what the check guards. Whatever writes the root, its layout update mark, the full tree update flag or
+    /// the partial relayout boundary roots calls this.
     pub(crate) fn publish_layout_tree_state(&self) {
         let state = LayoutTreeState {
             root: self.layout_root(),
             laid_out: self.layout_is_up_to_date(false),
             needs_full_layout_tree_update: self.needs_full_layout_tree_update(),
         };
-        self.published_layout_tree_state.store(state.pack(), Ordering::Release);
+        let sequence = self.layout_tree_states_published.get().wrapping_add(1);
+        self.layout_tree_states_published.set(sequence);
+        let packed = state.pack(sequence);
+        match &self.held {
+            Some(held) => held.layout_tree_state.set(Some(HeldLayoutTreeState(packed))),
+            None => self.published_layout_tree_state.store(packed, Ordering::Release),
+        }
     }
 
     pub(crate) fn layout_root(&self) -> NodeSlotId {
@@ -7038,9 +7050,12 @@ impl Default for LayoutTreeState {
 impl LayoutTreeState {
     const LAID_OUT: u64 = 1 << 32;
     const NEEDS_FULL_LAYOUT_TREE_UPDATE: u64 = 1 << 33;
+    /// Where a packed state keeps the low bits of the count of the arena's publications it was published as.
+    const SEQUENCE_SHIFT: u32 = 34;
 
-    fn pack(self) -> u64 {
-        let mut packed = u64::from(self.root.index);
+    /// The state, as the arena's `sequence`th publication of it.
+    fn pack(self, sequence: u32) -> u64 {
+        let mut packed = u64::from(self.root.index) | (u64::from(sequence) << Self::SEQUENCE_SHIFT);
         if self.laid_out {
             packed |= Self::LAID_OUT;
         }
@@ -7067,6 +7082,61 @@ impl LayoutTreeState {
             laid_out: packed & Self::LAID_OUT != 0,
             needs_full_layout_tree_update: packed & Self::NEEDS_FULL_LAYOUT_TREE_UPDATE != 0,
         }
+    }
+
+    /// Whether the packed state `packed` was published after `than`.
+    fn published_later(packed: u64, than: u64) -> bool {
+        let publications_between = (packed >> Self::SEQUENCE_SHIFT).wrapping_sub(than >> Self::SEQUENCE_SHIFT)
+            & (u64::MAX >> Self::SEQUENCE_SHIFT);
+        publications_between != 0 && publications_between <= u64::MAX >> (Self::SEQUENCE_SHIFT + 1)
+    }
+}
+
+/// What a display tick published of the arena while it ran beside the document thread's task, which only the thread's
+/// adoption of the tick publishes where it reads ([`Self::publish_on_adoption`]).
+#[derive(Default)]
+pub(crate) struct HeldPublication {
+    /// The rows the tick published last.
+    rows: Option<Arc<super::row_reads::RowSnapshot>>,
+    /// The layout tree's state the tick published last.
+    layout_tree_state: Cell<Option<HeldLayoutTreeState>>,
+}
+
+/// A packed [`LayoutTreeState`] a display tick published, which nothing but its adoption reads.
+struct HeldLayoutTreeState(u64);
+
+impl HeldPublication {
+    /// Takes what a later tick published in over what this holds.
+    pub(crate) fn follow_with(&mut self, later: Self) {
+        if later.rows.is_some() {
+            self.rows = later.rows;
+        }
+        if let Some(state) = later.layout_tree_state.into_inner() {
+            self.layout_tree_state.set(Some(state));
+        }
+    }
+
+    /// Publishes what the ticks held where the document thread reading the arena `handle` names reads, as it adopts
+    /// them between its tasks, unless the arena published something later since.
+    ///
+    /// # Safety
+    ///
+    /// `handle` must be a live handle on the document thread, which borrows no rows here.
+    pub(crate) unsafe fn publish_on_adoption(self, handle: *mut c_void) {
+        if let Some(rows) = self.rows {
+            // SAFETY: Guaranteed by the caller.
+            unsafe { HostTables::beside_frame(handle) }.adopted_rows.publish(rows);
+        }
+        let Some(HeldLayoutTreeState(held)) = self.layout_tree_state.into_inner() else {
+            return;
+        };
+        // SAFETY: Guaranteed by the caller. The projection reads and writes an atomic, borrowing nothing of the arena
+        // beside it.
+        let published =
+            unsafe { &*std::ptr::addr_of!((*handle.cast::<LayoutNodeArena>()).published_layout_tree_state) };
+        let _ = published.fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            LayoutTreeState::published_later(held, current).then_some(held)
+        });
     }
 }
 
@@ -7218,6 +7288,21 @@ mod tests {
     use crate::layout::node_data::{NodeConstructionFacts, NodeFlag, NodeKind, NodeSlotId};
     use crate::layout::{CssPixels, fragment_tree, used_values};
     use std::ffi::c_void;
+
+    #[test]
+    fn a_held_layout_tree_state_is_adopted_only_over_earlier_ones() {
+        use crate::layout::layout_node_arena::LayoutTreeState;
+        let packed = |sequence| LayoutTreeState::default().pack(sequence);
+        assert!(LayoutTreeState::published_later(packed(2), packed(1)));
+        assert!(!LayoutTreeState::published_later(packed(1), packed(2)));
+        assert!(!LayoutTreeState::published_later(packed(1), packed(1)));
+        // The count wraps in the bits a packed state keeps of it.
+        assert!(LayoutTreeState::published_later(packed(1 << 30), packed((1 << 30) - 1)));
+        assert!(LayoutTreeState::published_later(
+            packed(u32::MAX.wrapping_add(1)),
+            packed(u32::MAX)
+        ));
+    }
 
     fn test_construction_facts() -> NodeConstructionFacts {
         test_construction_facts_with_kind(NodeKind::Box)

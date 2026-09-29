@@ -194,8 +194,9 @@ struct Adoption {
     /// The committed geometry the last display tick laid out, which the host's reads answer from once it adopted the
     /// entries, as they would from a snapshot it published.
     query_snapshot: Option<QuerySnapshot>,
-    /// The rows the last display tick published, which the host's row reads answer from once it adopted the entries.
-    rows: Option<Arc<crate::layout::row_reads::RowSnapshot>>,
+    /// What the display ticks published of the arena, its rows and its layout tree's state, which the host reads from
+    /// once it adopted the entries.
+    held: crate::layout::HeldPublication,
 }
 
 impl Adoption {
@@ -962,12 +963,8 @@ pub unsafe extern "C" fn rust_document_clock_take_adoption(
     let mut adoption = published.adoption();
     let entries = home.map_or_else(Vec::new, |home| adoption.take_entries(home));
     let has_samples = !entries.is_empty();
-    if let Some(rows) = adoption.rows.take() {
-        // SAFETY: Every caller passes the live arena of a document on the main thread, which borrows no rows here.
-        unsafe { crate::layout::HostTables::beside_frame(arena) }
-            .adopted_rows
-            .publish(rows);
-    }
+    // SAFETY: Every caller passes the live arena of a document on the main thread, which borrows no rows here.
+    unsafe { std::mem::take(&mut adoption.held).publish_on_adoption(arena) };
     ADOPTING.with_borrow_mut(|adopting| *adopting = entries.into());
     FfiClockAdoption {
         has_samples,
@@ -1246,9 +1243,10 @@ fn run_display_tick_on(
         return;
     };
     let mut tick = None;
-    // What the tick publishes of the arena's rows, the main thread reads once it adopts the tick, not beside its task.
+    // What the tick publishes of the arena, its rows and its layout tree's state, the main thread reads once it adopts
+    // the tick, not beside its task.
     // SAFETY: The owner holds the document's render state.
-    unsafe { &mut *arena }.arena_mut().hold_published_rows();
+    unsafe { &mut *arena }.arena_mut().hold_publications();
     crate::stage_thread::run_detached_for(clock.main_thread, arena as usize, || {
         let mut run_tick = |engine: Option<&mut StyleEngine>| {
             let entries = &mut adoption.entries;
@@ -1311,9 +1309,9 @@ fn run_display_tick_on(
         )));
     });
     // SAFETY: As above.
-    if let Some(rows) = unsafe { &mut *arena }.arena_mut().take_held_rows() {
-        adoption.rows = Some(rows);
-    }
+    adoption
+        .held
+        .follow_with(unsafe { &mut *arena }.arena_mut().take_held_publication());
     let (outcome, laid_out, presented_frame) = match tick {
         Some(Ok(ran)) => ran,
         // A tick has nobody to hand a panic to: it is dropped, and the clock stops at the host, whose next rendering
