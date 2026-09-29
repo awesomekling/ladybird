@@ -62,11 +62,21 @@ fn chunk_slot_mut<T, const CHUNK: usize>(
 
 pub(crate) struct CowColumn<T, const CHUNK: usize> {
     spine: Spine<T, CHUNK>,
+    /// The chunk the spine holds at each index, so that reaching a row does not walk the spine
+    /// and the chunk's group. The spine keeps each alive, and whatever puts another chunk in a
+    /// slot of the spine (`grow_to`, and `owned_row` copying one a snapshot shares) updates it.
+    chunks: Vec<*mut Chunk<T, CHUNK>>,
     /// Whether each chunk is known to be unshared, with its group and the spine: the column made
     /// them writable after it last published, and nothing but publishing shares them.
     unshared: Vec<bool>,
     written_since_publish: bool,
 }
+
+// SAFETY: `chunks` points only into what `spine` holds, and the column hands out its rows only
+// through `&self` and `&mut self`, as the spine alone would.
+unsafe impl<T: Send + Sync, const CHUNK: usize> Send for CowColumn<T, CHUNK> {}
+// SAFETY: As above.
+unsafe impl<T: Send + Sync, const CHUNK: usize> Sync for CowColumn<T, CHUNK> {}
 
 /// A generation of a [`CowColumn`], as it was when published. It does not see later writes.
 pub(crate) struct ColumnSnapshot<T, const CHUNK: usize> {
@@ -77,6 +87,7 @@ impl<T, const CHUNK: usize> Default for CowColumn<T, CHUNK> {
     fn default() -> Self {
         Self {
             spine: Arc::new([]),
+            chunks: Vec::new(),
             unshared: Vec::new(),
             written_since_publish: false,
         }
@@ -102,7 +113,9 @@ impl<T: Clone + Default, const CHUNK: usize> CowColumn<T, CHUNK> {
 
     #[inline]
     pub(crate) fn get(&self, index: usize) -> Option<&T> {
-        row_of(&self.spine, index)
+        let chunk = *self.chunks.get(index / CHUNK)?;
+        // SAFETY: The spine holds the chunk, and nothing writes it while `&self` is borrowed.
+        Some(unsafe { &(*chunk).0[index % CHUNK] })
     }
 
     /// The row at `index` in a chunk made the column's own, copying the spine, the chunk's group
@@ -111,21 +124,16 @@ impl<T: Clone + Default, const CHUNK: usize> CowColumn<T, CHUNK> {
         let chunk_index = index / CHUNK;
         let unshared = self.unshared.get_mut(chunk_index)?;
         self.written_since_publish = true;
-        let chunk = if *unshared {
-            let chunk = chunk_of(&self.spine, chunk_index).expect("the column holds the chunk");
-            // SAFETY: The chunk, its group and the spine have not been shared since `make_mut`
-            // below made them unique: only `publish` shares them, and it forgets which chunks are
-            // unshared. `&mut self` keeps any other reference into the column from being live.
-            unsafe { &mut *Arc::as_ptr(chunk).cast_mut() }
-        } else {
+        if !*unshared {
+            let chunk = chunk_slot_mut(&mut self.spine, chunk_index).as_mut()?;
+            Arc::make_mut(chunk);
+            self.chunks[chunk_index] = Arc::as_ptr(chunk).cast_mut();
             *unshared = true;
-            Arc::make_mut(
-                chunk_slot_mut(&mut self.spine, chunk_index)
-                    .as_mut()
-                    .expect("the column holds the chunk"),
-            )
-        };
-        Some(&mut chunk.0[index % CHUNK])
+        }
+        // SAFETY: The chunk, its group and the spine have not been shared since `make_mut` above
+        // made them unique: only `publish` shares them, and it forgets which chunks are unshared.
+        // `&mut self` keeps any other reference into the column from being live.
+        Some(unsafe { &mut (*self.chunks[chunk_index]).0[index % CHUNK] })
     }
 
     /// Whether the row at `index` is in a chunk no snapshot shares, marking the chunk so if it is.
@@ -155,8 +163,9 @@ impl<T: Clone + Default, const CHUNK: usize> CowColumn<T, CHUNK> {
                 let group = Arc::new(Group(std::array::from_fn(|_| None)));
                 self.spine = self.spine.iter().cloned().chain([group]).collect();
             }
-            *chunk_slot_mut(&mut self.spine, chunk_index) =
-                Some(Arc::new(Chunk(std::array::from_fn(|_| T::default()))));
+            let chunk = Arc::new(Chunk(std::array::from_fn(|_| T::default())));
+            self.chunks.push(Arc::as_ptr(&chunk).cast_mut());
+            *chunk_slot_mut(&mut self.spine, chunk_index) = Some(chunk);
             self.unshared.push(true);
             self.written_since_publish = true;
         }
