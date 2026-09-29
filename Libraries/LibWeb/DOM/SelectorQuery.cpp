@@ -231,7 +231,7 @@ constexpr CSS::SelectorFFI::FfiDomSelectorCallbacks dom_selector_callbacks {
             return {};
         return utf16_view_to_ffi(*language);
     },
-    .directionality = [](void const* element) {
+    .directionality = [](void const* element) -> size_t {
         auto const& directionality = element_from_ffi(element).directionality() == Element::Directionality::Rtl ? "rtl"_utf16_fly_string : "ltr"_utf16_fly_string;
         return directionality.raw_identity(); },
     .heading_level = [](void const* element) -> u32 {
