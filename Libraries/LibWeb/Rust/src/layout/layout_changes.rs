@@ -135,6 +135,13 @@ pub(crate) enum LayoutChange {
         node: NodeSlotId,
         style_record: u64,
     },
+    /// The host adopted `style_record`, which the owner applied to the row ahead of it as it took the style
+    /// transaction whose batch the host installs (see [`LayoutNodeArena::apply_flight_style_rows`]): the row keeps its
+    /// style, and so does its layout.
+    AdoptOwnerRowStyle {
+        node: NodeSlotId,
+        style_record: u64,
+    },
     /// The row's DOM target took `style_record`: see [`LayoutNodeArena::replace_row_style_record`].
     ReplaceRowStyleRecord {
         node: NodeSlotId,
@@ -274,6 +281,16 @@ impl LayoutChange {
                     arena.install_row_style(node, style_record);
                 }
             }
+            Self::AdoptOwnerRowStyle { node, style_record } => {
+                if arena.slot_is_live(node) {
+                    debug_assert_eq!(
+                        arena.node_style_record(node),
+                        style_record,
+                        "the host adopts the record the owner applied to the row"
+                    );
+                    arena.install_row_style(node, style_record);
+                }
+            }
             Self::ReplaceRowStyleRecord { node, style_record } => {
                 if arena.slot_is_live(node) {
                     arena.replace_row_style_record(node, style_record);
@@ -371,6 +388,7 @@ impl LayoutChange {
             | Self::RowOwnsImageProvider { .. }
             | Self::SetStyleImageResourcesAttached { .. }
             | Self::PinBoundBoxStyleRecordForDetachment { .. }
+            | Self::AdoptOwnerRowStyle { .. }
             | Self::SetTableSpans { .. } => false,
         }
     }

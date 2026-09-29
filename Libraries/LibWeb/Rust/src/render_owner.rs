@@ -171,8 +171,9 @@ pub(crate) enum ArenaChange {
     Layout(crate::layout::layout_changes::LayoutChange),
     /// The host installed a style update whose transactions the owner applied the batches of to the layout nodes: a
     /// row the install did not adopt the record of is put back with the record its element holds, and what that owes
-    /// the host goes with the next payment the owner hands it.
-    FinishOwnerStyleHostHalf,
+    /// the host goes with the next payment the owner hands it. Where `host_adopted_every_row`, the install took every
+    /// row the owner applied, so none is put back.
+    FinishOwnerStyleHostHalf { host_adopted_every_row: bool },
     /// The `::selection` style of an element changed: the subtree of its nearest painted ancestor in the ancestry the
     /// layout tree was built from (a `display: contents` element has no box of its own) paints again, so cached text
     /// commands take the new highlight.
@@ -217,7 +218,7 @@ impl ArenaChange {
             ArenaChange::Layout(change) => change.alters_published_rows(),
             ArenaChange::Paint(change) => change.alters_published_rows(),
             // A row the install did not adopt the record of takes another style.
-            ArenaChange::FinishOwnerStyleHostHalf => true,
+            ArenaChange::FinishOwnerStyleHostHalf { host_adopted_every_row } => !host_adopted_every_row,
             ArenaChange::DocumentIsDecodedSvg(_)
             | ArenaChange::StyleSnapshotScrollStates(_)
             | ArenaChange::OwnedProviderHandedOver(_)
@@ -265,7 +266,9 @@ impl ArenaChange {
             ArenaChange::DropUnadoptedAnimationSamples => arena.drop_animation_adoptions(),
             ArenaChange::HostHearsBoxPresence(hears) => arena.set_host_hears_box_presence(hears),
             ArenaChange::Layout(change) => change.apply(arena),
-            ArenaChange::FinishOwnerStyleHostHalf => arena.finish_owner_style_host_half(),
+            ArenaChange::FinishOwnerStyleHostHalf { host_adopted_every_row } => {
+                arena.finish_owner_style_host_half(host_adopted_every_row);
+            }
             ArenaChange::SelectionStyleChanged(element) => {
                 crate::painting::selection::repaint_after_selection_style_change(arena, element);
             }

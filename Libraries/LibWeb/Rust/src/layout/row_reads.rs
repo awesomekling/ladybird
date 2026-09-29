@@ -902,18 +902,55 @@ pub unsafe extern "C" fn layout_arena_install_row_style(
     style_record: *const c_void,
 ) -> *mut c_void {
     // SAFETY: Guaranteed by the caller.
+    unsafe {
+        send_row_style(arena, node, style_record, |style_record| {
+            LayoutChange::InstallRowStyle { node, style_record }
+        })
+    }
+}
+
+/// Has the row `node` adopt the record `style_record` names, which the owner applied to it ahead of the host as it took
+/// the style transaction whose batch the host installs, as [`layout_arena_install_row_style`] does: the row keeps its
+/// style and its layout (see [`LayoutChange::AdoptOwnerRowStyle`]).
+///
+/// # Safety
+///
+/// As for [`layout_arena_install_row_style`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_adopt_owner_row_style(
+    arena: *mut c_void,
+    node: NodeSlotId,
+    style_record: *const c_void,
+) -> *mut c_void {
+    // SAFETY: Guaranteed by the caller.
+    unsafe {
+        send_row_style(arena, node, style_record, |style_record| {
+            LayoutChange::AdoptOwnerRowStyle { node, style_record }
+        })
+    }
+}
+
+/// Sends the change `change` makes of the record `style_record` names, which moves the row `node` to it, and answers the
+/// image observers the row let go of.
+///
+/// # Safety
+///
+/// As for [`layout_arena_install_row_style`].
+unsafe fn send_row_style(
+    arena: *mut c_void,
+    node: NodeSlotId,
+    style_record: *const c_void,
+    change: impl FnOnce(u64) -> LayoutChange,
+) -> *mut c_void {
+    // SAFETY: Guaranteed by the caller.
     let record = unsafe { crate::css::style::published_record::shared_from_handle(style_record) };
     // SAFETY: As above.
     let old_image_observers =
         unsafe { HostTables::from_handle(arena) }.replace_image_observers(node, std::ptr::null_mut());
     // SAFETY: As above.
     let (_, mut sent_ahead) = unsafe { rows_and_sent_ahead(arena) };
-    let change = LayoutChange::InstallRowStyle {
-        node,
-        style_record: record.style_record,
-    };
     // SAFETY: As above.
-    let sent = unsafe { super::layout_changes::send(arena, change) };
+    let sent = unsafe { super::layout_changes::send(arena, change(record.style_record)) };
     sent_ahead.note_style(sent, node, Some(record));
     old_image_observers
 }

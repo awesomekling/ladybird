@@ -2591,8 +2591,12 @@ impl LayoutNodeArena {
     /// Ends the host half of the batches the owner applied as the host took a style update's transactions, once the
     /// host has installed them (see [`Self::finish_flight_style_host_half`]). What that owes the host waits for
     /// [`Self::take_leftover_payment`].
-    pub(crate) fn finish_owner_style_host_half(&mut self) {
-        let (_, payment) = self.finish_flight_style_host_half();
+    pub(crate) fn finish_owner_style_host_half(&mut self, host_adopted_every_row: bool) {
+        let (restored, payment) = self.finish_flight_style_host_half();
+        debug_assert!(
+            !(restored && host_adopted_every_row),
+            "the host adopted every row the owner applied, and none is put back"
+        );
         self.append_leftover_payment(payment);
     }
 
