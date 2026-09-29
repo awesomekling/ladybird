@@ -250,6 +250,16 @@ impl ArenaHandle {
         &mut self.arena
     }
 
+    /// For a unit the document thread waits for, which publishes before it answers: lets go of the rows the arena
+    /// published last ([`LayoutNodeArena::let_go_of_rows_while_document_thread_waits`]), and of those the thread
+    /// adopted from display ticks where the arena's are later, which the thread does not read again.
+    pub(crate) fn let_go_of_rows_while_document_thread_waits(&mut self) {
+        self.arena.let_go_of_rows_while_document_thread_waits();
+        self.host_tables
+            .adopted_rows
+            .let_go_if_earlier_than(&self.arena.published_rows);
+    }
+
     pub(crate) fn arena(&self) -> &LayoutNodeArena {
         &self.arena
     }

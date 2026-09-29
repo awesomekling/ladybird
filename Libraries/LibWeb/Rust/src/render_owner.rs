@@ -424,6 +424,9 @@ impl RenderState {
 
     /// Answers `query` from the state as the units before it left it.
     fn answer(&mut self, owner: &Owner, query: Query) -> Answer {
+        if query.publishes_rows() {
+            self.arena.let_go_of_rows_while_document_thread_waits();
+        }
         self.apply_changes(EngineReach::Owner(owner));
         match query {
             Query::Engine(query) => {
@@ -458,6 +461,14 @@ impl RenderState {
     fn state(&mut self, owner: &Owner) -> *mut ArenaHandle {
         self.apply_changes(EngineReach::Owner(owner));
         std::ptr::from_mut::<ArenaHandle>(&mut self.arena)
+    }
+
+    /// The state's arena and what lives beside it, for a unit the document thread waits for, which publishes the rows
+    /// before it answers: the rows published last are let go of before the unit, and the changes it applies first,
+    /// write what they shared.
+    fn state_for_waiting_thread(&mut self, owner: &Owner) -> *mut ArenaHandle {
+        self.arena.let_go_of_rows_while_document_thread_waits();
+        self.state(owner)
     }
 
     /// The state's arena and what lives beside it, for a rendering update, which runs beside the main thread with the
@@ -508,6 +519,16 @@ pub(crate) enum Query {
     CommittedRows { measured_overflow: bool },
     /// A read for tests and debugging, which only Internals and the WebContent debug requests ask.
     DevTools(devtools::DevToolsQuery),
+}
+
+impl Query {
+    /// Whether the owner publishes the rows before it answers the query.
+    fn publishes_rows(&self) -> bool {
+        matches!(
+            self,
+            Self::Geometry { .. } | Self::Write(_) | Self::CommittedRows { .. }
+        )
+    }
 }
 
 /// A read of a document's layout arena, which [`Query::Arena`] asks.
@@ -1015,11 +1036,15 @@ fn handle_message(owner: &Owner, message: ToOwner) {
         ToOwner::Layout { document, job } => {
             // The state's borrow ends before the job runs, which may reach another document's state. The job finds
             // the arena inside its answer, so that a panic there answers the waiting document thread.
-            (*job).run(owner, || with_state(document, |state| state.state(owner)));
+            (*job).run(owner, || {
+                with_state(document, |state| state.state_for_waiting_thread(owner))
+            });
         }
         ToOwner::Paint { document, pass } => {
             // As for a layout unit, the pass finds the arena inside its answer.
-            (*pass).run(owner, || with_state(document, |state| state.state(owner)));
+            (*pass).run(owner, || {
+                with_state(document, |state| state.state_for_waiting_thread(owner))
+            });
         }
         ToOwner::Ask { document, query, reply } => reply.answer(|| {
             with_state(document, |state| state.answer(owner, query)).unwrap_or_else(|| Answer::left_to_host(query))
@@ -1510,10 +1535,9 @@ fn run_style_on_owner(
 ) -> crate::css::style::bridge::OwnerStyleTransactionView {
     // The state's changes, the link to its engine among them, go in before the engine is read.
     let reached = with_state(document, |state| {
-        let state_handle = state.state(owner);
+        let state_handle = state.state_for_waiting_thread(owner);
         (state.style_engine(), state_handle)
-    })
-    .filter(|(engine, _)| !engine.is_null());
+    });
     let Some((engine, state)) = reached else {
         debug_assert!(
             false,
@@ -1521,13 +1545,22 @@ fn run_style_on_owner(
         );
         return crate::css::style::bridge::OwnerStyleTransactionView::unanswered();
     };
-    // The faces the transaction wants are this document's, for its layout end to request, whichever document's update
-    // the owner serves the transaction beside.
-    let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
-    // SAFETY: The engine and the state are the document's, which only the owner reaches, and the document thread
-    // waits for the transaction.
-    let view = unsafe { engine.reach_on_owner(owner, |engine| transaction.run(engine, &mut *state)) };
-    // SAFETY: As above.
+    let view = if engine.is_null() {
+        debug_assert!(
+            false,
+            "the owner runs the style transaction of a document with an engine"
+        );
+        crate::css::style::bridge::OwnerStyleTransactionView::unanswered()
+    } else {
+        // The faces the transaction wants are this document's, for its layout end to request, whichever document's
+        // update the owner serves the transaction beside.
+        let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
+        // SAFETY: The engine and the state are the document's, which only the owner reaches, and the document thread
+        // waits for the transaction.
+        unsafe { engine.reach_on_owner(owner, |engine| transaction.run(engine, &mut *state)) }
+    };
+    // The rows go out as the transaction left them, and in any case: the unit let go of those published before.
+    // SAFETY: The state is the document's, which only the owner reaches, and the document thread waits.
     unsafe { &mut *state }.arena_mut().publish_rows();
     view
 }

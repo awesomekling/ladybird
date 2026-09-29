@@ -298,6 +298,9 @@ enum Freshness {
 #[derive(Default)]
 pub(crate) struct RowSnapshotSlot {
     rows: Mutex<Arc<RowSnapshot>>,
+    /// No rows, which the slot holds from where a unit the document thread waits for lets go of its rows
+    /// ([`Self::let_go`]) until the unit publishes again, before it answers: the thread reads no rows meanwhile.
+    let_go_of: Arc<RowSnapshot>,
     /// The generation of the rows the slot holds, which tells a reader which of two slots holds the later rows
     /// without taking either lock.
     generation: AtomicU64,
@@ -319,6 +322,21 @@ impl RowSnapshotSlot {
         drop(previous);
     }
 
+    /// Lets go of the rows, for the owner, in a unit the document thread waits for: the thread reads no rows until the
+    /// unit publishes again, so the unit writes what the rows shared with the arena in place rather than copying it for
+    /// rows nothing reads.
+    pub(crate) fn let_go(&self) {
+        let rows = std::mem::replace(&mut *self.rows(), Arc::clone(&self.let_go_of));
+        drop(rows);
+    }
+
+    /// Lets go of the rows where `other` holds later ones, which a reader reads instead.
+    pub(crate) fn let_go_if_earlier_than(&self, other: &Self) {
+        if other.is_later_than(self) {
+            self.let_go();
+        }
+    }
+
     /// Whether the slot holds later rows than `other` does.
     fn is_later_than(&self, other: &Self) -> bool {
         self.generation.load(Ordering::Acquire) > other.generation.load(Ordering::Acquire)
@@ -326,6 +344,13 @@ impl RowSnapshotSlot {
 
     /// The rows the slot holds, with a reference of the caller's own.
     pub(crate) fn shared(&self) -> Arc<RowSnapshot> {
+        let rows = self.shared_on_owner();
+        debug_assert!(!Arc::ptr_eq(&rows, &self.let_go_of), "{LET_GO}");
+        rows
+    }
+
+    /// Like [`Self::shared`], for the owner, which reads no rows where a unit of its let go of them.
+    pub(crate) fn shared_on_owner(&self) -> Arc<RowSnapshot> {
         self.rows().clone()
     }
 
@@ -333,10 +358,14 @@ impl RowSnapshotSlot {
     ///
     /// Nothing may publish rows while the borrow is live.
     unsafe fn latest<'a>(&self) -> &'a RowSnapshot {
+        let rows = Arc::as_ptr(&self.rows());
+        debug_assert!(!std::ptr::eq(rows, Arc::as_ptr(&self.let_go_of)), "{LET_GO}");
         // SAFETY: Guaranteed by the caller: the slot keeps the rows until the next publication.
-        unsafe { &*Arc::as_ptr(&self.rows()) }
+        unsafe { &*rows }
     }
 }
+
+const LET_GO: &str = "a unit the document thread waits for publishes the rows it let go of before it answers";
 
 /// The rows the arena's owner published last, with a reference of the document thread's own: a frame's own snapshot.
 /// Reading them waits for nothing (no frame in flight, no owner that publishes rows reflecting what the document thread
@@ -1058,6 +1087,30 @@ mod tests {
         arena.remove_child(viewport, block);
         arena.remove_child(viewport, referencer);
         for freed in [block, referencer, viewport] {
+            arena.free_subtree(freed).invoke_callbacks();
+        }
+    }
+
+    #[test]
+    fn rows_let_go_of_for_a_waiting_document_thread_come_back_with_the_next_publication() {
+        let mut arena = LayoutNodeArena::new();
+        let viewport = row(&mut arena, NodeKind::Viewport, None);
+        arena.bind_row(viewport);
+        arena.publish_rows();
+        let reader = arena.published_rows();
+
+        arena.let_go_of_rows_while_document_thread_waits();
+        assert!(arena.published_rows().node(viewport).is_none());
+        let block = row(&mut arena, NodeKind::BlockContainer, None);
+        arena.insert_child(viewport, block, NodeSlotId::INVALID);
+        arena.publish_rows();
+
+        assert_eq!(arena.published_rows().node(viewport).unwrap().first_child, block);
+        // A reader that held the rows let go of goes on reading its own generation.
+        assert_eq!(reader.node(viewport).unwrap().first_child, NodeSlotId::INVALID);
+
+        arena.remove_child(viewport, block);
+        for freed in [block, viewport] {
             arena.free_subtree(freed).invoke_callbacks();
         }
     }
