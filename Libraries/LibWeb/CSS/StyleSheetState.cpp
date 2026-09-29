@@ -7,6 +7,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/AnyOf.h>
 #include <AK/Utf16StringBuilder.h>
 #include <LibJS/Runtime/ExternalMemory.h>
 #include <LibWeb/CSS/CSSImportRule.h>
@@ -653,6 +654,11 @@ bool StyleSheetState::evaluate_media_queries(DOM::Document const& document)
 {
     Parser::ValueParserFFI::NativeStyleSheetMediaEvaluation result {};
     return evaluate_media_queries(document, result);
+}
+
+bool StyleSheetState::has_evaluated_media_queries_for(DOM::Document const& document) const
+{
+    return any_of(m_document_media_states, [&](auto const& state) { return state->document.ptr().ptr() == &document; });
 }
 
 StyleSheetState::DocumentMediaState::DocumentMediaState(DOM::Document const& document)
