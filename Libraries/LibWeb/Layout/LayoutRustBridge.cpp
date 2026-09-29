@@ -817,10 +817,10 @@ void register_layout_host(DOM::Document& document)
             (bits & RustFFI::BOX_PRESENCE_HAS_COMMITTED_BOX) != 0);
     });
     RustFFI::layout_arena_set_chrome_state_callback(arena, &document,
-        [](void* context, Compositing::RustFFI::NodeSlotId slot, RustFFI::PaintableRowResetKind kind, bool is_viewport_row) {
+        [](void* context, bool viewport_row_was_recommitted) {
             auto& document = *static_cast<DOM::Document*>(context);
-            document.chrome_widget_registry().drop_widgets_for_slot(slot);
-            if (kind == RustFFI::PaintableRowResetKind::Recommitted && is_viewport_row)
+            document.chrome_widget_registry().drop_widgets_of_reset_rows();
+            if (viewport_row_was_recommitted)
                 document.paint_state().viewport_row_was_reset();
         });
     static_assert(to_underlying(SVG::PreserveAspectRatio::Align::None) == 0);

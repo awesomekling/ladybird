@@ -338,18 +338,11 @@ pub unsafe extern "C" fn layout_arena_paintable_wheel_scrollable_axes(
 pub unsafe extern "C" fn layout_arena_set_chrome_state_callback(
     arena: *mut c_void,
     context: *mut c_void,
-    callback: unsafe extern "C" fn(*mut c_void, NodeSlotId, PaintableRowResetKind, bool),
+    callback: unsafe extern "C" fn(*mut c_void, bool),
 ) {
     unsafe { crate::layout::HostTables::from_handle(arena) }
         .chrome_state_callback
         .set(Some((context, callback)));
-    // SAFETY: Guaranteed by the caller.
-    unsafe {
-        send(
-            arena,
-            crate::painting::paint_changes::PaintChange::ChromeStateListens(true),
-        );
-    };
 }
 
 /// # Safety
@@ -360,13 +353,6 @@ pub unsafe extern "C" fn layout_arena_clear_chrome_state_callback(arena: *mut c_
     unsafe { crate::layout::HostTables::from_handle(arena) }
         .chrome_state_callback
         .set(None);
-    // SAFETY: Guaranteed by the caller.
-    unsafe {
-        send(
-            arena,
-            crate::painting::paint_changes::PaintChange::ChromeStateListens(false),
-        );
-    };
 }
 
 /// # Safety

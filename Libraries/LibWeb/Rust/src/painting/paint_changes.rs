@@ -23,8 +23,6 @@ pub(crate) enum PaintChange {
         direction: ScrollDirection,
         enlarged: bool,
     },
-    /// Whether the host listens for the chrome state of the paintable rows the arena resets.
-    ChromeStateListens(bool),
     /// The nearest self-painting inline box around a box paints again.
     NearestSelfPaintingInlineRepaint(NodeSlotId),
     /// The document's selection, which the rows it covers paint.
@@ -103,8 +101,7 @@ impl PaintChange {
                     crate::painting::replaced_paint_facts::ReplacedPaintFacts::NavigableContainer(_)
                 )
             }
-            Self::ChromeStateListens(_)
-            | Self::NearestSelfPaintingInlineRepaint(_)
+            Self::NearestSelfPaintingInlineRepaint(_)
             | Self::Selection(_)
             | Self::SelectionCleared { .. }
             | Self::ScrollableOverflowRecalculationCountReset
@@ -146,7 +143,6 @@ impl PaintChange {
                 rows.paintable_data_mut(slot).set_flag(flag, enlarged);
                 rows.push_paint_damage(slot, PaintDamage::DRAW_OVERLAY | PaintDamage::HIT_OVERLAY);
             }
-            Self::ChromeStateListens(listens) => arena.set_chrome_state_listens(listens),
             Self::NearestSelfPaintingInlineRepaint(node) => {
                 if !arena.slot_is_live(node) {
                     return;

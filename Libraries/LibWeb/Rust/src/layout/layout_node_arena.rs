@@ -698,10 +698,7 @@ enum ResolvedHostHandback {
     },
     OwnedImageProviderDetach(NodeSlotId),
     ImageBoxAwaitsOwnedProvider(NodeSlotId),
-    PaintableRowReset {
-        reset: crate::painting::paintable_rows::PaintableRowReset,
-        viewport_row: NodeSlotId,
-    },
+    PaintableRowReset(crate::painting::paintable_rows::PaintableRowReset),
 }
 
 /// What the arena owed the host, resolved in the order the arena let go of it (see
@@ -740,6 +737,7 @@ impl HostPayment {
         // them and here, so the tables still hold each as it was then, and the host code paying runs cannot change
         // what the rest of the payment pays with.
         let objects = take_host_objects_owed(main_thread, &self.0);
+        let mut row_resets = crate::painting::paintable_rows::RowResetsForHost::default();
         for (handback, object) in self.0.into_iter().zip(objects) {
             match handback {
                 ResolvedHostHandback::BoxPresence { style_node, bits } => {
@@ -755,14 +753,15 @@ impl HostPayment {
                         host_tables.image_boxes_awaiting_owned_provider.borrow_mut().insert(row);
                     }
                 }
-                ResolvedHostHandback::PaintableRowReset { reset, viewport_row } => {
+                ResolvedHostHandback::PaintableRowReset(reset) => {
                     if let (Some(host_tables), Some(row)) = (main_thread.host_tables(), reset.freed_row()) {
                         host_tables.compositor_animation_frames.borrow_mut().remove(&row);
                     }
-                    reset.invoke_callback_on_main_thread(main_thread, viewport_row);
+                    row_resets.note_reset();
                 }
             }
         }
+        row_resets.tell(main_thread);
     }
 }
 
@@ -796,7 +795,7 @@ fn take_host_objects_owed(
                 }
                 ResolvedHostHandback::BoxPresence { .. }
                 | ResolvedHostHandback::ImageBoxAwaitsOwnedProvider(_)
-                | ResolvedHostHandback::PaintableRowReset { .. } => None,
+                | ResolvedHostHandback::PaintableRowReset(_) => None,
             };
             object.unwrap_or(std::ptr::null_mut())
         })
@@ -858,9 +857,11 @@ impl FreedSubtree {
             self.rows_with_owned_image_provider.is_empty() && self.rows_with_image_observers.is_empty(),
             "a test arena has no host to own image objects"
         );
-        for reset in self.paintable_row_resets {
-            reset.invoke_callback_on_main_thread(&main_thread, NodeSlotId::INVALID);
+        let mut row_resets = crate::painting::paintable_rows::RowResetsForHost::default();
+        if !self.paintable_row_resets.is_empty() {
+            row_resets.note_reset();
         }
+        row_resets.tell(&main_thread);
         // A test arena links no engine, which the rows' pins would be released in.
     }
 }
@@ -4168,8 +4169,7 @@ impl LayoutNodeArena {
     }
 
     /// Resolves what the arena let go of in `handbacks` into what paying it hands the host, as the arena stands now,
-    /// for the main thread to pay without reading the arena: the boxes each node has, and the viewport a row reset is
-    /// told of.
+    /// for the main thread to pay without reading the arena: the boxes each node has.
     pub(crate) fn resolve_host_handbacks(&self, handbacks: HostHandbacks) -> HostPayment {
         let viewport_row = self.bound_viewport_row();
         HostPayment(
@@ -4193,9 +4193,7 @@ impl LayoutNodeArena {
                     HostHandback::ImageBoxAwaitsOwnedProvider(row) => {
                         ResolvedHostHandback::ImageBoxAwaitsOwnedProvider(row)
                     }
-                    HostHandback::PaintableRowReset(reset) => {
-                        ResolvedHostHandback::PaintableRowReset { reset, viewport_row }
-                    }
+                    HostHandback::PaintableRowReset(reset) => ResolvedHostHandback::PaintableRowReset(reset),
                 })
                 .collect(),
         )

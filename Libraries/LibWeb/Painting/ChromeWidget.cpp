@@ -66,17 +66,21 @@ NonnullRefPtr<ResizeHandle> ChromeWidgetRegistry::get_or_create_resize_handle(DO
     return *entry.resize_handle;
 }
 
-void ChromeWidgetRegistry::drop_widgets_for_slot(Compositing::RustFFI::NodeSlotId slot)
+void ChromeWidgetRegistry::drop_widgets_of_reset_rows()
 {
-    auto entry = m_entries.take(slot.index);
-    if (!entry.has_value())
-        return;
-    if (entry->horizontal_scrollbar)
-        entry->horizontal_scrollbar->detach({});
-    if (entry->vertical_scrollbar)
-        entry->vertical_scrollbar->detach({});
-    if (entry->resize_handle)
-        entry->resize_handle->detach({});
+    // A reset moves the row's reset version, so a row's widgets are the ones to drop when any of them is not current.
+    m_entries.remove_all_matching([](u32, Entry& entry) {
+        auto is_stale = [](RefPtr<ChromeWidget> const& widget) { return widget && !widget->is_current(); };
+        if (!is_stale(entry.horizontal_scrollbar) && !is_stale(entry.vertical_scrollbar) && !is_stale(entry.resize_handle))
+            return false;
+        if (entry.horizontal_scrollbar)
+            entry.horizontal_scrollbar->detach({});
+        if (entry.vertical_scrollbar)
+            entry.vertical_scrollbar->detach({});
+        if (entry.resize_handle)
+            entry.resize_handle->detach({});
+        return true;
+    });
 }
 
 void ChromeWidgetRegistry::clear()
