@@ -8,6 +8,7 @@
 
 use super::RetainedState;
 use super::tree::StyleNodeID;
+use crate::css::animated_overlay::AnimatedOverlay;
 use crate::css::animated_overlay::FfiAnimatedOverlayEntry;
 use crate::css::computed_longhand_table::ComputedLonghandTable;
 use crate::css::style_value::StyleValueData;
@@ -69,29 +70,53 @@ impl RetainedState {
         });
     }
 
-    /// Where an inherited value of `property` in `table`, a record for `node`, comes from when an
+    /// The ancestors a record for `node` inherits along, where one of them holds an animation
+    /// overlay: only then can a value the record inherits be an animated one. Most elements have
+    /// no animated ancestor, which this one walk decides for every property.
+    pub(crate) fn animated_inheritance_chain(&self, node: StyleNodeID) -> Option<AnimatedInheritanceChain<'_>> {
+        std::iter::successors(self.tree.inheritance_parent(node), |&ancestor| {
+            self.tree.inheritance_parent(ancestor)
+        })
+        .any(|ancestor| {
+            self.record_parts(ancestor)
+                .is_some_and(|(_, overlay)| overlay.is_some())
+        })
+        .then_some(AnimatedInheritanceChain { engine: self, node })
+    }
+
+    fn record_parts(&self, node: StyleNodeID) -> Option<(&ComputedLonghandTable, Option<&AnimatedOverlay>)> {
+        let record = self.computed_group_sets.assigned_style_record(node)?;
+        let view = self.computed_group_sets.style_record_view(record.raw())?;
+        Some((unsafe { view.longhand_table.as_ref() }?, unsafe {
+            view.animated_overlay.as_ref()
+        }))
+    }
+}
+
+/// The inheritance chain above an element with an animated ancestor on it.
+#[derive(Clone, Copy)]
+pub(crate) struct AnimatedInheritanceChain<'a> {
+    engine: &'a RetainedState,
+    node: StyleNodeID,
+}
+
+impl<'a> AnimatedInheritanceChain<'a> {
+    /// Where an inherited value of `property` in `table`, a record for the node, comes from when an
     /// ancestor animates it: the nearest ancestor along the chain of records that inherited the
     /// property and holds an overlay entry for it, and the base value of the ancestor the chain
     /// starts at. None when no such ancestor exists.
     pub(crate) fn inherited_animated_value(
-        &self,
-        node: StyleNodeID,
+        self,
         table: &ComputedLonghandTable,
         property: u16,
-    ) -> Option<InheritedAnimatedValue<'_>> {
-        let record_parts = |node: StyleNodeID| {
-            let record = self.computed_group_sets.assigned_style_record(node)?;
-            let view = self.computed_group_sets.style_record_view(record.raw())?;
-            Some((unsafe { view.longhand_table.as_ref() }?, unsafe {
-                view.animated_overlay.as_ref()
-            }))
-        };
+    ) -> Option<InheritedAnimatedValue<'a>> {
+        let engine = self.engine;
         let mut entry = None;
         let mut inherits = table.is_inherited(property);
-        let mut ancestor = self.tree.inheritance_parent(node);
+        let mut ancestor = engine.tree.inheritance_parent(self.node);
         while inherits {
             let current = ancestor?;
-            let (ancestor_table, overlay) = record_parts(current)?;
+            let (ancestor_table, overlay) = engine.record_parts(current)?;
             // NB: A record the engine derived holds an inherited animated value in its table, so
             //     the base value is read where the chain of inheriting records starts.
             entry = entry.or_else(|| overlay.and_then(|overlay| overlay.get(property)));
@@ -104,7 +129,7 @@ impl RetainedState {
                     .filter(|_| !base_value.is_null())
                     .map(|entry| InheritedAnimatedValue { entry, base_value });
             }
-            ancestor = self.tree.inheritance_parent(current);
+            ancestor = engine.tree.inheritance_parent(current);
         }
         None
     }
