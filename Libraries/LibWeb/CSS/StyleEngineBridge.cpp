@@ -1537,9 +1537,12 @@ bool StyleEngine::has_deferred_geometry_transaction() const
     // The submitted pass took the transaction a geometry read deferred with the rest of its inputs, and only a
     // geometry read, which takes the pass back first, defers another one. A layout pass is submitted once the
     // frame's style rounds have applied every transaction, a deferred one included.
+    if (!m_geometry_read_deferred_transaction)
+        return false;
     if (Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(rust_handle()) || layout_pass_is_in_flight())
         return false;
-    return StyleEngineFFI::style_engine_pending_facts(rust_handle()).deferred_geometry_transaction;
+    m_geometry_read_deferred_transaction = StyleEngineFFI::style_engine_pending_facts(rust_handle()).deferred_geometry_transaction;
+    return m_geometry_read_deferred_transaction;
 }
 
 bool StyleEngine::has_deferred_element_style_inputs() const
@@ -1563,6 +1566,7 @@ bool StyleEngine::defer_pending_transaction_for_geometry_read()
     auto facts = StyleEngineFFI::style_engine_pending_facts(rust_handle());
     if (!facts.transaction)
         return !facts.may_affect_layout_geometry;
+    m_geometry_read_deferred_transaction = true;
     return StyleEngineFFI::style_engine_defer_pending_transaction_for_geometry_read(rust_handle());
 }
 
