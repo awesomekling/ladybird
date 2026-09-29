@@ -69,7 +69,7 @@ use crate::layout::layout_node_arena::IntrinsicInlineSizeMeasurement;
 use crate::layout::layout_node_arena::IntrinsicSizeCacheKey;
 use crate::layout::layout_node_arena::IntrinsicSizeCacheKind;
 pub(crate) use crate::layout::layout_node_arena::MainThreadFfiEntry as ArenaMainThreadFfiEntry;
-pub(crate) use crate::layout::layout_node_arena::{HostPayment, OwnerAppliedStyle};
+pub(crate) use crate::layout::layout_node_arena::{HeldPublication, HostPayment, OwnerAppliedStyle};
 pub(crate) use crate::layout::layout_node_arena::{LayoutNodeArena, SLOTS_PER_CHUNK};
 use crate::layout::layout_node_arena::{TableCellMeasurement, TableCellMeasurementKey};
 use crate::layout::node_data::AncestorFact;
