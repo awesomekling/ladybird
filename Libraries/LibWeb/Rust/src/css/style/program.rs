@@ -1310,6 +1310,7 @@ impl StyleSheetProgram {
             || declared
                 .iter()
                 .any(|declared| crate::css::property_metadata::property_may_affect_layout_geometry(declared.property));
+        let moves_layout_geometry = entry.declarations.data.may_affect_layout_geometry != may_affect_layout_geometry;
         entry.declarations = share_rule_declarations(
             RuleDeclarationData {
                 declared_properties: declared,
@@ -1330,6 +1331,11 @@ impl StyleSheetProgram {
             (false, true) => self.rules_declaring_custom_properties += 1,
             (true, false) => self.rules_declaring_custom_properties -= 1,
             _ => {}
+        }
+        // The routing liveness view carries which live routes' rules may move layout geometry. A rule that cannot
+        // decide has no live routes, and moves the routing liveness when it comes to.
+        if moves_layout_geometry && self.rule_can_decide(rule) {
+            self.bump_routing_liveness_version();
         }
         self.bump_rule_sheet_dispatch_version(rule);
     }
