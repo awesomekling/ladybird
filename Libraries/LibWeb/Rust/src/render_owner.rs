@@ -277,7 +277,7 @@ impl ArenaChange {
     }
 
     /// The engine the change links the arena to, which applying it reaches.
-    fn linked_engine(&self) -> Option<crate::layout::StyleEngineLink> {
+    fn linked_engine(&self) -> Option<crate::layout::StyleEngineHold> {
         match self {
             ArenaChange::LinkStyleEngine(link) => Some(link.hold()),
             _ => None,
@@ -371,7 +371,7 @@ enum EngineReach<'a> {
 impl EngineReach<'_> {
     fn reach<T>(
         &mut self,
-        engine: &crate::layout::StyleEngineLink,
+        engine: &crate::layout::StyleEngineHold,
         run: impl FnOnce(&mut crate::css::style::StyleEngine) -> T,
     ) -> T {
         match self {
@@ -509,7 +509,7 @@ impl RenderState {
 
     /// The document's style engine, which the arena links (null before it links one), for what the owner tells of it
     /// without reaching it. The units the owner runs reach it through a hold of the arena's link
-    /// ([`crate::layout::StyleEngineLink::reach_on_owner`]).
+    /// ([`crate::layout::StyleEngineHold::reach_on_owner`]).
     fn style_engine(&self) -> crate::css::style::StyleEngineHandle {
         self.arena.arena().style_engine_handle()
     }
@@ -1191,7 +1191,7 @@ fn with_state<R>(document: DocumentId, operation: impl FnOnce(&mut RenderState) 
 }
 
 /// On the owner thread: a hold of the style engine the arena of `document`'s render state links.
-pub(crate) fn style_engine_of(document: DocumentId) -> Option<crate::layout::StyleEngineLink> {
+pub(crate) fn style_engine_of(document: DocumentId) -> Option<crate::layout::StyleEngineHold> {
     with_state(document, |state| state.arena.arena().hold_style_engine()).flatten()
 }
 

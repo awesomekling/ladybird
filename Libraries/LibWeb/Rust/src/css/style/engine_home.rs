@@ -15,7 +15,7 @@
 //! it too ([`StyleEngineLink`]), until the render owner applies the unlink.
 //!
 //! The engine is reached by the render owner, which holds the document's render state
-//! ([`StyleEngineLink::reach_on_owner`], which only the owner's [`crate::render_owner::Owner`] can call), by a stage
+//! ([`StyleEngineHold::reach_on_owner`], which only the owner's [`crate::render_owner::Owner`] can call), by a stage
 //! it is lent to, or by the thread that owns it with its render state ([`OwnedStyleEngine`]). The main thread waits for
 //! the engine before what it sends the render owner. With the engine home it goes on at once. With the engine lent it
 //! waits for the stage that holds it and nothing else, unless the stage will still owe the frame it runs in its
@@ -245,26 +245,20 @@ impl Drop for StyleEngineHome {
     }
 }
 
-/// The layout arena's link to the style engine it mirrors, which holds the engine's home, and the engine with it, for
-/// as long as the arena links it. The render owner reaches the engine only through the arena, so no engine it reaches
-/// goes away before it applies the unlink, however soon after sending it the main thread destroys its handle.
+/// A hold of a style engine's home, and of the engine with it, for a reach of the owner's to hold for as long as it
+/// reaches the engine. The arena's [`StyleEngineLink`] is one too.
 ///
 /// A stage reaches the engine through the arena only while the document thread, which owns both,
 /// waits for the stage: the tree build walks the style mirror and pins the records it stamps, and
 /// layout and recording look up SVG references and published styles by identity. Those are some
 /// thirty-five engine reads and writes, too many to publish into the arena as rows, so the arena
-/// carries the engine along as a `&mut StyleEngine` would be carried: the link is `Send` exactly
+/// carries the engine along as a `&mut StyleEngine` would be carried: the hold is `Send` exactly
 /// when the engine is.
-pub(crate) struct StyleEngineLink(std::mem::ManuallyDrop<Arc<StyleEngineHome>>);
+pub(crate) struct StyleEngineHold(std::mem::ManuallyDrop<Arc<StyleEngineHome>>);
 
-impl StyleEngineLink {
+impl StyleEngineHold {
     pub(crate) fn handle(&self) -> StyleEngineHandle {
         StyleEngineHandle(Arc::as_ptr(&self.0).cast_mut().cast())
-    }
-
-    /// Another hold of the engine, for a reach of the owner's to hold for as long as it reaches it.
-    pub(crate) fn hold(&self) -> Self {
-        Self(std::mem::ManuallyDrop::new(Arc::clone(&self.0)))
     }
 
     /// As the render `owner`, in a unit it runs with the render state of the engine's document: runs `run` with the
@@ -274,7 +268,7 @@ impl StyleEngineLink {
     ///
     /// # Safety
     ///
-    /// The link must be of a document whose render state the owner holds.
+    /// The hold must be of a document whose render state the owner holds.
     pub(crate) unsafe fn reach_on_owner<T>(
         &self,
         _owner: &crate::render_owner::Owner,
@@ -314,7 +308,35 @@ impl StyleEngineLink {
     }
 }
 
-/// A home whose last hold an arena's link let go of off its document thread, which alone frees the engine: what the
+/// The layout arena's link to the style engine it mirrors, which holds the engine's home, and the engine with it, for
+/// as long as the arena links it. The render owner reaches the engine only through the arena, so no engine it reaches
+/// goes away before it applies the unlink, however soon after sending it the main thread destroys its handle.
+///
+/// Only the arena holds a link, and the owner lets go of it, with the unlink or the arena, once no reach of the engine
+/// is left: nothing reaches the engine again. It frees what it built of the engine then
+/// ([`super::RetainedState::discard_owner_built_tables`]), whichever thread lets go of the engine's home last, so no
+/// document thread is left to free it.
+pub(crate) struct StyleEngineLink(StyleEngineHold);
+
+impl StyleEngineLink {
+    pub(crate) fn handle(&self) -> StyleEngineHandle {
+        self.0.handle()
+    }
+
+    /// Another hold of the engine, for a reach of the owner's to hold for as long as it reaches it.
+    pub(crate) fn hold(&self) -> StyleEngineHold {
+        StyleEngineHold(std::mem::ManuallyDrop::new(Arc::clone(&self.0.0)))
+    }
+}
+
+impl Drop for StyleEngineLink {
+    fn drop(&mut self) {
+        // SAFETY: The arena let go of the link once no reach of the engine was left, and nothing reaches it again.
+        unsafe { &mut *self.0.0.engine.as_ptr() }.discard_owner_built_tables();
+    }
+}
+
+/// A home whose last hold let go of it off its document thread, which alone frees the engine: what the
 /// engine retains is released there.
 struct ReturnedHome(StyleEngineHome);
 
@@ -326,17 +348,13 @@ unsafe impl Send for ReturnedHome {}
 static RETURNED_HOMES: Mutex<Vec<ReturnedHome>> = Mutex::new(Vec::new());
 static HAS_RETURNED_HOMES: AtomicBool = AtomicBool::new(false);
 
-impl Drop for StyleEngineLink {
+impl Drop for StyleEngineHold {
     fn drop(&mut self) {
-        // SAFETY: The link is dropped once, here.
+        // SAFETY: The hold is dropped once, here.
         let home = unsafe { std::mem::ManuallyDrop::take(&mut self.0) };
         if let Some(home) = Arc::into_inner(home)
             && home.thread != std::thread::current().id()
         {
-            // The owner built the engine's prefix caches as it matched, much of what the engine holds, and frees
-            // them itself rather than leave them to the document thread.
-            // SAFETY: Nothing holds the home any more.
-            unsafe { &mut *home.engine.as_ptr() }.discard_retained_prefix_caches();
             RETURNED_HOMES
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -359,11 +377,11 @@ pub(crate) fn free_returned_style_engines() {
     drop(mine);
 }
 
-// SAFETY: The link stands for an exclusive borrow of the engine, which the compiler checks is `Send`. The engine is
+// SAFETY: The hold stands for an exclusive borrow of the engine, which the compiler checks is `Send`. The engine is
 // only reached through it by whoever holds the arena exclusively, while the engine's owning thread waits for that
 // stage, and the handoff orders those accesses. Of the home, only the lock-guarded exchange is shared: dropping the
 // last hold frees the rest once no main-thread hold (the handle, a lend's settlement) is left to reach it.
-unsafe impl Send for StyleEngineLink where StyleEngine: Send {}
+unsafe impl Send for StyleEngineHold where StyleEngine: Send {}
 
 impl StyleEngineHome {
     fn exchange(&self) -> MutexGuard<'_, Exchange> {
@@ -679,7 +697,7 @@ impl StyleEngineHandle {
             reached_by_owning_thread: Cell::new(false),
             beside_pass: Cell::new(false),
         });
-        let link = StyleEngineLink(std::mem::ManuallyDrop::new(Arc::clone(&home)));
+        let link = StyleEngineLink(StyleEngineHold(std::mem::ManuallyDrop::new(Arc::clone(&home))));
         let handle = Self(Arc::into_raw(home).cast_mut().cast());
         crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::LinkStyleEngine(link));
         handle
@@ -957,7 +975,7 @@ mod tests {
         // SAFETY: The handle holds the home, which the test's hold joins.
         let link = unsafe {
             Arc::increment_strong_count(handle.0.cast::<StyleEngineHome>().cast_const());
-            StyleEngineLink(std::mem::ManuallyDrop::new(Arc::from_raw(
+            StyleEngineHold(std::mem::ManuallyDrop::new(Arc::from_raw(
                 handle.0.cast::<StyleEngineHome>().cast_const(),
             )))
         };

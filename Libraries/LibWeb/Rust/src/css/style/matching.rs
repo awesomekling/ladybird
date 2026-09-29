@@ -272,6 +272,18 @@ impl RetainedState {
         caches.answers.release(&mut self.match_answers);
     }
 
+    /// Frees what the render owner built as it matched and cascaded, most of what the engine holds, as the owner lets
+    /// go of the engine for good. None of it holds what only the document thread may release: the custom property
+    /// data, font memos and group payloads stay for the engine's drop there.
+    pub(super) fn discard_owner_built_tables(&mut self) {
+        self.discard_retained_prefix_caches();
+        self.winner_groups.evict();
+        self.facts = ElementFactStore::new();
+        self.match_answers = MatchAnswerCatalog::default();
+        self.specified_values = SpecifiedValues::new();
+        self.program = StyleSheetProgram::new();
+    }
+
     pub(super) fn retain_prefix_states(&mut self) {
         if !self.prefix_caches.borrow_mut().states.retain(&mut self.memory) {
             self.prefix_caches.borrow_mut().states.release_transition_states();

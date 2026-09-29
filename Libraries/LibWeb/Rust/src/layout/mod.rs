@@ -61,7 +61,7 @@ pub(crate) mod update_layout;
 pub mod used_values;
 mod viewport_propagation;
 
-pub(crate) use crate::css::style::engine_home::StyleEngineLink;
+pub(crate) use crate::css::style::engine_home::{StyleEngineHold, StyleEngineLink};
 use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::css::style::fast_hash::FastSet as HashSet;
 use crate::layout::layout_node_arena::IntrinsicBlockSizeMeasurement;

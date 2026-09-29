@@ -1019,7 +1019,7 @@ pub(crate) struct StaleWalkFacts {
     pub(crate) next_dom_sibling: Option<StyleNodeID>,
 }
 
-use crate::css::style::engine_home::StyleEngineLink;
+use crate::css::style::engine_home::{StyleEngineHold, StyleEngineLink};
 
 const _: () = {
     const fn assert_send<T: Send>() {}
@@ -3186,7 +3186,7 @@ impl LayoutNodeArena {
 
     /// Another hold of the style engine the arena links, for a reach of the owner's: whatever the reach unlinks, the
     /// engine stays until the hold goes.
-    pub(crate) fn hold_style_engine(&self) -> Option<StyleEngineLink> {
+    pub(crate) fn hold_style_engine(&self) -> Option<StyleEngineHold> {
         // SAFETY: As for `style_engine_handle`.
         unsafe { &*self.style_engine.as_ptr() }
             .as_ref()
