@@ -66,17 +66,24 @@ impl StyleEngineInputHandle {
     /// Leaves `change` in the engine's home, for whoever reaches the engine next to apply first. On the main thread,
     /// which goes on at once: a change sent beside a style pass waits behind the pass's drain.
     pub(crate) fn send(self, change: StyleChange) {
+        let home = self.0.home();
+        home.follow_owning_thread();
         // SAFETY: On the main thread, which borrows its answers only here.
-        let answers = unsafe { self.0.answers() };
+        let answers = unsafe { &mut *home.answers.get() };
+        // One lock adopts the news left since, and leaves the change.
+        let mut exchange = home.exchange();
+        exchange.adopt_news(answers);
         let leaves = change.leaves(answers.pending);
         answers.follow_sent(&change, leaves);
-        self.0.home().leave_sent((change, leaves));
+        exchange.leave_sent(home.beside_pass.get(), (change, leaves));
     }
 
     /// Leaves `change`, which leaves nothing the main thread's answers follow, in the engine's home without borrowing
     /// the answers.
     pub(super) fn send_unfollowed(self, change: StyleChange) {
-        self.0.home().leave_sent((change, PendingFacts::NONE));
+        let home = self.0.home();
+        home.exchange()
+            .leave_sent(home.beside_pass.get(), (change, PendingFacts::NONE));
     }
 
     /// The drain of the style pass the engine was lent to has ended: what the main thread sent beside the pass goes
@@ -197,6 +204,27 @@ impl Exchange {
     /// The most changes the spare vector keeps room for: a drain of a few thousand rows, which sends a few changes per
     /// row.
     const SPARE_CAPACITY: usize = 16 * 1024;
+
+    /// Has the main thread's `answers` adopt the news whoever reached the engine last left, if any. On the main thread.
+    fn adopt_news(&mut self, answers: &mut HomeAnswers) {
+        if let Some(news) = self.news.take() {
+            // What the main thread sent since the news was left, it follows again over it.
+            answers.adopt(news);
+            for (change, leaves) in self.unapplied.iter().chain(&self.beside_pass) {
+                answers.follow_sent(change, *leaves);
+            }
+        }
+    }
+
+    /// Leaves what the main thread sent: behind the drain of the style pass the engine is lent to, `beside_pass`, or
+    /// for the next reach. On the main thread.
+    fn leave_sent(&mut self, beside_pass: bool, sent: (StyleChange, PendingFacts)) {
+        if beside_pass {
+            self.beside_pass.push(sent);
+        } else {
+            self.unapplied.push(sent);
+        }
+    }
 }
 
 // What the exchange holds moves between the main thread and whoever reaches the engine.
@@ -210,14 +238,13 @@ impl StyleEngineHome {
         self.exchange.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Leaves what the main thread sent in the exchange: behind the drain of a style pass the engine is lent to, or for
-    /// the next reach. On the main thread.
-    fn leave_sent(&self, sent: (StyleChange, PendingFacts)) {
-        let mut exchange = self.exchange();
-        if self.beside_pass.get() {
-            exchange.beside_pass.push(sent);
-        } else {
-            exchange.unapplied.push(sent);
+    /// Has the news whoever reached the engine through the thread that owns it (a unit test's, or the replay tool's)
+    /// left, as that thread's borrow of the engine has ended. On the main thread.
+    fn follow_owning_thread(&self) {
+        if self.reached_by_owning_thread.take() {
+            // SAFETY: The owning thread reaches the engine only through `OwnedStyleEngine::engine`, whose borrow has
+            // ended.
+            self.leave_news(self.take_news(), unsafe { &mut *self.engine.as_ptr() });
         }
     }
 
@@ -607,21 +634,10 @@ impl StyleEngineHandle {
     #[allow(clippy::mut_from_ref)]
     pub(crate) unsafe fn answers<'a>(self) -> &'a mut HomeAnswers {
         let home = self.home();
-        if home.reached_by_owning_thread.take() {
-            // SAFETY: The owning thread reaches the engine only through `OwnedStyleEngine::engine`, whose borrow has
-            // ended.
-            home.leave_news(home.take_news(), unsafe { &mut *home.engine.as_ptr() });
-        }
+        home.follow_owning_thread();
         // SAFETY: Guaranteed by the caller.
         let answers = unsafe { &mut *home.answers.get() };
-        let mut exchange = home.exchange();
-        if let Some(news) = exchange.news.take() {
-            // What the main thread sent since the news was left, it follows again over it.
-            answers.adopt(news);
-            for (change, leaves) in exchange.unapplied.iter().chain(&exchange.beside_pass) {
-                answers.follow_sent(change, *leaves);
-            }
-        }
+        home.exchange().adopt_news(answers);
         answers
     }
 
