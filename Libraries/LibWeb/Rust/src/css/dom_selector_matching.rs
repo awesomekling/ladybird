@@ -23,6 +23,7 @@ use super::ffi_support::FfiUtf16View;
 use super::selector::RustSelector;
 use super::style::compiler::SelectorCompiler;
 use super::style::fast_hash::FastMap as HashMap;
+use super::style::index::DispatchKey;
 use super::style::index::StyleAtomID;
 use super::style::relative_selector::RelativeQueryID;
 use super::style::selector::FeatureTest;
@@ -182,36 +183,18 @@ pub struct DomSelectorProgram {
     names: QueryNames,
     /// Every attribute name the program's selectors compare, in either case: an element's row is read with them.
     attribute_names: Box<[usize]>,
-    /// The roots of the entries that name elements. A query names elements, and a pseudo-element is not one.
+    /// The roots of the entries that can name an element. A query names elements, and a pseudo-element is not one.
     subjects: Box<[SelectorNodeID]>,
+    /// The local names of the attributes every subject requires its element to carry.
+    required_attribute_names: Box<[usize]>,
 }
 
 impl DomSelectorProgram {
-    /// The attribute names an element must carry to match any selector of the query, as bits of the DOM's attribute
-    /// name filter. Each selector's subject names its own, so only those every one of them names are required.
-    fn subject_attribute_names(&self, dom: &FfiDomSelectorCallbacks) -> u64 {
-        let program = &self.program;
-        self.subjects
+    /// The attribute names every match carries, as bits of the DOM's attribute name filter.
+    fn required_attribute_name_bits(&self, dom: &FfiDomSelectorCallbacks) -> u64 {
+        self.required_attribute_names
             .iter()
-            .map(|root| {
-                let subject = match program.node(*root) {
-                    SelectorOp::And { first, count } => program.operands(first, count),
-                    _ => std::slice::from_ref(root),
-                };
-                subject
-                    .iter()
-                    .filter_map(|&operand| match program.node(operand) {
-                        // A name with an uppercase letter compares in one case or the other depending on the element.
-                        SelectorOp::Feature(FeatureTest::Attribute(test)) if test.fold_in_namespace.is_none() => {
-                            Some(self.names.raw(test.name))
-                        }
-                        _ => None,
-                    })
-                    .fold(0, |names, name| {
-                        names | unsafe { (dom.attribute_name_filter_bit)(name) }
-                    })
-            })
-            .fold(u64::MAX, |common, names| common & names)
+            .fold(0, |bits, &name| bits | unsafe { (dom.attribute_name_filter_bit)(name) })
     }
 }
 
@@ -244,6 +227,9 @@ pub unsafe extern "C" fn rust_dom_selector_program_create(
         compiler.finish()
     };
     let mut attribute_names = Vec::new();
+    // An attribute name that folds is carried in one case or the other depending on the element, so the folded form
+    // it dispatches on is not the name every match carries.
+    let mut folding_names = SmallVec::<[StyleAtomID; 4]>::new();
     for index in 0..program.node_count() {
         let Ok(index) = u32::try_from(index) else {
             break;
@@ -254,19 +240,42 @@ pub unsafe extern "C" fn rust_dom_selector_program_create(
                     attribute_names.push(name);
                 }
             }
+            if test.name != test.folded {
+                folding_names.push(test.folded);
+            }
         }
     }
-    let subjects = program
-        .entries()
-        .iter()
-        .filter(|entry| entry.pseudo_element.is_none())
-        .map(|entry| entry.root)
-        .collect();
+    let mut subjects = Vec::new();
+    let mut required_attribute_names: Option<Vec<usize>> = None;
+    for (index, entry) in program.entries().iter().enumerate() {
+        if entry.pseudo_element.is_some() || program.entry_never_matches(entry) {
+            continue;
+        }
+        subjects.push(entry.root);
+        // The keys an entry dispatches on are alternatives, so a lone one is required as well.
+        let dispatch = program.subject_dispatch_keys(index);
+        let required_by_entry = program
+            .subject_required_keys(index)
+            .iter()
+            .chain(dispatch.iter().filter(|_| dispatch.len() == 1))
+            .filter_map(|&key| match key {
+                DispatchKey::AttributeName(name) if !folding_names.contains(&name) => Some(names.raw(name)),
+                _ => None,
+            });
+        match &mut required_attribute_names {
+            None => required_attribute_names = Some(required_by_entry.collect()),
+            Some(required) => {
+                let required_by_entry: SmallVec<[usize; 4]> = required_by_entry.collect();
+                required.retain(|name| required_by_entry.contains(name));
+            }
+        }
+    }
     Box::into_raw(Box::new(DomSelectorProgram {
         program,
         names,
         attribute_names: attribute_names.into_boxed_slice(),
-        subjects,
+        subjects: subjects.into_boxed_slice(),
+        required_attribute_names: required_attribute_names.unwrap_or_default().into_boxed_slice(),
     }))
 }
 
@@ -802,9 +811,13 @@ pub unsafe extern "C" fn rust_dom_selector_query_subtree(
     found: unsafe extern "C" fn(context: *mut c_void, element: *const c_void) -> bool,
 ) {
     let mut query_run = unsafe { DomQuery::new(query) };
+    // A query whose every selector matches nothing needs no walk.
+    if query_run.query.subjects.is_empty() {
+        return;
+    }
     let dom = query_run.evaluator.subject.dom;
-    // A subtree none of whose elements has every attribute name each selector's subject names holds no match.
-    let attribute_names = query_run.evaluator.subject.query.subject_attribute_names(dom);
+    // A subtree none of whose elements carries every attribute name each match carries holds no match.
+    let attribute_names = query_run.query.required_attribute_name_bits(dom);
     let next = |node| optional_node(unsafe { (dom.next_element_in_subtree)(node, root, attribute_names) });
     let mut candidate = next(root);
     while let Some(element) = candidate {
