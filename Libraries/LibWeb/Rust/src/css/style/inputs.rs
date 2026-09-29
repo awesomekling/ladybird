@@ -2063,6 +2063,7 @@ impl StyleEngineState {
                 records_for_drain: None,
                 records_named: Vec::new(),
                 compositions_published: Vec::new(),
+                published_rules: Vec::new(),
                 content_counter_style_verdicts: Default::default(),
                 retired_custom_property_data: Vec::new(),
                 environment_moves_in_flight: HashMap::default(),

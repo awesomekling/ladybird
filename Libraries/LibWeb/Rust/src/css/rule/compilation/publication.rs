@@ -356,7 +356,7 @@ impl Planned {
     }
 
     /// Publishes the step into `engine`, the one the owner answers from, into the sheet `sheet`.
-    pub(crate) fn publish(self, engine: &mut crate::css::style::StyleEngine, sheet: u32) {
+    pub(crate) fn publish(&mut self, engine: &mut crate::css::style::StyleEngine, sheet: u32) {
         match self {
             Self::Compile(rule) => rule.publish(engine, sheet),
             Self::ReplaceSelectors(replaced) => {
@@ -372,7 +372,7 @@ impl Planned {
 }
 
 impl CompiledRule {
-    fn publish(self, engine: &mut crate::css::style::StyleEngine, sheet: u32) {
+    fn publish(&mut self, engine: &mut crate::css::style::StyleEngine, sheet: u32) {
         // The rule it goes before is the one the engine holds by then, as the changes before this one left it.
         let before = match self.before {
             0 => 0,
@@ -380,7 +380,7 @@ impl CompiledRule {
         };
         // Reuse the engine's recorded publication operations so recording and replay see the
         // same semantic inputs as incremental CSSOM edits.
-        let rule_id = match self.kind {
+        let rule_id = match &self.kind {
             CompiledRuleKind::Style {
                 selectors,
                 namespaces,
@@ -389,9 +389,9 @@ impl CompiledRule {
             } => {
                 let namespaces = namespaces.intern(engine);
                 let compiled: Vec<_> = selectors.iter().map(AsRef::as_ref).collect();
-                let id = publish_style_rule(engine, sheet, before, &compiled, namespaces, &scope);
+                let id = publish_style_rule(engine, sheet, before, &compiled, namespaces, scope);
                 publish_rule_declarations(engine, id, self.declarations.as_deref().unwrap());
-                if gated_by_container_query {
+                if *gated_by_container_query {
                     operations::set_rule_gated_by_container_query(engine, id);
                 }
                 id
@@ -400,11 +400,11 @@ impl CompiledRule {
             CompiledRuleKind::CounterStyle => operations::add_counter_style_rule(engine, sheet, before),
             CompiledRuleKind::Function => operations::add_function_rule(engine, sheet, before),
             CompiledRuleKind::Property(name) => {
-                let name = crate::css::style::bridge::intern_native_text(engine, &name).0;
+                let name = crate::css::style::bridge::intern_native_text(engine, name).0;
                 operations::add_property_rule(engine, sheet, before, name)
             }
             CompiledRuleKind::Keyframes(name) => {
-                let name = crate::css::style::bridge::intern_native_text(engine, &name).0;
+                let name = crate::css::style::bridge::intern_native_text(engine, name).0;
                 operations::add_keyframes_rule(engine, sheet, before, name)
             }
         };
@@ -425,7 +425,7 @@ impl CompiledRule {
             engine.register_native_rule(
                 crate::css::style::program::RuleID(rule_id - 1),
                 self.identity,
-                self.declarations,
+                self.declarations.take(),
                 self.source_identity,
                 &self.layer_name,
                 &containers,
@@ -473,9 +473,10 @@ impl CompiledRules {
         }
     }
 
-    /// Publishes the rules into `engine`, on the owner.
-    pub(crate) fn publish(self, engine: &mut crate::css::style::StyleEngine) {
-        for planned in self.plan {
+    /// Publishes the rules into `engine`, on the owner, which leaves what it does not take for the main thread that
+    /// compiled them to free.
+    pub(crate) fn publish(&mut self, engine: &mut crate::css::style::StyleEngine) {
+        for planned in &mut self.plan {
             planned.publish(engine, self.sheet);
         }
     }

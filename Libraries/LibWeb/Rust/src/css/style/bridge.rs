@@ -4668,6 +4668,9 @@ pub(crate) struct EngineNews {
     pseudo_element_environments_named: Vec<((StyleNodeID, u8), Option<NamedEnvironment>)>,
     anchored: Vec<(StyleNodeID, bool)>,
     rule_ids: Vec<(u64, Option<RuleID>)>,
+    /// The rules the main thread compiled that the engine published, which the main thread frees as it adopts the news.
+    #[expect(clippy::vec_box, reason = "the rules go back boxed as they came")]
+    published_rules: Vec<Box<crate::css::rule::compilation::CompiledRules>>,
     transition_steps: Option<super::transition_step::TransitionStepTables>,
     animation_plans: Vec<((StyleNodeID, u8), Option<AnimationPlanForHost>)>,
 }
@@ -4741,6 +4744,7 @@ impl EngineNews {
         self.records_named.append(&mut engine.host.records_named);
         self.compositions_published
             .append(&mut engine.host.compositions_published);
+        self.published_rules.append(&mut engine.host.published_rules);
         if let Some(steps) = engine.transition_steps_moved() {
             self.transition_steps = Some(steps);
         }
