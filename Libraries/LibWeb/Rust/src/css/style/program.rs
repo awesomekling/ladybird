@@ -293,6 +293,9 @@ struct RuleDeclarationData {
     /// Whether a declaration of a non-inherited property is written `inherit`, or was written with
     /// a value the rule arrived without: only such a rule can make a winner state inherit one.
     may_inherit_a_non_inherited_property: bool,
+    /// Whether the rule declares a property that may move layout geometry, or a custom property, whose uses are not
+    /// known until it resolves.
+    may_affect_layout_geometry: bool,
     /// The custom properties the rule declares, in declaration order, and the values they were
     /// written with, parallel to them: a custom property resolves from its written spelling.
     custom_declarations: Vec<CustomDeclaration>,
@@ -1303,6 +1306,10 @@ impl StyleSheetProgram {
                         if *keyword == crate::css::style_compute::keyword::INHERIT)
                 })
         });
+        let may_affect_layout_geometry = !custom_declarations.is_empty()
+            || declared
+                .iter()
+                .any(|declared| crate::css::property_metadata::property_may_affect_layout_geometry(declared.property));
         entry.declarations = share_rule_declarations(
             RuleDeclarationData {
                 declared_properties: declared,
@@ -1310,6 +1317,7 @@ impl StyleSheetProgram {
                 written_value_checks,
                 written_values_add_no_state_facts,
                 may_inherit_a_non_inherited_property,
+                may_affect_layout_geometry,
                 custom_declarations,
                 custom_written_values,
             },
@@ -1456,6 +1464,11 @@ impl StyleSheetProgram {
             .declarations
             .data
             .may_inherit_a_non_inherited_property
+    }
+
+    /// Whether a match of the rule may move layout geometry: it declares a property that may, or a custom property.
+    pub(super) fn rule_may_affect_layout_geometry(&self, rule: RuleID) -> bool {
+        self.rules[rule.0 as usize].declarations.data.may_affect_layout_geometry
     }
 
     pub(super) fn written_value_checks(&self, rule: RuleID, index: usize) -> super::publication::WrittenValueChecks {
