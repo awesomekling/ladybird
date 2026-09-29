@@ -1533,21 +1533,32 @@ static bool style_record_is_unchanged(CSS::StyleEngine::StyleRecordDelta const& 
     return !!delta.old_style_record && delta.old_style_record == delta.new_style_record;
 }
 
-// What moving the element from the record `old_record` to `new_record` damages, read from the two records and what the
-// element's place in the tree adds, as the engine answers it.
-static u32 element_record_damage(Element const& element, CSS::PublishedStyleRecord const* old_record, CSS::PublishedStyleRecord const& new_record)
+// What the element's place in the tree adds to what moving it, or one of its pseudo-elements, from one record to
+// another damages.
+static CSS::StyleEngineFFI::FfiElementDamageFacts element_damage_facts(Element const& element)
 {
     bool const is_svg_graphics_element = is<SVG::SVGGraphicsElement>(element);
     auto const* parent = element.parent_or_shadow_host_element();
     // https://drafts.csswg.org/css-overflow-3/#overflow-propagation
     bool const propagates_overflow_to_viewport = element.is_document_element()
         || (parent && parent->is_document_element() && parent->is_html_html_element() && parent->first_child_of_type<HTML::HTMLBodyElement>() == &element);
-    CSS::StyleEngineFFI::FfiElementDamageFacts const facts {
+    return {
         .is_svg_graphics_element = is_svg_graphics_element,
         .folds_transform_into_svg_container_layout = is_svg_graphics_element && parent && is<SVG::SVGElement>(*parent) && !parent->is_svg_foreign_object_element(),
         .propagates_overflow_to_viewport = propagates_overflow_to_viewport,
     };
-    return CSS::StyleEngineFFI::published_style_record_damage(old_record ? old_record->handle() : nullptr, new_record.handle(), facts);
+}
+
+static void const* handle_of(CSS::PublishedStyleRecord const* style_record)
+{
+    return style_record ? style_record->handle() : nullptr;
+}
+
+// What moving the element from the record `old_record` to `new_record` damages, read from the two records and what the
+// element's place in the tree adds, as the engine answers it.
+static u32 element_record_damage(Element const& element, CSS::PublishedStyleRecord const* old_record, CSS::PublishedStyleRecord const& new_record)
+{
+    return CSS::StyleEngineFFI::published_style_record_damage(handle_of(old_record), new_record.handle(), element_damage_facts(element));
 }
 
 static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidation_with_cache(CSS::StyleDrainScope const& scope, CSS::ComputedValues const& new_computed_values, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element, CSS::StyleEngine::StyleRecordDelta const& style_record_delta, CSS::PublishedStyleRecord const* old_record, CSS::PublishedStyleRecord const& new_record, Optional<u32> answered_damage = {})
@@ -1653,15 +1664,14 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
                 counter_styles_changed = !counter_style_invalidation.is_none();
             }
         }
-        auto record_damage = [&](bool with_counter_styles_changed) {
-            return CSS::StyleEngineFFI::style_engine_pseudo_element_record_damage(scope,
-                scope.engine().rust_handle(),
-                style_node_id().value(),
+        // The records the move reads: the pseudo-element's until now, the one it moves to, and its element's.
+        auto record_damage = [&, old_pseudo_element_record = RefPtr { published_style_record(pseudo_element) }](bool with_counter_styles_changed) {
+            return CSS::StyleEngineFFI::published_pseudo_element_record_damage(handle_of(old_pseudo_element_record),
+                handle_of(engine_pseudo_element_record),
+                handle_of(published_style_record()),
                 to_underlying(pseudo_element),
-                old_style_record.value(),
-                engine_record->value(),
-                style_record_identity().value(),
-                with_counter_styles_changed);
+                with_counter_styles_changed,
+                element_damage_facts(*this));
         };
         // The engine answered the record with what the move from the pseudo-element record it names
         // damages, beside the originating record it names.

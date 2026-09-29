@@ -308,7 +308,6 @@
     "style_engine_native_container_effect",
     "style_engine_native_container_effect_count",
     "style_engine_native_container_effects_release",
-    "style_engine_pseudo_element_record_damage",
     "style_engine_publish_anchor_names",
     "style_engine_record_transition_baseline",
     "style_engine_register_anchor_names",
