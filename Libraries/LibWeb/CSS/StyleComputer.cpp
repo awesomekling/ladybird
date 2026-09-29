@@ -818,6 +818,13 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     ASSERT(decided_names_each_property);
     if (!decided_names_each_property)
         decided = nullptr;
+    // OPTIMIZATION: Without a transition or a provisional state to end, the only action a step can take is a start. A
+    //               `transition: all` names every longhand, and most restyles of such an element start nothing.
+    if (decided && existing_property_ids.is_empty() && !has_provisional_transition_states(abstract_element)) {
+        ReadonlySpan<StyleEngineFFI::FfiTransitionStepAction> actions { decided->actions, decided->action_count };
+        if (all_of(actions, [](auto const& action) { return static_cast<StyleValueFFI::FfiTransitionActionKind>(action.kind) == StyleValueFFI::FfiTransitionActionKind::None; }))
+            return {};
+    }
 
     if (!decided) {
         if (auto baseline = scope.engine().transition_baseline(scope, abstract_element.element().style_node_id(), pseudo_element_to_ffi(abstract_element.pseudo_element())); baseline != 0)
