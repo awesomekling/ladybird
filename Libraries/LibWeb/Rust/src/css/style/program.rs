@@ -372,6 +372,9 @@ pub struct StyleSheetProgram {
     /// How many rules declare a custom property. A document without any resolves no environment
     /// of its own, and a cascade need not look.
     rules_declaring_custom_properties: usize,
+    /// How many rules sit behind a container query. A document without any answers that no rule
+    /// is gated without reading the rule's record.
+    rules_gated_by_container_query: usize,
     rule_versions: RuleVersionTable,
     semantic_declarations: HashMap<u64, Vec<SemanticDeclarationEntry>>,
     next_semantic_declaration_id: u32,
@@ -435,6 +438,7 @@ impl StyleSheetProgram {
             rules: RuleRecordTable::default(),
             rule_children: Vec::new(),
             rules_declaring_custom_properties: 0,
+            rules_gated_by_container_query: 0,
             rule_versions: RuleVersionTable::default(),
             semantic_declarations: HashMap::default(),
             next_semantic_declaration_id: 1,
@@ -1249,12 +1253,17 @@ impl StyleSheetProgram {
             return;
         }
         self.rules[rule.0 as usize].gated_by_container_query = gated;
+        if gated {
+            self.rules_gated_by_container_query += 1;
+        } else {
+            self.rules_gated_by_container_query -= 1;
+        }
         self.bump_rule_sheet_dispatch_version(rule);
     }
 
     #[must_use]
     pub fn rule_is_gated_by_container_query(&self, rule: RuleID) -> bool {
-        self.rules[rule.0 as usize].gated_by_container_query
+        self.rules_gated_by_container_query != 0 && self.rules[rule.0 as usize].gated_by_container_query
     }
 
     /// Record which longhand properties a rule declares, and which of them it marks important.
