@@ -34,7 +34,6 @@ use super::selector::NthPosition;
 use super::selector::SelectorNodeID;
 use super::selector::SelectorOp;
 use super::selector::SelectorProgram;
-use super::selector::TagTest;
 use super::selector::ValueStateTestKind;
 use super::selector::attribute_value_matches;
 use super::selector::matches_an_plus_b;
@@ -118,6 +117,8 @@ pub trait SelectorTree: Copy {
     fn previous_sibling(self, node: Self::Node) -> Option<Self::Node>;
     fn next_sibling(self, node: Self::Node) -> Option<Self::Node>;
     fn first_child(self, parent: Self::Node) -> Option<Self::Node>;
+    /// The first of a node's inclusive siblings, which is the node itself when it has none.
+    fn first_sibling(self, node: Self::Node) -> Self::Node;
 
     /// The parent in the tree as it stands now. Scope, slot and relational walks read it even where
     /// the combinators read an earlier state of the tree.
@@ -149,6 +150,69 @@ pub trait SelectorTree: Copy {
     }
 }
 
+/// What a feature test reads of one element. Names are atoms of the program's atom space.
+pub trait ElementFeatures {
+    type Attribute: Copy;
+
+    fn local_name_is(&self, name: StyleAtomID) -> bool;
+    /// `NONE` names the null namespace.
+    fn namespace_is(&self, namespace: StyleAtomID) -> bool;
+    fn has_id(&self, id: StyleAtomID) -> bool;
+    fn has_class(&self, class: StyleAtomID) -> bool;
+    /// The attributes with the qualified name `name`, or with the local name `name` in any namespace.
+    fn attributes_named(&self, name: StyleAtomID, any_namespace: bool) -> impl Iterator<Item = Self::Attribute> + '_;
+}
+
+/// Whether an element passes one feature test. `value_matches` compares an attribute's value with the one the test
+/// names, ASCII case-insensitively when it is told to.
+pub fn matches_feature<E: ElementFeatures>(
+    element: &E,
+    test: FeatureTest,
+    mut value_matches: impl FnMut(AttributeTest, E::Attribute, bool) -> bool,
+) -> bool {
+    // https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
+    // When comparing a CSS element type selector to the names of HTML elements in HTML documents, the CSS element type
+    // selector must first be converted to ASCII lowercase. The same selector when compared to other elements must be
+    // compared according to its original case. In both cases, to match, the values must be identical to each other
+    // (and therefore the comparison is case sensitive).
+    //
+    // When comparing the name part of a CSS attribute selector to the names of attributes on HTML elements in HTML
+    // documents, the name part of the CSS attribute selector must first be converted to ASCII lowercase. The same
+    // selector when compared to other attributes must be compared according to its original case. In both cases, the
+    // comparison is case-sensitive.
+    //
+    // NB: A test's folding namespace is the HTML namespace in an HTML document, and none anywhere else.
+    let folds =
+        |fold_in_namespace: StyleAtomID| !fold_in_namespace.is_none() && element.namespace_is(fold_in_namespace);
+    match test {
+        FeatureTest::AnyElement => true,
+        FeatureTest::Namespace(NamespaceTest::None) => element.namespace_is(StyleAtomID::NONE),
+        FeatureTest::Namespace(NamespaceTest::Named(namespace)) => element.namespace_is(namespace),
+        FeatureTest::TagName(tag) => element.local_name_is(match folds(tag.fold_in_namespace) {
+            true => tag.folded,
+            false => tag.written,
+        }),
+        FeatureTest::Id(id) => element.has_id(id),
+        FeatureTest::Class(class) => element.has_class(class),
+        FeatureTest::Attribute(test) => {
+            let insensitive = match test.case {
+                AttributeCase::Sensitive => false,
+                AttributeCase::Insensitive => true,
+                AttributeCase::InsensitiveForNamespace(namespace) => element.namespace_is(namespace),
+            };
+            let name = match folds(test.fold_in_namespace) {
+                true => test.folded,
+                false => test.name,
+            };
+            // `[*|x]` names one attribute per namespace the element carries `x` in, and the test holds when any of
+            // them satisfies it.
+            element
+                .attributes_named(name, test.any_namespace)
+                .any(|attribute| value_matches(test, attribute, insensitive))
+        }
+    }
+}
+
 /// The elements a selector program is evaluated against, and their facts.
 ///
 /// Facts are read through a row, which a subject fetches once per element and the evaluator then
@@ -159,6 +223,9 @@ pub trait SelectorSubject {
     type Tree: SelectorTree<Node = Self::Node>;
     type Row: Copy;
     type Attribute: Copy;
+    type Features<'s>: ElementFeatures<Attribute = Self::Attribute>
+    where
+        Self: 's;
     type Incomplete: ScanIncomplete<Self::Node>;
     type Counters: CounterSink;
     /// Where a subject keeps one sibling sequence's preceding-sibling progress.
@@ -167,15 +234,9 @@ pub trait SelectorSubject {
     fn tree(&self) -> Self::Tree;
 
     fn row(&mut self, node: Self::Node) -> Result<Self::Row, Self::Incomplete>;
-    fn local_name_is(&self, row: Self::Row, name: StyleAtomID) -> bool;
-    /// `NONE` names the null namespace.
-    fn namespace_is(&self, row: Self::Row, namespace: StyleAtomID) -> bool;
-    fn has_id(&self, row: Self::Row, id: StyleAtomID) -> bool;
-    fn has_class(&self, row: Self::Row, class: StyleAtomID) -> bool;
+    fn features(&self, row: Self::Row) -> Self::Features<'_>;
     /// Whether two elements have the same local name and namespace.
     fn same_type(&self, row: Self::Row, other: Self::Row) -> bool;
-    /// The attributes an attribute test names.
-    fn attributes(&self, row: Self::Row, test: AttributeTest) -> impl Iterator<Item = Self::Attribute> + '_;
     /// An attribute's value as an atom, or `NONE` where the subject interned none.
     fn attribute_value_atom(&self, attribute: Self::Attribute) -> StyleAtomID;
     fn attribute_value_text(&self, attribute: Self::Attribute) -> Option<TokenizerInput<'_>>;
@@ -188,6 +249,8 @@ pub trait SelectorSubject {
     fn heading_level(&self, row: Self::Row) -> u8;
     /// Whether no child of the element keeps it from being `:empty`.
     fn is_empty(&mut self, node: Self::Node) -> Result<bool, Self::Incomplete>;
+    /// Whether the element is the root of its document.
+    fn is_root(&self, node: Self::Node) -> bool;
 
     /// Whether the element is the one named by identity.
     fn is_node(&self, _node: Self::Node, _named: StyleNodeID) -> bool {
@@ -588,19 +651,18 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
         counters: &mut S::Counters,
     ) -> Answer<S> {
         let tree = self.subject.tree();
-        let Some(parent) = tree.parent(node) else {
-            return Ok(false);
-        };
-        let remembered = match self.subject.remembers_relations(&self.bindings) {
-            true => self.subject.preceding_sibling_prefix(program, relation, parent),
-            false => None,
+        let first_sibling = tree.first_sibling(node);
+        // Only a sibling sequence with a parent has somewhere to keep its progress.
+        let remembered = match (self.subject.remembers_relations(&self.bindings), tree.parent(node)) {
+            (true, Some(parent)) => self.subject.preceding_sibling_prefix(program, relation, parent),
+            _ => None,
         };
         let Some(RememberedPrefix {
             slot,
             prefix: cached_prefix,
         }) = remembered
         else {
-            let mut sibling = tree.first_child(parent);
+            let mut sibling = Some(first_sibling);
             while let Some(current) = sibling {
                 if current == node {
                     return Ok(false);
@@ -622,7 +684,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
             return Ok(prefix.answer);
         }
         let mut prefix = cached_prefix.unwrap_or(PrecedingSiblingPrefix {
-            next: tree.first_child(parent),
+            next: Some(first_sibling),
             answer: false,
         });
         let mut retried_from_start = false;
@@ -646,7 +708,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
                     return Ok(false);
                 }
                 prefix = PrecedingSiblingPrefix {
-                    next: tree.first_child(parent),
+                    next: Some(first_sibling),
                     answer: false,
                 };
                 incomplete = None;
@@ -899,7 +961,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
             }
             SelectorOp::Root => {
                 counters.bump(Counter::StructuralTests);
-                Ok(tree.parent(node).is_none())
+                Ok(self.subject.is_root(node))
             }
             SelectorOp::InScope {
                 root,
@@ -1065,40 +1127,16 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
         }
     }
 
-    fn matches_tag(&self, row: S::Row, tag: TagTest) -> bool {
-        if self.subject.local_name_is(row, tag.written) {
-            return true;
-        }
-        !tag.fold_in_namespace.is_none()
-            && self.subject.namespace_is(row, tag.fold_in_namespace)
-            && self.subject.local_name_is(row, tag.folded)
-    }
-
     fn matches_feature(&mut self, program: &SelectorProgram, test: FeatureTest, node: S::Node) -> Answer<S> {
         if test == FeatureTest::AnyElement {
             return Ok(true);
         }
         let row = self.subject.row(node)?;
-        Ok(match test {
-            FeatureTest::AnyElement => true,
-            FeatureTest::Namespace(NamespaceTest::None) => self.subject.namespace_is(row, StyleAtomID::NONE),
-            FeatureTest::Namespace(NamespaceTest::Named(namespace)) => self.subject.namespace_is(row, namespace),
-            FeatureTest::TagName(tag) => self.matches_tag(row, tag),
-            FeatureTest::Id(id) => self.subject.has_id(row, id),
-            FeatureTest::Class(class) => self.subject.has_class(row, class),
-            FeatureTest::Attribute(test) => {
-                let insensitive = match test.case {
-                    AttributeCase::Sensitive => false,
-                    AttributeCase::Insensitive => true,
-                    AttributeCase::InsensitiveForNamespace(namespace) => self.subject.namespace_is(row, namespace),
-                };
-                // `[*|x]` names one attribute per namespace the element carries `x` in, and the
-                // test holds when any of them satisfies it.
-                self.subject
-                    .attributes(row, test)
-                    .any(|attribute| self.matches_attribute_value(program, test, attribute, insensitive))
-            }
-        })
+        Ok(matches_feature(
+            &self.subject.features(row),
+            test,
+            |test, attribute, insensitive| self.matches_attribute_value(program, test, attribute, insensitive),
+        ))
     }
 
     fn matches_attribute_value(
@@ -1150,20 +1188,16 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
         };
 
         // https://drafts.csswg.org/selectors/#child-index
-        // A positional test counts the subject among its inclusive siblings, and the root of a tree
-        // has none - which makes it the one and only element of its sequence rather than absent from
-        // one. `:first-child`, `:last-child` and `:only-child` all name it.
-        let tree = self.subject.tree();
-        let Some(parent) = tree.parent(node) else {
-            if !self.counts_in_sequence(program, position, subject_type, node, counters)? {
-                return Ok(false);
-            }
-            return Ok(matches_an_plus_b(position.step, position.offset, 1));
-        };
+        // A positional test counts the subject among its inclusive siblings. The root of a tree has none, which makes
+        // it the one and only element of its sequence rather than absent from one: `:first-child`, `:last-child` and
+        // `:only-child` all name it. The children of a document or a fragment have no parent element, but they are
+        // siblings all the same.
+        //
         // The subject has to be one of the counted siblings, or it has no position in the sequence.
         if !self.counts_in_sequence(program, position, subject_type, node, counters)? {
             return Ok(false);
         }
+        let tree = self.subject.tree();
 
         // Count towards the near end only. The whole sequence is never needed, and a sequence of
         // thousands of siblings is what a long list or a table is, so materializing one per test
@@ -1172,7 +1206,7 @@ impl<S: SelectorSubject> SelectorEvaluator<S> {
         let bounded = position.step == 0;
         let mut current = match position.from_end {
             true => tree.next_sibling(node),
-            false => tree.first_child(parent),
+            false => Some(tree.first_sibling(node)),
         };
         while let Some(sibling) = current {
             if !position.from_end && sibling == node {
