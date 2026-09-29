@@ -1324,6 +1324,7 @@ impl LayoutFrame {
         let frame = std::ptr::from_mut(self);
         let job = std::cell::Cell::new(Some(job));
         let outcome = crate::stage_thread::wait_for_owner(
+            crate::render_owner::LockstepProof::layout_update(),
             |reply| crate::render_owner::ToOwner::Layout {
                 document,
                 job: Box::new(OwnerFrameJob {

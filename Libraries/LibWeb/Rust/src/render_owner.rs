@@ -63,12 +63,12 @@ impl DocumentId {
     }
 }
 
-/// The capability to make the document thread wait for the owner, for one question. A script API that must return a
-/// current answer (getComputedStyle, an element's geometry, hit testing, innerText and the like) mints one at the host
-/// entry it calls, and every read current as of the changes sent takes it by value: one ask per call of the API.
-/// Internal code (drains, style and layout updates, painting, event dispatch) holds none, so it cannot ask: it reads
-/// the rows the owner published last ([`crate::layout::row_reads::FrameRows`]) and what it sent ahead of them, and waits
-/// for the owner otherwise only with a [`LockstepProof`].
+/// The one wait of a script API call that needs a current answer (getComputedStyle, an element's geometry, hit testing,
+/// innerText and the like). The host entry the API calls mints it, and the wait takes it by value, so the call waits for
+/// the owner once with it: it is neither `Clone` nor `Copy`, and stays on the document thread. Internal code
+/// (drains, painting, event dispatch) holds none: it reads the rows the owner published last
+/// ([`crate::layout::row_reads::FrameRows`]) and what it sent ahead of them, and waits for the owner otherwise only with
+/// a [`LockstepProof`].
 pub(crate) struct ScriptForcedRead {
     _not_send: std::marker::PhantomData<*const ()>,
 }
@@ -85,10 +85,9 @@ impl ScriptForcedRead {
     }
 }
 
-/// The right of a main thread that cannot go on without the owner to wait for it outside a script's forced read: a
-/// write whose payment the host makes before it goes on, a user's input that reads the text it selects, a recording the
-/// main thread makes itself. Each has a constructor of its own, so the waits internal code makes are these and no
-/// others; everything else reads what the owner published ([`crate::layout::row_reads::FrameRows`]).
+/// The right of a main thread that cannot go on without the owner to wait for it outside a script's forced read. Each
+/// reason has a constructor of its own, so the waits internal code makes are these and no others; everything else reads
+/// what the owner published ([`crate::layout::row_reads::FrameRows`]).
 pub(crate) struct LockstepProof {
     _not_send: std::marker::PhantomData<*const ()>,
 }
@@ -111,9 +110,41 @@ impl LockstepProof {
         Self::new()
     }
 
+    /// A user's input (a wheel or key scroll, an event's target), which reads the boxes the owner laid out.
+    pub(crate) const fn input_reads_boxes() -> Self {
+        Self::new()
+    }
+
     /// A recording the main thread makes itself, which predicts the vector images it paints from the damage only the
-    /// owner holds.
+    /// owner holds, or reads what the owner's last recording left.
     pub(crate) const fn recording_on_main() -> Self {
+        Self::new()
+    }
+
+    /// A paint step the host runs over the owner's paint state: the visual contexts, the scroll state, the rendering
+    /// preparation after a layout, the compositor's animations and the SVG paint resources.
+    pub(crate) const fn host_paint_step() -> Self {
+        Self::new()
+    }
+
+    /// A door of the style engine the host's style code calls in the middle of its own steps (a match, a record, a
+    /// sample, a transition's decision), which only the engine answers.
+    pub(crate) const fn engine_door() -> Self {
+        Self::new()
+    }
+
+    /// The snap areas of a scroll container, which scroll snapping reads once a scroll ends.
+    pub(crate) const fn scroll_snaps() -> Self {
+        Self::new()
+    }
+
+    /// A clean read's query snapshot, which holds the rows as of every change the document thread sent.
+    pub(crate) const fn query_snapshot() -> Self {
+        Self::new()
+    }
+
+    /// A job of a style or layout update.
+    pub(crate) const fn layout_update() -> Self {
         Self::new()
     }
 }
@@ -124,7 +155,8 @@ mod sealed_wait {
     impl Sealed for super::LockstepProof {}
 }
 
-/// What lets the main thread wait for the owner: a script's forced read, or a [`LockstepProof`].
+/// What lets the main thread wait for the owner, taken by value by every wait: a script's forced read, or a
+/// [`LockstepProof`].
 pub(crate) trait OwnerWait: sealed_wait::Sealed {}
 impl OwnerWait for ScriptForcedRead {}
 impl OwnerWait for LockstepProof {}
@@ -1431,7 +1463,7 @@ pub(crate) fn recall_rendering_update(document: DocumentId) {
 /// # Safety
 ///
 /// `arena` must be the live arena of `document`, which no stage the document thread submitted owns.
-pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query, _wait: impl OwnerWait) -> Answer {
+pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query, wait: impl OwnerWait) -> Answer {
     if !document.is_valid() {
         // The owner holds no state of an arena of no document (a unit test's): the thread that holds it answers.
         // SAFETY: Guaranteed by the caller.
@@ -1441,6 +1473,7 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query,
         });
     }
     let answer = crate::stage_thread::wait_for_owner(
+        wait,
         |reply| ToOwner::Ask { document, query, reply },
         |owner| {
             if let Some(answer) =
@@ -1476,7 +1509,7 @@ pub(crate) unsafe fn ask_about(arena: *mut c_void, query: Query, wait: impl Owne
 /// Asks the owner the engine query `query` about `document` and waits for the answer, as of every change the calling
 /// thread sent before. Only the owner answers it: a run a test holds serves it between the run's units. The thread that
 /// holds the document's render state (the owner) answers it right here.
-pub(crate) fn ask_engine(document: DocumentId, query: Query) -> Answer {
+pub(crate) fn ask_engine(document: DocumentId, query: Query, wait: impl OwnerWait) -> Answer {
     if let Some(answer) = STATES.with_borrow_mut(|states| {
         states
             .get_mut(&document)
@@ -1484,7 +1517,7 @@ pub(crate) fn ask_engine(document: DocumentId, query: Query) -> Answer {
     }) {
         return answer;
     }
-    let answer = crate::stage_thread::wait_for_owner_thread(|reply| ToOwner::Ask { document, query, reply });
+    let answer = crate::stage_thread::wait_for_owner_thread(wait, |reply| ToOwner::Ask { document, query, reply });
     match answer {
         Some(outcome) => {
             debug_assert!(outcome.is_ok(), "the render owner panicked answering {query:?}");
@@ -1499,8 +1532,9 @@ pub(crate) fn ask_engine(document: DocumentId, query: Query) -> Answer {
 
 /// Asks the owner `query` about `document` and waits for the answer, as [`ask`] does, for a document thread that
 /// names no arena: where the owner cannot answer it, the question is left to the host.
-pub(crate) fn ask_owner(document: DocumentId, query: Query, _wait: impl OwnerWait) -> Answer {
+pub(crate) fn ask_owner(document: DocumentId, query: Query, wait: impl OwnerWait) -> Answer {
     let answer = crate::stage_thread::wait_for_owner(
+        wait,
         |reply| ToOwner::Ask { document, query, reply },
         |owner| {
             STATES
@@ -1611,7 +1645,7 @@ pub(crate) fn run_style_transaction(
     if STATES.with_borrow(|states| states.contains_key(&document)) {
         return run_style_job_on_owner(&Owner::here(), document, transaction, then_layout);
     }
-    let ran = crate::stage_thread::wait_for_owner_thread(|reply| ToOwner::Style {
+    let ran = crate::stage_thread::wait_for_owner_thread(LockstepProof::layout_update(), |reply| ToOwner::Style {
         document,
         transaction,
         then_layout,
