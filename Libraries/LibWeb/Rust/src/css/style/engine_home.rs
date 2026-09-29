@@ -615,6 +615,11 @@ impl StyleEngineHandle {
         self.home().exchange().news.is_some()
     }
 
+    /// Whether the main thread sent the engine changes no reach has applied yet.
+    pub(crate) fn has_unapplied_changes(self) -> bool {
+        !self.home().exchange().unapplied.is_empty()
+    }
+
     /// The document whose render state's arena links the engine, whose render owner owns it.
     pub(crate) fn document(self) -> crate::render_owner::DocumentId {
         self.home().document
@@ -836,6 +841,42 @@ mod tests {
             matches!(lend, HostPinsLend::Lent(_)),
             "the pins are lent again once the reach ends"
         );
+    }
+
+    #[test]
+    fn the_owner_applies_what_the_main_thread_sent_its_engine_alone_as_it_idles() {
+        use crate::render_owner::{ArenaChange, TakeIn, create_document, destroy_document, send_arena_change};
+        let wait_until = |done: &dyn Fn() -> bool| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !done() && std::time::Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            done()
+        };
+        let (document, arena) = create_document(TakeIn::AsTheOwnerIdles);
+        // SAFETY: The owner keeps the arena until the document is destroyed below.
+        let handle = unsafe {
+            StyleEngineHandle::create(
+                Box::new(StyleEngine::new(super::super::memory::DeviceClass::ForegroundDesktop)),
+                arena,
+            )
+        };
+        // The owner linked the engine as it took the arena's change in, and left news of it.
+        assert!(wait_until(&|| handle.has_unadopted_news()));
+        // A change to the engine alone, with no arena change beside it, which adopts that news.
+        // SAFETY: The engine is live.
+        unsafe {
+            super::super::bridge::style_engine_set_fold_id_and_class_name_case(StyleEngineInputHandle(handle), true)
+        };
+        assert!(handle.has_unapplied_changes());
+        // Another document's change wakes the owner, which takes the engine's change in as it idles.
+        let (other, _) = create_document(TakeIn::AsTheOwnerIdles);
+        send_arena_change(other, ArenaChange::BeginLayoutTrace);
+        assert!(wait_until(&|| !handle.has_unapplied_changes()));
+        destroy_document(other);
+        destroy_document(document);
+        // SAFETY: The handle came from `StyleEngineHandle::create`, and goes with this.
+        unsafe { super::super::bridge::style_engine_destroy(handle) };
     }
 
     #[test]
