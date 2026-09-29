@@ -207,7 +207,11 @@ static void apply_layout_tree_rebuild_after_style_change(DOM::Element& element, 
 void StyleEffectDrain::install(DOM::Document& document, Function<void(StyleDrainScope const&)> const& install)
 {
     auto& style_engine = document.render_inputs_for_write().style_engine();
-    // Declared first, so the install's marks are written through once the rest of the drain has ended.
+    // Declared first, so what the drain writes of the layout arena, row by row and as its marks are written through,
+    // goes to the render owner as one message once all of it has been written.
+    Layout::RustFFI::render_owner_open_change_batch();
+    ScopeGuard send_change_batch = [] { Layout::RustFFI::render_owner_close_change_batch(); };
+    // Declared next, so the install's marks are written through once the rest of the drain has ended.
     DOM::InvalidationJournal::WriteThroughDeferral const write_through_deferral { document.invalidation_journal() };
     StyleDrainScope const scope { style_engine };
     style_engine.enter_effect_drain(scope);

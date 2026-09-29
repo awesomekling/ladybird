@@ -197,6 +197,7 @@ RENDER_STAGE_ALLOWED = {
             "render_owner.rs:RECALLED",
             "render_owner.rs:SENT_THROUGH",
             "render_owner.rs:TAKEN_IN_THROUGH",
+            "render_owner.rs:HELD",
             "render_owner.rs:FRAME_KEYS",
             "render_owner.rs:SPARE",
             "render_owner.rs:ASKED",
