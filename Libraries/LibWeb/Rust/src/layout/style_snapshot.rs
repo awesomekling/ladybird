@@ -42,8 +42,8 @@ pub struct FfiLayoutStyleScrollState {
     pub scrolled: u8,
 }
 
-/// The rows of a generation, by element index: only elements are containers, which are all that
-/// style asks layout about, and nearly every element has a box.
+/// The rows of a generation, by element index: style asks layout only about the size containers
+/// among elements, and about the scroll state of scroll-state containers.
 #[derive(Clone, Default)]
 struct SnapshotGeneration {
     layout_commit_generation: u64,
@@ -118,6 +118,13 @@ pub(crate) struct LayoutStyleSnapshotCommit {
 }
 
 impl LayoutStyleSnapshotCommit {
+    /// Whether the generation published when the commit began has a row for `node`.
+    fn published_names(&self, node: StyleNodeID) -> bool {
+        self.published
+            .as_ref()
+            .is_some_and(|published| published.row(node).is_some())
+    }
+
     pub(crate) fn push(
         &mut self,
         node: StyleNodeID,
@@ -276,13 +283,23 @@ impl LayoutNodeArena {
         else {
             return;
         };
+        let style = crate::layout::node_facts::node_style_view(self.data(node));
+        // Style reads a row only for a size container: an element that becomes one gets an independent formatting
+        // context, so the commit that lays it out as one reaches it. A row published for an element that stopped
+        // being one goes on being updated until the element goes.
+        let is_size_container = style.is_some_and(|style| {
+            let box_values = style.box_values();
+            box_values.is_size_container || box_values.is_inline_size_container
+        });
+        if !is_size_container && !self.layout_style_snapshot_commit.borrow().published_names(style_node) {
+            return;
+        }
         if self.bound_row(style_node) != node {
             return;
         }
-        let writing_mode = crate::layout::node_facts::node_style_view(self.data(node))
-            .map_or(crate::css::css_enums::writing_mode::HORIZONTAL_TB, |style| {
-                style.writing_mode()
-            });
+        let writing_mode = style.map_or(crate::css::css_enums::writing_mode::HORIZONTAL_TB, |style| {
+            style.writing_mode()
+        });
         let rows = self.paintable_rows();
         let has_committed_box = rows.paintable_row_is_populated(node);
         let size = if has_committed_box {
