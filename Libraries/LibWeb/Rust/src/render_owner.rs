@@ -865,6 +865,7 @@ pub(crate) enum ToOwner {
     Layout {
         document: DocumentId,
         job: Box<crate::layout::update_layout::OwnerFrameJob>,
+        reply: crate::stage_thread::OwnerReplyTo<crate::layout::update_layout::OwnerFrameJobAnswer>,
     },
     /// Runs a paint preparation pass over the render state of `document` for the document thread, which waits for it.
     Paint {
@@ -1048,11 +1049,13 @@ fn handle_message(owner: &Owner, message: ToOwner) {
             transaction,
             reply,
         } => reply.answer(|| run_style_on_owner(owner, document, transaction)),
-        ToOwner::Layout { document, job } => {
+        ToOwner::Layout { document, job, reply } => {
             // The state's borrow ends before the job runs, which may reach another document's state. The job finds
             // the arena inside its answer, so that a panic there answers the waiting document thread.
-            (*job).run(owner, || {
-                with_state(document, |state| state.state_for_waiting_thread(owner))
+            reply.answer(|| {
+                (*job).run(owner, || {
+                    with_state(document, |state| state.state_for_waiting_thread(owner))
+                })
             });
         }
         ToOwner::Paint { document, pass } => {
