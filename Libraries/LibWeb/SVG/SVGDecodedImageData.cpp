@@ -16,6 +16,7 @@
 #include <LibGfx/PaintingSurface.h>
 #include <LibJS/Runtime/ExternalMemory.h>
 #include <LibWeb/CSS/ComputedValues.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/Responses.h>
 #include <LibWeb/HTML/BrowsingContext.h>
@@ -161,7 +162,13 @@ ErrorOr<GC::Ref<SVGDecodedImageData>> SVGDecodedImageData::create(GC::Ref<Page> 
         dbgln("SVGDecodedImageData: Invalid SVG input (no SVGSVGElement found)");
         return Error::from_string_literal("SVGDecodedImageData: Invalid SVG input");
     }
-    auto svg_image_data = GC::Heap::the().allocate<SVGDecodedImageData>(page, page_client, document, *svg_root);
+
+    // The first box that shows the image asks for its natural size, which styles the document there and then. Its
+    // user-agent sheets are recorded as it is decoded instead, so that the render owner publishes their rules to its
+    // style engine as it idles, not while that first ask waits for the style.
+    auto recorded_sheets = CSS::record_non_author_stylesheets(*document);
+
+    auto svg_image_data = GC::Heap::the().allocate<SVGDecodedImageData>(page, page_client, document, *svg_root, recorded_sheets);
     page_client->register_svg_image_data(svg_image_data);
     return svg_image_data;
 }
@@ -179,7 +186,7 @@ SVGDecodedImageData* SVGDecodedImageData::with_vector_image_identity(u64 identit
     return images_by_vector_image_identity().get(identity).value_or(nullptr);
 }
 
-SVGDecodedImageData::SVGDecodedImageData(GC::Ref<Page> page, GC::Ref<SVGPageClient> page_client, GC::Ref<DOM::Document> document, GC::Ref<SVG::SVGSVGElement> root_element)
+SVGDecodedImageData::SVGDecodedImageData(GC::Ref<Page> page, GC::Ref<SVGPageClient> page_client, GC::Ref<DOM::Document> document, GC::Ref<SVG::SVGSVGElement> root_element, CSS::RecordedNonAuthorSheets)
     : m_page(page)
     , m_page_client(page_client)
     , m_document(document)
