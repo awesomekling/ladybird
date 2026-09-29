@@ -52,6 +52,10 @@ pub struct PaintableData {
     pub enclosing_scroll_node_index: SpatialNodeIndex,
     pub own_scroll_node_index: SpatialNodeIndex,
     pub node_identity: i64,
+    /// How many times the row in this slot was reset, which a reader holding a row notices a reset
+    /// by. Unlike the slot generation, it changes when the same node's row is recommitted or
+    /// cleared as well as when it is freed, so it carries over whatever else of the row starts over.
+    pub row_reset_version: u64,
     pub has_accumulated_visual_context: bool,
     pub accumulated_visual_context: ContextRef,
     pub accumulated_visual_context_for_descendants: ContextRef,
@@ -72,6 +76,7 @@ impl Default for PaintableData {
             enclosing_scroll_node_index: SpatialNodeIndex::default(),
             own_scroll_node_index: SpatialNodeIndex::default(),
             node_identity: 0,
+            row_reset_version: 0,
             has_accumulated_visual_context: false,
             accumulated_visual_context: ContextRef::default(),
             accumulated_visual_context_for_descendants: ContextRef::default(),
