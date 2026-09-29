@@ -73,6 +73,52 @@ unsafe extern "C" fn layout_arena_update_layout(
     })
 }
 
+/// Offers the style transaction the document takes next the first round of the frame of the forced read whose layout
+/// update it runs: the frame's first job rides the transaction, and the owner runs it right after it, in the same
+/// message, where the transaction lets it.
+///
+/// # Safety
+///
+/// `arena` must be a live handle with a registered layout update host, used on the document thread between
+/// `layout_arena_begin_update_layout` and `layout_arena_update_layout`, before the update's first style runs.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_offer_first_round(arena: *mut c_void) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    abort_on_panic(|| {
+        // SAFETY: Guaranteed by the entry point's contract.
+        unsafe { offer_first_round(&main_thread, arena) }
+    });
+}
+
+/// Readies the first job of the frame the document offered to ride the style transaction it is about to take, with
+/// the round the document reads for it now, if it offered one and has taken no transaction since.
+///
+/// # Safety
+///
+/// As for [`layout_arena_offer_first_round`], right before the document takes a style transaction whose batch the owner
+/// applies to the layout nodes itself.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_ready_ride(arena: *mut c_void) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    abort_on_panic(|| {
+        // SAFETY: Guaranteed by the entry point's contract.
+        unsafe { ready_ride(&main_thread, arena) }
+    });
+}
+
+/// Whether the first job of the frame the document offered rode the style transaction of its round, and ran: the
+/// update's first round is read already.
+///
+/// # Safety
+///
+/// `arena` must be a live handle, on the document thread.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_first_round_rode_style(arena: *mut c_void) -> bool {
+    first_round_rode_style(arena)
+}
+
 /// Submits the flight the document's layout update readied (see
 /// `FfiLayoutUpdateOutcome::FlightReady`), once the document has sealed what its recording reads.
 ///

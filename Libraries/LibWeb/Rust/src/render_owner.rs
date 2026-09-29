@@ -142,11 +142,22 @@ impl ChangeSeq {
 }
 
 /// The changes a document thread sent for a document: the number of the last one, and of the last one that alters the
-/// rows the owner publishes.
+/// rows the owner publishes; and what it sent that may move the document's layout.
 #[derive(Default)]
 struct SentChanges {
     through: ChangeSeq,
     altering_rows_through: ChangeSeq,
+    moving_layout: LayoutMark,
+}
+
+/// What a document thread sent the owner of a document that may move the document's layout, as of a point: the last
+/// change that does not keep a layout ([`ArenaChange::keeps_layout`]), and how many units and questions that may move
+/// it the thread sent ([`ToOwner::may_move_layout`]). A layout the owner ran at that point stands as long as the mark
+/// stays where it is.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub(crate) struct LayoutMark {
+    changes: ChangeSeq,
+    units: u64,
 }
 
 /// A write the main thread makes to a document's layout arena, as owned data the owner applies in the order the main
@@ -233,6 +244,33 @@ impl ArenaChange {
             | ArenaChange::LinkStyleEngine(_)
             | ArenaChange::UnlinkStyleEngine
             | ArenaChange::SelectionPseudoStylePublished(_)
+            | ArenaChange::PublishAnchorNames
+            | ArenaChange::CounterStyles { .. } => false,
+        }
+    }
+
+    /// Whether applying the change leaves a layout the owner ran before it as it is: it neither alters the rows the owner
+    /// publishes nor marks layout, and moves nothing a layout reads. A layout frame's job that rode a style transaction
+    /// stands only if the document thread sends nothing else after it (see [`LayoutMark`]).
+    fn keeps_layout(&self) -> bool {
+        match self {
+            ArenaChange::Layout(change) => change.keeps_layout(),
+            ArenaChange::Paint(change) => !change.alters_published_rows(),
+            ArenaChange::FinishOwnerStyleHostHalf { host_adopted_every_row } => *host_adopted_every_row,
+            ArenaChange::DropUnadoptedAnimationSamples
+            | ArenaChange::HostHearsBoxPresence(_)
+            | ArenaChange::SelectionStyleChanged(_)
+            | ArenaChange::SelectionPseudoStylePublished(_)
+            | ArenaChange::BeginLayoutTrace
+            | ArenaChange::EndLayoutTrace => true,
+            ArenaChange::DocumentIsDecodedSvg(_)
+            | ArenaChange::StyleSnapshotScrollStates(_)
+            | ArenaChange::OwnedProviderHandedOver(_)
+            | ArenaChange::SvgAttributeFacts { .. }
+            | ArenaChange::SvgStyleReferences { .. }
+            | ArenaChange::SvgAttributeFactsCleared(_)
+            | ArenaChange::LinkStyleEngine(_)
+            | ArenaChange::UnlinkStyleEngine
             | ArenaChange::PublishAnchorNames
             | ArenaChange::CounterStyles { .. } => false,
         }
@@ -876,11 +914,14 @@ pub(crate) enum ToOwner {
         pass: Box<crate::painting::owner_pass::OwnerPaintPass>,
     },
     /// Runs the style transaction `transaction` of `document`, which the document thread takes and waits for: begins
-    /// it, runs its pass and finishes it.
+    /// it, runs its pass and finishes it. Where the transaction leaves the document thread nothing a layout reads, the
+    /// first job of the layout frame the transaction's round is for, `then_layout`, runs right after it, and answers
+    /// with it.
     Style {
         document: DocumentId,
         transaction: Box<crate::css::style::bridge::OwnerStyleTransaction>,
-        reply: crate::stage_thread::OwnerReplyTo<crate::css::style::bridge::OwnerStyleTransactionView>,
+        then_layout: Option<Box<crate::layout::update_layout::OwnerFrameJob>>,
+        reply: crate::stage_thread::OwnerReplyTo<StyleJobAnswer>,
     },
     /// Answers `query` about `document` after the changes sent before it. The document thread waits.
     Ask {
@@ -911,6 +952,20 @@ impl ToOwner {
             | Self::Recall { document }
             | Self::Destroy { document } => *document,
             Self::Clock(message) => message.document(),
+        }
+    }
+
+    /// Whether handling the message may move the layout of its document: it runs units over its arena, or writes its
+    /// layout tree. A change counts by itself ([`ArenaChange::keeps_layout`]), and a question only reads.
+    fn may_move_layout(&self) -> bool {
+        match self {
+            Self::RenderingUpdate { .. } | Self::Layout { .. } | Self::Paint { .. } | Self::Style { .. } => true,
+            Self::Ask { query, .. } => matches!(query, Query::Write(_)),
+            Self::Create { .. }
+            | Self::Changes { .. }
+            | Self::Recall { .. }
+            | Self::Destroy { .. }
+            | Self::Clock(_) => false,
         }
     }
 
@@ -1050,8 +1105,9 @@ fn handle_message(owner: &Owner, message: ToOwner) {
         ToOwner::Style {
             document,
             transaction,
+            then_layout,
             reply,
-        } => reply.answer(|| run_style_on_owner(owner, document, transaction)),
+        } => reply.answer(|| run_style_job_on_owner(owner, document, transaction, then_layout)),
         ToOwner::Layout { document, job, reply } => {
             // The state's borrow ends before the job runs, which may reach another document's state. The job finds
             // the arena inside its answer, so that a panic there answers the waiting document thread.
@@ -1235,11 +1291,15 @@ pub(crate) fn destroy_document(document: DocumentId) {
 /// the arena. Inside a change batch ([`render_owner_open_change_batch`]), the change waits to go with the rest of it.
 pub(crate) fn send_arena_change(document: DocumentId, change: ArenaChange) -> ChangeSeq {
     let alters_published_rows = change.alters_published_rows();
+    let keeps_layout = change.keeps_layout();
     let seq = SENT_THROUGH.with_borrow_mut(|sent| {
         let sent = sent.entry(document).or_default();
         sent.through.0 += 1;
         if alters_published_rows {
             sent.altering_rows_through = sent.through;
+        }
+        if !keeps_layout {
+            sent.moving_layout.changes = sent.through;
         }
         sent.through
     });
@@ -1323,11 +1383,22 @@ pub(crate) fn taken_in_before_next_arena_reach(document: DocumentId, seq: Change
 /// its document's arena, the owner takes in every change the thread sent before it first.
 pub(crate) fn note_sending(message: &ToOwner) {
     send_held_changes();
+    if message.may_move_layout() {
+        SENT_THROUGH.with_borrow_mut(|sent| sent.entry(message.document()).or_default().moving_layout.units += 1);
+    }
     if message.reaches_arena() {
         let document = message.document();
         let through = sent_through(document);
         TAKEN_IN_THROUGH.with_borrow_mut(|taken_in| taken_in.insert(document, through));
     }
+}
+
+/// What the calling document thread sent the owner of `document` so far that may move its layout.
+pub(crate) fn layout_mark(document: DocumentId) -> LayoutMark {
+    SENT_THROUGH.with_borrow(|sent| {
+        sent.get(&document)
+            .map_or_else(LayoutMark::default, |sent| sent.moving_layout)
+    })
 }
 
 /// The number of the last change the calling document thread sent for `document`.
@@ -1518,34 +1589,61 @@ pub extern "C" fn render_owner_generated_content_accessible_text(
     ak::Utf16String::from_utf16(text.as_deref().unwrap_or_default()).into_raw()
 }
 
+/// What the owner answers a style transaction with: the transaction's view, and the answer of the layout frame's job
+/// that rode it, where the transaction let the owner run it.
+pub(crate) struct StyleJobAnswer {
+    pub(crate) view: crate::css::style::bridge::OwnerStyleTransactionView,
+    pub(crate) layout: Option<crate::layout::update_layout::OwnerFrameJobAnswer>,
+}
+
 /// Runs the style transaction `transaction` of `document`, which the calling document thread takes, on the owner, and
-/// waits for its answers. The owner serves it between the units of whatever it runs. Where the calling thread holds
+/// waits for its answers, with the layout frame's job `then_layout` right after it where the transaction lets it run
+/// (see [`ToOwner::Style`]). The owner serves it between the units of whatever it runs. Where the calling thread holds
 /// the document's render state, it is the owner (a unit the owner runs may take a transaction), and runs the
 /// transaction as the owner does one it is sent.
 pub(crate) fn run_style_transaction(
     document: DocumentId,
     transaction: crate::css::style::bridge::OwnerStyleTransaction,
-) -> crate::css::style::bridge::OwnerStyleTransactionView {
+    then_layout: Option<Box<crate::layout::update_layout::OwnerFrameJob>>,
+) -> StyleJobAnswer {
     let transaction = Box::new(transaction);
     if STATES.with_borrow(|states| states.contains_key(&document)) {
-        return run_style_on_owner(&Owner::here(), document, transaction);
+        return run_style_job_on_owner(&Owner::here(), document, transaction, then_layout);
     }
-    let transaction = std::cell::Cell::new(Some(transaction));
-    let ran = crate::stage_thread::wait_for_owner_thread(|reply| {
-        let transaction = transaction.take().expect("the transaction is sent once");
-        ToOwner::Style {
-            document,
-            transaction,
-            reply,
-        }
+    let ran = crate::stage_thread::wait_for_owner_thread(|reply| ToOwner::Style {
+        document,
+        transaction,
+        then_layout,
+        reply,
     });
     match ran {
         Some(ran) => ran.unwrap_or_else(|payload| std::panic::resume_unwind(payload)),
         None => {
             debug_assert!(false, "the style transaction of document {document:?} has no owner");
-            crate::css::style::bridge::OwnerStyleTransactionView::unanswered()
+            StyleJobAnswer {
+                view: crate::css::style::bridge::OwnerStyleTransactionView::unanswered(),
+                layout: None,
+            }
         }
     }
+}
+
+/// On the owner: runs the style transaction `transaction` of `document`, and the layout frame's job `then_layout` right
+/// after it where the transaction lets it run, while the document thread waits for both.
+fn run_style_job_on_owner(
+    owner: &Owner,
+    document: DocumentId,
+    transaction: Box<crate::css::style::bridge::OwnerStyleTransaction>,
+    then_layout: Option<Box<crate::layout::update_layout::OwnerFrameJob>>,
+) -> StyleJobAnswer {
+    let view = run_style_on_owner(owner, document, transaction);
+    let layout = then_layout.filter(|_| view.lets_layout_follow()).map(|job| {
+        // As for a job sent on its own, the job finds the arena inside the answer.
+        job.run(owner, || {
+            with_state(document, |state| state.state_for_waiting_thread(owner))
+        })
+    });
+    StyleJobAnswer { view, layout }
 }
 
 /// On the owner: runs the style transaction `transaction` of `document` with the engine its render state links, while

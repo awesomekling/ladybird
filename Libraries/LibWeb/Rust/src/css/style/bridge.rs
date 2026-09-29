@@ -6651,7 +6651,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         engine.send(StyleChange::Inputs(Box::new(input)));
     }
     // SAFETY: Guaranteed by the caller.
-    let render_half = render_half.applies.then(|| unsafe {
+    let render_half: Option<Vec<StyleNodeID>> = render_half.applies.then(|| unsafe {
         borrow(
             render_half.viewport_propagation_sources,
             render_half.viewport_propagation_source_count,
@@ -6660,6 +6660,13 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         .filter_map(|&node| StyleNodeID::from_raw(node))
         .collect()
     });
+    // The first job of the layout frame of the forced read the document takes the transaction for rides it, where the
+    // document readied one: the owner lays the document out right after the transaction, where the owner applies the
+    // batch to the layout nodes itself, so the host's install leaves nothing the layout reads.
+    let riding = render_half
+        .as_ref()
+        .and_then(|_| crate::layout::update_layout::take_readied_ride(layout_arena));
+    let rides = riding.is_some();
     let transaction = OwnerStyleTransaction::Whole {
         root,
         computation_inputs,
@@ -6667,8 +6674,14 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         render_half,
     };
     // This thread reaches the engine again only once the owner has finished the transaction.
-    let OwnerStyleTransactionView(view, retired, applied) =
-        crate::render_owner::run_style_transaction(engine.home().document(), transaction);
+    let crate::render_owner::StyleJobAnswer {
+        view: OwnerStyleTransactionView(view, retired, applied, _),
+        layout,
+    } = crate::render_owner::run_style_transaction(engine.home().document(), transaction, riding);
+    if rides {
+        // SAFETY: This is the document thread's FFI entry, right after the transaction the job rode.
+        unsafe { crate::layout::update_layout::settle_ride(layout_arena, layout) };
+    }
     // Font cascade lists and custom-property data are the document thread's to give up.
     crate::css::ffi_stats::release_deferred_font_cascade_lists();
     drop(retired);
@@ -6778,7 +6791,18 @@ pub(crate) struct OwnerStyleTransactionView(
     FfiStyleTransactionView,
     RetiredCustomPropertyData,
     Option<crate::layout::OwnerAppliedStyle>,
+    /// Whether the owner may lay the document out right after the transaction, in the same job: it applied the batch
+    /// to the layout nodes itself, or the batch had nothing to apply, so the host's install leaves nothing the layout
+    /// reads.
+    bool,
 );
+
+impl OwnerStyleTransactionView {
+    /// Whether the owner may lay the document out right after the transaction, in the same job.
+    pub(crate) fn lets_layout_follow(&self) -> bool {
+        self.3
+    }
+}
 
 // SAFETY: The view points into the engine, which nothing changes until the document thread's next entrance of it, and
 // the retired data goes to the document thread, which alone releases it.
@@ -6791,6 +6815,7 @@ impl OwnerStyleTransactionView {
             FfiStyleTransactionView::default(),
             RetiredCustomPropertyData { _data: Vec::new() },
             None,
+            false,
         )
     }
 }
@@ -6808,7 +6833,7 @@ impl OwnerStyleTransaction {
         engine: &mut StyleEngine,
         state: &mut crate::layout::ArenaHandle,
     ) -> OwnerStyleTransactionView {
-        let (view, retired, applied) = match self {
+        let (view, retired, applied, lets_layout_follow) = match self {
             Self::Whole {
                 root,
                 computation_inputs,
@@ -6827,27 +6852,31 @@ impl OwnerStyleTransaction {
                 let timeline_samples = engine.animation_timeline_samples().clone();
                 let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
                 let (mut view, retired) = finish_style_transaction(engine, root, output);
+                let render_half = render_half.map(|viewport_propagation_sources| {
+                    apply_render_half_on_owner(engine, state.arena_mut(), &viewport_propagation_sources)
+                });
+                let lets_layout_follow = matches!(
+                    render_half,
+                    Some(RenderHalfOnOwner::Applied(_) | RenderHalfOnOwner::NothingToApply)
+                );
                 let mut applied = None;
-                if let Some(viewport_propagation_sources) = render_half
-                    && let Some(effects) =
-                        apply_render_half_on_owner(engine, state.arena_mut(), &viewport_propagation_sources)
-                {
+                if let Some(RenderHalfOnOwner::Applied(effects)) = render_half {
                     view.render_half_applied = true;
                     view.render_half_moved_visual_contexts = effects.moved_visual_contexts;
                     view.render_half_repaint = effects.repaint;
                     applied = Some(effects.applied);
                 }
-                (view, retired, applied)
+                (view, retired, applied, lets_layout_follow)
             }
             Self::FinishSubmitted {
                 host_named_atoms_beside_pass,
             } => {
                 let (view, retired) = finish_submitted_style_transaction(engine, host_named_atoms_beside_pass);
-                (view, retired, None)
+                (view, retired, None, false)
             }
         };
         note_content_counter_style_verdicts(engine, state.arena());
-        OwnerStyleTransactionView(view, retired, applied)
+        OwnerStyleTransactionView(view, retired, applied, lets_layout_follow)
     }
 }
 
@@ -6914,6 +6943,16 @@ pub unsafe extern "C" fn style_engine_content_counter_styles_changed(
     verdict.unwrap_or(crate::layout::LayoutNodeArena::CONTENT_COUNTER_STYLES_NOT_RECORDED)
 }
 
+/// How the owner took the render half of a style transaction's batch.
+enum RenderHalfOnOwner {
+    /// It applied the batch, which asks the document what the effects say.
+    Applied(OwnerRenderHalfEffects),
+    /// The batch has no row to apply.
+    NothingToApply,
+    /// A row of the batch is one the host styles in a way of its own: the host applies the batch whole.
+    HostApplies,
+}
+
 /// Applies the batch a style transaction the owner took left to the layout nodes of the rows'
 /// elements, as a flight applies its pass's: each row's record, and what the row's move marks of
 /// layout, paint and the visual contexts, which the host's install then leaves alone. Answers what
@@ -6923,12 +6962,16 @@ fn apply_render_half_on_owner(
     engine: &StyleEngine,
     arena: &mut crate::layout::LayoutNodeArena,
     viewport_propagation_sources: &[StyleNodeID],
-) -> Option<OwnerRenderHalfEffects> {
-    let rows = engine.rows_the_owner_applies(viewport_propagation_sources).ok()?;
+) -> RenderHalfOnOwner {
+    let Ok(rows) = engine.rows_the_owner_applies(viewport_propagation_sources) else {
+        return RenderHalfOnOwner::HostApplies;
+    };
     if rows.is_empty() {
-        return None;
+        return RenderHalfOnOwner::NothingToApply;
     }
-    arena.apply_flight_style_rows(&rows).ok()?;
+    if arena.apply_flight_style_rows(&rows).is_err() {
+        return RenderHalfOnOwner::HostApplies;
+    }
     let mut effects = OwnerRenderHalfEffects {
         moved_visual_contexts: false,
         repaint: 0,
@@ -6941,7 +6984,7 @@ fn apply_render_half_on_owner(
             effects.repaint = effects.repaint.max(if marks.repaint_hit_test { 2 } else { 1 });
         }
     }
-    Some(effects)
+    RenderHalfOnOwner::Applied(effects)
 }
 
 /// What the rows the owner applied of a batch ask of the document, which the host applies once it
@@ -7149,8 +7192,10 @@ pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
         host_named_atoms_beside_pass,
     };
     // This thread reaches the engine again only once the owner has finished the transaction.
-    let OwnerStyleTransactionView(view, retired, applied) =
-        crate::render_owner::run_style_transaction(engine.home().document(), transaction);
+    let crate::render_owner::StyleJobAnswer {
+        view: OwnerStyleTransactionView(view, retired, applied, _),
+        ..
+    } = crate::render_owner::run_style_transaction(engine.home().document(), transaction, None);
     debug_assert!(
         applied.is_none(),
         "finishing a submitted transaction applies no batch on the owner"

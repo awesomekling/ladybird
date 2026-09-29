@@ -725,7 +725,9 @@ enum FrameJobAnswer {
 }
 
 /// A job of a layout frame the document thread waits for, which the render owner runs with the document's render
-/// state, apart from where it answers. The frame stays with the document thread meanwhile.
+/// state: on its own ([`crate::render_owner::ToOwner::Layout`]), or right after the style transaction of the frame's
+/// first round, in the same message ([`crate::render_owner::ToOwner::Style`]). The frame stays with the document thread
+/// meanwhile.
 pub(crate) struct OwnerFrameJob {
     frame: crate::stage_thread::CallerWaits<*mut LayoutFrame>,
     job: FrameJob,
@@ -799,6 +801,14 @@ impl OwnerFrameJob {
         // SAFETY: The answer goes back to the document thread, which waits for it.
         OwnerFrameJobAnswer(unsafe { crate::stage_thread::CallerWaits::new(answer) })
     }
+}
+
+/// The next job of a layout frame the document thread runs with the owner.
+enum NextJob {
+    /// The owner ran the job already, and answered it.
+    Answered(FrameJobAnswer),
+    /// The frame sends the job, with the round the document read for it.
+    Send(LayoutRoundFacts),
 }
 
 /// Where a layout frame goes on once a step of a round has run.
@@ -1196,24 +1206,38 @@ impl LayoutFrame {
         main_thread: &crate::stage::MainThread,
         readies_flight: bool,
         query: Option<crate::render_owner::Query>,
+        first_job_rode_style: Option<RiddenJob>,
     ) -> FrameRun {
         // SAFETY: Guaranteed by the caller.
         let document = unsafe { super::ArenaHandle::document_of(self.inputs.arena_handle) };
-        // SAFETY: As above.
-        let mut round = unsafe { self.start_first_round(main_thread) };
-        loop {
-            if !readies_flight {
-                // The job may build, which reads the marks: they are its until this thread pays what the job owes it.
-                // SAFETY: As above, with no job of the frame outstanding.
-                unsafe { super::tree_update_marks::lend_to_frame(self.inputs.arena_handle) };
+        let mut next = match first_job_rode_style {
+            // The first job rode the style transaction of its round, and the owner answered it then.
+            Some(ridden) => {
+                self.layout_pass += 1;
+                NextJob::Answered(self.ridden_first_job(main_thread, document, ridden))
             }
-            let input = FrameInput {
-                round,
-                query,
-                readies_flight,
+            // SAFETY: As above.
+            None => NextJob::Send(unsafe { self.start_first_round(main_thread) }),
+        };
+        loop {
+            let answer = match next {
+                NextJob::Answered(answer) => answer,
+                NextJob::Send(round) => {
+                    if !readies_flight {
+                        // The job may build, which reads the marks: they are its until this thread pays what the job
+                        // owes it.
+                        // SAFETY: As above, with no job of the frame outstanding.
+                        unsafe { super::tree_update_marks::lend_to_frame(self.inputs.arena_handle) };
+                    }
+                    let input = FrameInput {
+                        round,
+                        query,
+                        readies_flight,
+                    };
+                    self.run_job_on_owner(document, FrameJob::Rounds(input))
+                }
             };
-            let FrameJobAnswer::Rounds(FrameOutput { end, answer }) =
-                self.run_job_on_owner(document, FrameJob::Rounds(input));
+            let FrameJobAnswer::Rounds(FrameOutput { end, answer }) = answer;
             // SAFETY (for the steps below): As above, with no job of the frame outstanding.
             let (owner, facts) = match end {
                 FrameJobEnd::Over(end) => {
@@ -1246,11 +1270,52 @@ impl LayoutFrame {
                 return FrameRun::Ended(answer);
             }
             self.layout_pass += 1;
-            round = self
-                .inputs
-                .host
-                .start_round(main_thread, owner.next_round_runs_style(&facts));
+            next = NextJob::Send(
+                self.inputs
+                    .host
+                    .start_round(main_thread, owner.next_round_runs_style(&facts)),
+            );
         }
+    }
+
+    /// The answer of the frame's first job, which rode the style transaction of its round, as it stands once the
+    /// document thread has installed the round's style: as the owner answered it, unless the thread sent the owner
+    /// what may move the layout since, or left the document a tree to build where the job's round ended the frame. The
+    /// job's rounds are over then, and the frame goes on with another round, as after a round that left work.
+    fn ridden_first_job(
+        &self,
+        main_thread: &crate::stage::MainThread,
+        document: crate::render_owner::DocumentId,
+        RiddenJob { answer, sent }: RiddenJob,
+    ) -> FrameJobAnswer {
+        let FrameJobAnswer::Rounds(FrameOutput { end, answer }) = answer;
+        let stands = crate::render_owner::layout_mark(document) == sent
+            && match end {
+                // A round that laid nothing out ends the frame without the document being asked again.
+                FrameJobEnd::Over(_) => {
+                    let facts = self.inputs.host.document_facts(main_thread);
+                    !facts.document_needs_layout_tree_build && !facts.top_layer_work_pending
+                }
+                FrameJobEnd::Settled(_) | FrameJobEnd::NextRound(_) | FrameJobEnd::ReadiedForFlight { .. } => true,
+            };
+        if stands {
+            return FrameJobAnswer::Rounds(FrameOutput { end, answer });
+        }
+        let owner = match end {
+            FrameJobEnd::Settled(owner) | FrameJobEnd::NextRound(owner) => owner,
+            FrameJobEnd::Over(_) | FrameJobEnd::ReadiedForFlight { .. } => OwnerEndFacts {
+                arena_laid_out: false,
+                engine_style_follows: false,
+                deferred_element_style_inputs: false,
+            },
+        };
+        FrameJobAnswer::Rounds(FrameOutput {
+            end: FrameJobEnd::NextRound(OwnerEndFacts {
+                arena_laid_out: false,
+                ..owner
+            }),
+            answer: None,
+        })
     }
 
     /// Runs `job`, a job of the frame, on the render owner, which holds `document`'s render state, and waits for its
@@ -1793,6 +1858,172 @@ unsafe fn frame_state(arena_handle: *mut c_void) -> FfiLayoutFrameState {
     }
 }
 
+/// A forced read's layout frame, which the document offers the style transaction of the frame's first round before it
+/// runs the round's style: the owner runs the frame's first job right after the transaction, in the same message
+/// ([`crate::render_owner::ToOwner::Style`]), so that the read waits for the owner once for its style and its layout.
+struct OfferedFrame {
+    frame: Box<LayoutFrame>,
+    query: Option<crate::render_owner::Query>,
+    ride: Ride,
+}
+
+/// Where the first job of an [`OfferedFrame`] stands. Only the update's first style transaction takes it: the rounds
+/// after the first read what the drain of the transaction before them left.
+enum Ride {
+    /// The document has taken no transaction since it offered the frame.
+    Offered,
+    /// The job rides the transaction the document takes next, with the round the document read for it.
+    Readied(Box<OwnerFrameJob>),
+    /// The owner ran the job right after the transaction.
+    Ran(RiddenJob),
+    /// The job did not ride: the frame sends it on its own, with its round read once the round's style has run.
+    Declined,
+}
+
+/// The answer of a frame's first job, which the owner ran right after the style transaction of its round, when the
+/// document thread had sent it what `sent` marks.
+struct RiddenJob {
+    answer: FrameJobAnswer,
+    sent: crate::render_owner::LayoutMark,
+}
+
+thread_local! {
+    /// On a document thread, the frames its documents offered their style transactions.
+    static OFFERED_FRAMES: std::cell::RefCell<Vec<OfferedFrame>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Takes the frame the document whose arena `arena_handle` names offered, if it offered one.
+fn take_offered_frame(arena_handle: *mut c_void) -> Option<OfferedFrame> {
+    OFFERED_FRAMES.with_borrow_mut(|offered| {
+        let index = offered
+            .iter()
+            .position(|offered| offered.frame.inputs.arena_handle == arena_handle)?;
+        Some(offered.swap_remove(index))
+    })
+}
+
+/// Runs `step` on the frame the document whose arena `arena_handle` names offered, if it offered one, and answers what
+/// the step answers. The step may call the document, which may run the layout update of another document.
+fn with_offered_frame<R>(arena_handle: *mut c_void, step: impl FnOnce(&mut OfferedFrame) -> R) -> Option<R> {
+    let mut offered = take_offered_frame(arena_handle)?;
+    let result = step(&mut offered);
+    OFFERED_FRAMES.with_borrow_mut(|frames| frames.push(offered));
+    Some(result)
+}
+
+/// Offers the style transaction the document takes next the first round of the frame of the forced read whose layout
+/// update the document thread runs.
+///
+/// # Safety
+///
+/// As for [`update_layout`], before the update's first style runs.
+unsafe fn offer_first_round(main_thread: &crate::stage::MainThread, arena_handle: *mut c_void) {
+    let inputs = FrameInputs {
+        host: layout_update_host(main_thread),
+        arena_handle,
+        reason_is_inspect_devtools_layout_data: false,
+        is_template_contents_document: false,
+    };
+    // SAFETY: Guaranteed by the caller.
+    let document = unsafe { super::ArenaHandle::document_of(arena_handle) };
+    let stale = take_offered_frame(arena_handle);
+    debug_assert!(stale.is_none(), "a layout update offers one frame");
+    OFFERED_FRAMES.with_borrow_mut(|frames| {
+        frames.push(OfferedFrame {
+            frame: Box::new(LayoutFrame::new(inputs, None)),
+            query: crate::render_owner::asked_about(document),
+            ride: Ride::Offered,
+        });
+    });
+}
+
+/// Readies the first job of the frame the document offered to ride the style transaction it takes next, if it offered
+/// one and has taken no transaction since: the document reads the round as it reads a round it starts. A round that
+/// builds a tree does not ride: the rest of the round's style may mark more of the tree.
+///
+/// # Safety
+///
+/// As for [`update_layout`], with the transaction about to be taken.
+unsafe fn ready_ride(main_thread: &crate::stage::MainThread, arena_handle: *mut c_void) {
+    with_offered_frame(arena_handle, |offered| {
+        if !matches!(offered.ride, Ride::Offered) {
+            return;
+        }
+        let round = offered.frame.inputs.host.start_round(main_thread, false);
+        if round.facts.document_needs_layout_tree_build
+            || round.facts.top_layer_work_pending
+            || round.document_style.is_some()
+        {
+            offered.ride = Ride::Declined;
+            return;
+        }
+        // The job may build, which reads the marks: they are its until this thread pays what the job owes it.
+        // SAFETY: Guaranteed by the caller, with no job of the frame outstanding.
+        unsafe { super::tree_update_marks::lend_to_frame(arena_handle) };
+        offered.ride = Ride::Readied(Box::new(OwnerFrameJob {
+            // SAFETY: This thread waits for the transaction the job rides, and reaches the frame only once it has the
+            // answer. The frame is boxed, so it stays where it is until then.
+            frame: unsafe { crate::stage_thread::CallerWaits::new(std::ptr::from_mut(&mut *offered.frame)) },
+            job: FrameJob::Rounds(FrameInput {
+                round,
+                query: offered.query,
+                readies_flight: false,
+            }),
+            run: LayoutFrame::run_job_in_state,
+        }));
+    });
+}
+
+/// Takes the job the document readied to ride the style transaction it takes now (see [`ready_ride`]), if it readied
+/// one.
+pub(crate) fn take_readied_ride(arena_handle: *mut c_void) -> Option<Box<OwnerFrameJob>> {
+    with_offered_frame(arena_handle, |offered| {
+        match std::mem::replace(&mut offered.ride, Ride::Declined) {
+            Ride::Readied(job) => Some(job),
+            ride => {
+                offered.ride = ride;
+                None
+            }
+        }
+    })
+    .flatten()
+}
+
+/// Settles the ride of the job [`take_readied_ride`] took, with the owner's answer to it where the transaction let it
+/// run. A job that did not run is declined.
+///
+/// # Safety
+///
+/// On the document thread, right after the transaction the job rode, for the arena `arena_handle`.
+pub(crate) unsafe fn settle_ride(arena_handle: *mut c_void, answer: Option<OwnerFrameJobAnswer>) {
+    let Some(OwnerFrameJobAnswer(answer)) = answer else {
+        // SAFETY: Guaranteed by the caller. The job did not run, and the marks are the document's.
+        unsafe { super::tree_update_marks::take_back_from_frame(arena_handle) };
+        return;
+    };
+    // SAFETY: Guaranteed by the caller.
+    let sent = crate::render_owner::layout_mark(unsafe { super::ArenaHandle::document_of(arena_handle) });
+    let settled = with_offered_frame(arena_handle, |offered| {
+        offered.ride = Ride::Ran(RiddenJob {
+            answer: answer.into_inner(),
+            sent,
+        });
+    });
+    debug_assert!(
+        settled.is_some(),
+        "a job rides the transaction of the frame that offered it"
+    );
+}
+
+/// Whether the first job of the frame the document offered rode the style transaction of its round, and ran.
+fn first_round_rode_style(arena_handle: *mut c_void) -> bool {
+    OFFERED_FRAMES.with_borrow(|offered| {
+        offered
+            .iter()
+            .any(|offered| offered.frame.inputs.arena_handle == arena_handle && matches!(offered.ride, Ride::Ran(_)))
+    })
+}
+
 /// Runs the layout update as one frame, which the render owner runs job by job while the document thread waits (see
 /// [`LayoutFrame::run_with_owner`]): the document thread hands each job everything its rounds read from the document,
 /// and nothing of a job comes back to it before the job has ended. Once the frame ends, the document thread has paid
@@ -1833,8 +2064,14 @@ unsafe fn update_layout(
     } else {
         crate::render_owner::asked_about(document)
     };
+    // A frame the document offered its first round's style transaction goes on from there.
+    let offered = take_offered_frame(arena_handle);
+    debug_assert!(
+        offered.is_none() || !submits_pass,
+        "only a forced read offers its frame"
+    );
     // SAFETY: Guaranteed by the caller.
-    let driven = unsafe { LayoutPassJob::prepare(main_thread, inputs, submits_pass, first_round, query) };
+    let driven = unsafe { LayoutPassJob::prepare(main_thread, inputs, submits_pass, first_round, query, offered) };
     // SAFETY: As above.
     unsafe { go_on_from_driven_frame(main_thread, arena_handle, driven, submits_pass) }
 }
@@ -1962,10 +2199,32 @@ impl LayoutPassJob {
         submits_pass: bool,
         first_round: LayoutRoundFacts,
         query: Option<crate::render_owner::Query>,
+        offered: Option<OfferedFrame>,
     ) -> DrivenFrame {
-        let mut frame = LayoutFrame::new(inputs, Some(first_round));
+        let (mut frame, ridden) = match offered {
+            Some(OfferedFrame { frame, ride, .. }) => {
+                let mut frame = *frame;
+                let arena_handle = inputs.arena_handle;
+                frame.inputs = inputs;
+                match ride {
+                    Ride::Ran(ridden) => (frame, Some(ridden)),
+                    Ride::Offered | Ride::Declined => {
+                        frame.first_round = Some(first_round);
+                        (frame, None)
+                    }
+                    // No transaction took the readied job: the document had no root to take one for.
+                    Ride::Readied(_) => {
+                        // SAFETY: Guaranteed by the caller. The job did not run, and the marks are the document's.
+                        unsafe { super::tree_update_marks::take_back_from_frame(arena_handle) };
+                        frame.first_round = Some(first_round);
+                        (frame, None)
+                    }
+                }
+            }
+            None => (LayoutFrame::new(inputs, Some(first_round)), None),
+        };
         // SAFETY: Guaranteed by the caller.
-        let facts = match unsafe { frame.run_with_owner(main_thread, submits_pass, query) } {
+        let facts = match unsafe { frame.run_with_owner(main_thread, submits_pass, query, ridden) } {
             FrameRun::Ended(answer) => return DrivenFrame::Ended(answer),
             FrameRun::ReadiedForFlight(facts) => facts,
         };

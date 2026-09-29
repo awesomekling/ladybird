@@ -523,6 +523,9 @@ static StyleEngineTransaction take_style_engine_transaction(DOM::Document& docum
     // again.
     if (document.layout_arena_handle() && !document.needs_layout_tree_update() && !document.child_needs_layout_tree_update()) {
         auto const viewport_propagation_sources = StyleEffectDrain::viewport_propagation_sources_of(document);
+        // The layout of a forced read rides the transaction, with the round the document reads now: nothing the
+        // transaction computes changes it.
+        Layout::RustFFI::layout_arena_ready_ride(document.layout_arena_handle());
         return accept_style_engine_transaction(document, style_engine.take_style_transaction(*root, StyleEngine::OwnerRenderHalf { viewport_propagation_sources.span() }));
     }
     return accept_style_engine_transaction(document, style_engine.take_style_transaction(*root));

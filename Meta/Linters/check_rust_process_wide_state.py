@@ -77,6 +77,7 @@ RENDER_STAGE_ALLOWED = {
             "flight.rs:SENT_FLIGHTS",
             "frame_news.rs:INBOX",
             "frame_news.rs:LAST_SENT",
+            "layout/update_layout.rs:OFFERED_FRAMES",
         ],
     ),
     **render_stage_entries(PRESENTED_COUNTER, ["clock_frames.rs:CLOCK_TICKS_PRESENTED"]),

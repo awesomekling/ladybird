@@ -393,6 +393,42 @@ impl LayoutChange {
         }
     }
 
+    /// Whether applying the change leaves a layout the owner ran before it as it is: it neither alters the rows the
+    /// owner publishes nor marks layout, and moves nothing a layout reads, only what the arena keeps for the host.
+    pub(crate) fn keeps_layout(&self) -> bool {
+        match self {
+            Self::AdoptOwnerRowStyle { .. }
+            | Self::SetRowImageObservers { .. }
+            | Self::SetStyleImageResourcesAttached { .. }
+            | Self::SetNodeNeedsCompositorAnimationFrame { .. } => true,
+            Self::SetNeedsLayoutUpdate { .. }
+            | Self::SetNeedsLayoutUpdateOfPossibleBoundary { .. }
+            | Self::SetNeedsFullLayoutTreeUpdate(_)
+            | Self::ResetCachedIntrinsicSizesOfSelfAndAncestors { .. }
+            | Self::DeferChildListInsertionLayoutUpdate { .. }
+            | Self::InvalidateTextContent { .. }
+            | Self::EnrollTextAfterLanguageChange { .. }
+            | Self::RecordPartialRelayoutEscape
+            | Self::SetOwnedImageNaturalSize { .. }
+            | Self::SetNodeFlag { .. }
+            | Self::SetNodeDomPaintFacts { .. }
+            | Self::SetElementScrollOffset { .. }
+            | Self::SetPseudoElementScrollOffset { .. }
+            | Self::DetachRemainingRowsForRemoval { .. }
+            | Self::DetachRemovedBoxInPlace { .. }
+            | Self::StyleNodeChanged { .. }
+            | Self::SetIdentityInFocusedTextControl { .. }
+            | Self::SetListOwnerHasStaleItemCounters { .. }
+            | Self::RowOwnsImageProvider { .. }
+            | Self::PinBoundBoxStyleRecordForDetachment { .. }
+            | Self::InstallRowStyle { .. }
+            | Self::ReplaceRowStyleRecord { .. }
+            | Self::AdoptDerivedNodeStyle { .. }
+            | Self::InstallAnimationSample { .. }
+            | Self::SetTableSpans { .. } => false,
+        }
+    }
+
     /// Whether the change can mark a node for layout, which is all a change can do to whether the layout is up to date.
     fn lays_out_again(&self) -> bool {
         matches!(
