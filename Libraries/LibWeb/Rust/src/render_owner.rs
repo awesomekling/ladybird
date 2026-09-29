@@ -1154,6 +1154,7 @@ pub(crate) fn take_in_sent_changes() {
             .values_mut()
             .filter(|state| state.take_in == TakeIn::AsTheOwnerIdles)
         {
+            state.arena.arena_mut().drop_rows_let_go();
             // Only the owner leaves news, so what the main thread has adopted stays adopted until the reach below.
             let engine = state.style_engine();
             if !engine.is_null() && engine.has_unadopted_news() {

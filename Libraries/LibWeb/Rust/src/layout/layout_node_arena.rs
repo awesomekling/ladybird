@@ -1168,6 +1168,9 @@ pub(crate) struct LayoutNodeArena {
     /// The rows as the document thread reads them, without reaching the arena (see
     /// [`super::row_reads`]).
     pub(super) published_rows: super::row_reads::RowSnapshotSlot,
+    /// The rows the arena published that the document or painting thread may still read, which the arena drops once
+    /// they let go of them.
+    lent_rows: crate::lent::Lender<super::row_reads::RowSnapshot>,
     /// How many rows the arena published.
     rows_published: u64,
     /// While a display tick runs over the arena, what it published, which the document thread reads once it adopts the
@@ -1345,6 +1348,7 @@ impl LayoutNodeArena {
             published_layout_tree_state: AtomicU64::new(LayoutTreeState::default().pack()),
             held_layout_tree_state: Mutex::new(None),
             published_rows: Default::default(),
+            lent_rows: Default::default(),
             rows_published: 0,
             held: None,
             changes_taken_in: Default::default(),
@@ -1944,14 +1948,22 @@ impl LayoutNodeArena {
             changes_taken_in: self.changes_taken_in,
             generation: self.rows_published,
         };
-        self.publish(Arc::new(rows));
+        self.publish(rows);
     }
 
-    fn publish(&mut self, rows: Arc<super::row_reads::RowSnapshot>) {
+    /// Lends `rows` where the document thread reads them.
+    fn publish(&mut self, rows: super::row_reads::RowSnapshot) {
+        let rows = self.lent_rows.lend(rows);
         match &mut self.held {
             Some(held) => held.rows = Some(rows),
             None => self.published_rows.publish(rows),
         }
+    }
+
+    /// Drops the rows the arena lent that nothing reads any more, as the owner idles: dropping them beside the thread
+    /// that waits for an answer would keep it waiting.
+    pub(crate) fn drop_rows_let_go(&mut self) {
+        self.lent_rows.take_back_let_go();
     }
 
     /// Keeps what the arena publishes from now on, its rows and its layout tree's state, from the document thread, for
@@ -1978,7 +1990,7 @@ impl LayoutNodeArena {
         let mut released = super::row_reads::RowSnapshot::clone(&rows);
         drop(rows);
         released.paintable = Default::default();
-        self.publish(Arc::new(released));
+        self.publish(released);
     }
 
     /// Lets go of the rows published last, for a unit the document thread waits for, which publishes before it
@@ -1988,6 +2000,7 @@ impl LayoutNodeArena {
     pub(crate) fn let_go_of_rows_while_document_thread_waits(&mut self) {
         if self.held.is_none() {
             self.published_rows.let_go();
+            self.lent_rows.take_back_let_go();
             self.release_published_paintable_rows();
         }
     }
@@ -2000,9 +2013,9 @@ impl LayoutNodeArena {
 
     /// The rows the arena published last, for a snapshot of its own to share: none in a unit that let go of them
     /// ([`Self::let_go_of_rows_while_document_thread_waits`]) until it publishes again.
-    pub(crate) fn published_rows(&self) -> Arc<super::row_reads::RowSnapshot> {
+    pub(crate) fn published_rows(&self) -> crate::lent::Lent<super::row_reads::RowSnapshot> {
         match self.held.as_ref().and_then(|held| held.rows.as_ref()) {
-            Some(held) => Arc::clone(held),
+            Some(held) => held.clone(),
             None => self.published_rows.shared_on_owner(),
         }
     }
@@ -7096,7 +7109,7 @@ impl LayoutTreeState {
 #[derive(Default)]
 pub(crate) struct HeldPublication {
     /// The rows the tick published last.
-    rows: Option<Arc<super::row_reads::RowSnapshot>>,
+    rows: Option<crate::lent::Lent<super::row_reads::RowSnapshot>>,
 }
 
 impl HeldPublication {

@@ -28,6 +28,7 @@ use crate::layout::text_chunker::GraphemeSegmenter;
 use crate::layout::tree_shape::RetiredSlots;
 use crate::layout::used_values::FfiCssPixelRect;
 use crate::layout::{RenderedText, RenderedTextBoundary, TextFragments};
+use crate::lent::Lent;
 use crate::painting::fragment_ownership::FragmentOwnershipFilter;
 use crate::painting::geometry_read::{GeometryRead, read_live_geometry};
 use crate::painting::hit_test::HitTestList;
@@ -78,7 +79,7 @@ pub(crate) struct PublishedRows {
 #[derive(Default)]
 pub(crate) struct PublishedFrame {
     /// The rows, which the frame shares with every reader of the same publication.
-    pub(super) rows: Arc<RowSnapshot>,
+    pub(super) rows: Lent<RowSnapshot>,
     /// Keeps the arena from reusing a slot this frame may name until the frame is dropped.
     _retired_slots: RetiredSlots,
     damage: FrameDamage,
@@ -169,7 +170,7 @@ const _: () = {
 
 impl PublishedFrame {
     pub(crate) fn new(
-        rows: Arc<RowSnapshot>,
+        rows: Lent<RowSnapshot>,
         retired_slots: RetiredSlots,
         damage: FrameDamage,
         paint_state: PublishedPaintState,

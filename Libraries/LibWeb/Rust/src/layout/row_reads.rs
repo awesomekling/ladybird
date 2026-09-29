@@ -23,6 +23,7 @@ use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::css::style::published_record::PublishedStyleRecord;
 use crate::css::style::tree::StyleNodeID;
+use crate::lent::Lent;
 use crate::painting::published_frame::{PaintStatus, PublishedPaintFacts, PublishedRows};
 use crate::render_owner::{ChangeSeq, ScriptForcedRead};
 use smallvec::SmallVec;
@@ -146,7 +147,7 @@ impl RowSnapshot {
     /// # Safety
     ///
     /// `handle` must be a live handle on the document thread.
-    pub(crate) unsafe fn current_shared(handle: *mut c_void, read: ScriptForcedRead) -> Arc<Self> {
+    pub(crate) unsafe fn current_shared(handle: *mut c_void, read: ScriptForcedRead) -> Lent<Self> {
         // SAFETY: Guaranteed by the caller.
         unsafe { Self::current(handle, read) };
         // SAFETY: As above; the rows were just read, and nothing published since.
@@ -297,23 +298,23 @@ enum Freshness {
 /// borrows them only where no frame in flight owns the arena ([`RowSnapshot::published`]).
 #[derive(Default)]
 pub(crate) struct RowSnapshotSlot {
-    rows: Mutex<Arc<RowSnapshot>>,
+    rows: Mutex<Lent<RowSnapshot>>,
     /// No rows, which the slot holds from where a unit the document thread waits for lets go of its rows
     /// ([`Self::let_go`]) until the unit publishes again, before it answers: the thread reads no rows meanwhile.
-    let_go_of: Arc<RowSnapshot>,
+    let_go_of: Lent<RowSnapshot>,
     /// The generation of the rows the slot holds, which tells a reader which of two slots holds the later rows
     /// without taking either lock.
     generation: AtomicU64,
 }
 
 impl RowSnapshotSlot {
-    fn rows(&self) -> std::sync::MutexGuard<'_, Arc<RowSnapshot>> {
+    fn rows(&self) -> std::sync::MutexGuard<'_, Lent<RowSnapshot>> {
         self.rows.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Replaces the rows the slot holds with `rows`, on the thread that writes the slot: the arena's owner, or the
     /// document thread for the rows it adopted.
-    pub(crate) fn publish(&self, rows: Arc<RowSnapshot>) {
+    pub(crate) fn publish(&self, rows: Lent<RowSnapshot>) {
         let mut held = self.rows();
         self.generation.store(rows.generation, Ordering::Release);
         // The rows it held go once the slot is let go of: a reader may hold the last reference to them.
@@ -326,7 +327,7 @@ impl RowSnapshotSlot {
     /// unit publishes again, so the unit writes what the rows shared with the arena in place rather than copying it for
     /// rows nothing reads.
     pub(crate) fn let_go(&self) {
-        let rows = std::mem::replace(&mut *self.rows(), Arc::clone(&self.let_go_of));
+        let rows = std::mem::replace(&mut *self.rows(), self.let_go_of.clone());
         drop(rows);
     }
 
@@ -343,14 +344,14 @@ impl RowSnapshotSlot {
     }
 
     /// The rows the slot holds, with a reference of the caller's own.
-    pub(crate) fn shared(&self) -> Arc<RowSnapshot> {
+    pub(crate) fn shared(&self) -> Lent<RowSnapshot> {
         let rows = self.shared_on_owner();
-        debug_assert!(!Arc::ptr_eq(&rows, &self.let_go_of), "{LET_GO}");
+        debug_assert!(!Lent::ptr_eq(&rows, &self.let_go_of), "{LET_GO}");
         rows
     }
 
     /// Like [`Self::shared`], for the owner, which reads no rows where a unit of its let go of them.
-    pub(crate) fn shared_on_owner(&self) -> Arc<RowSnapshot> {
+    pub(crate) fn shared_on_owner(&self) -> Lent<RowSnapshot> {
         self.rows().clone()
     }
 
@@ -358,8 +359,8 @@ impl RowSnapshotSlot {
     ///
     /// Nothing may publish rows while the borrow is live.
     unsafe fn latest<'a>(&self) -> &'a RowSnapshot {
-        let rows = Arc::as_ptr(&self.rows());
-        debug_assert!(!std::ptr::eq(rows, Arc::as_ptr(&self.let_go_of)), "{LET_GO}");
+        let rows = Lent::as_ptr(&self.rows());
+        debug_assert!(!std::ptr::eq(rows, Lent::as_ptr(&self.let_go_of)), "{LET_GO}");
         // SAFETY: Guaranteed by the caller: the slot keeps the rows until the next publication.
         unsafe { &*rows }
     }
@@ -370,7 +371,7 @@ const LET_GO: &str = "a unit the document thread waits for publishes the rows it
 /// The rows the arena's owner published last, with a reference of the document thread's own: a frame's own snapshot.
 /// Reading them waits for nothing (no frame in flight, no owner that publishes rows reflecting what the document thread
 /// sent since), so internal code reads the rows through this and only a script's forced read asks for current ones.
-pub(crate) struct FrameRows(Arc<RowSnapshot>);
+pub(crate) struct FrameRows(Lent<RowSnapshot>);
 
 impl std::ops::Deref for FrameRows {
     type Target = RowSnapshot;
@@ -394,7 +395,7 @@ impl FrameRows {
     }
 
     /// The rows, for a holder that keeps them beyond the read.
-    pub(crate) fn into_shared(self) -> Arc<RowSnapshot> {
+    pub(crate) fn into_shared(self) -> Lent<RowSnapshot> {
         self.0
     }
 

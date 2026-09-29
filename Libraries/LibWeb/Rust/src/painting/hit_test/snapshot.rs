@@ -29,7 +29,6 @@ use crate::painting::published_frame::{PaintRead, PaintSource};
 use crate::painting::visual_context::VisualContextTree;
 use std::cell::RefCell;
 use std::ffi::c_void;
-use std::sync::Arc;
 
 /// A document's published rows, as a hit test reads them. Rows that hold no list hit nothing.
 #[derive(Clone, Copy)]
@@ -384,7 +383,7 @@ pub(super) unsafe fn snapshot_from_handle<'a>(snapshot: *const c_void) -> HitTes
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_hit_test_snapshot(arena: *mut c_void) -> *const c_void {
     // SAFETY: Guaranteed by the caller.
-    Arc::into_raw(unsafe { crate::layout::row_reads::FrameRows::of(arena) }.into_shared()).cast()
+    crate::lent::Lent::into_raw(unsafe { crate::layout::row_reads::FrameRows::of(arena) }.into_shared()).cast()
 }
 
 /// # Safety
@@ -393,7 +392,7 @@ pub unsafe extern "C" fn layout_arena_hit_test_snapshot(arena: *mut c_void) -> *
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_release(snapshot: *const c_void) {
     assert!(!snapshot.is_null(), "hit-test snapshot handle is null");
-    drop(unsafe { Arc::from_raw(snapshot.cast::<RowSnapshot>()) });
+    drop(unsafe { crate::lent::Lent::from_raw(snapshot.cast::<RowSnapshot>()) });
 }
 
 /// Visits the chrome widgets the document's hit-test list holds items of, as the rows published it, and answers the
@@ -532,6 +531,7 @@ mod tests {
     use super::*;
     use crate::layout::LayoutNodeArena;
     use crate::painting::visual_context::{TransformData, TransformDataRole};
+    use std::sync::Arc;
 
     fn tree() -> Option<Arc<VisualContextTree>> {
         Some(Arc::new(VisualContextTree::create(TransformData {
