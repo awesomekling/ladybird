@@ -3985,48 +3985,6 @@ impl StyleEngine {
     }
 }
 
-/// Computes what moving an element from one final style record to another damages, from the
-/// records and the element's own facts. The counter styles its box was built with are the host's to
-/// compare.
-///
-/// # Safety
-/// `engine` must be live and both style records must remain pinned or assigned.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_element_record_damage(
-    engine: StyleEngineInputHandle,
-    node: u32,
-    old_style_record: u64,
-    new_style_record: u64,
-) -> u32 {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_element_record_damage",
-        crate::css::style::owner_calls::StyleQuery::ElementRecordDamage {
-            node,
-            old_style_record,
-            new_style_record,
-        },
-    )
-    .u32()
-}
-
-/// Answers [`style_engine_element_record_damage`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_element_record_damage`].
-pub(crate) unsafe fn owner_element_record_damage(
-    engine: &mut StyleEngine,
-    node: u32,
-    old_style_record: u64,
-    new_style_record: u64,
-) -> u32 {
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return super::style_invalidation::unreadable_record_damage("ElementRecordDamageWithoutStyleNode");
-    };
-    engine.element_record_damage(node, false, old_style_record, new_style_record)
-}
-
 /// Computes what moving one of an element's pseudo-elements from one final style record to another
 /// damages, where either record can be zero. `counter_styles_changed` is the host's comparison of
 /// the counter styles the pseudo-element's box was built with.

@@ -100,6 +100,29 @@ impl PublishedStyleRecord {
         })
     }
 
+    /// The record as the engine's comparisons read one, or None for a record without a longhand table, which no
+    /// element holds.
+    fn comparison_view(&self) -> Option<super::computed::StyleRecordView<'_>> {
+        let table = self.longhand_table.as_ref()?;
+        // SAFETY: The record holds a reference to the frozen table.
+        let longhand_values = SharedPayload::from_pointer_slice(unsafe { &*table.as_ptr() }.value_pointers());
+        Some(super::computed::StyleRecordView {
+            payloads: self.payloads.as_slice(),
+            base_payloads: self.base_payloads.as_slice(),
+            longhand_table: crate::css::host_shared::HostShared::new(table.as_ptr()),
+            longhand_values,
+            animated_overlay: crate::css::host_shared::HostShared::new(
+                self.animated_overlay
+                    .as_deref()
+                    .map_or(std::ptr::null(), std::ptr::from_ref),
+            ),
+            pseudo_element_styles: self.pseudo_element_styles,
+            counter_style_environment_identity: self.counter_style_environment_identity,
+            animation_overlay_identity: self.animation_overlay_identity,
+            dependency_flags: self.dependency_flags,
+        })
+    }
+
     fn view(&self) -> FfiStyleRecordView {
         FfiStyleRecordView {
             payloads: SharedPayload::as_pointer_slice(self.payloads.as_slice()).as_ptr(),
@@ -185,6 +208,42 @@ pub unsafe extern "C" fn published_style_record_affects_generated_content_state(
         record.payloads.as_slice(),
     ))
     .affects_generated_content_state()
+}
+
+/// What an element's place in the tree adds to what moving it from one record to another damages: whether it is an
+/// SVG graphics element, whether it folds its transform into its SVG container's layout (its parent is an SVG element
+/// other than a foreignObject), and whether the viewport takes its overflow (it is the root, or the html root's first
+/// body child).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiElementDamageFacts {
+    pub is_svg_graphics_element: bool,
+    pub folds_transform_into_svg_container_layout: bool,
+    pub propagates_overflow_to_viewport: bool,
+}
+
+/// What moving an element from the record `old` to the record `new` damages, with what `facts` say of its place in the
+/// tree, as the engine answers it: a read of the two records alone, which asks the engine nothing.
+///
+/// # Safety
+///
+/// `old` must be null or, as `new` must be, a live handle the engine handed out.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn published_style_record_damage(
+    old: *const c_void,
+    new: *const c_void,
+    facts: FfiElementDamageFacts,
+) -> u32 {
+    // SAFETY: Guaranteed by the caller.
+    let old = unsafe { old.cast::<PublishedStyleRecord>().as_ref() };
+    let new = unsafe { record_from_handle(new) };
+    match (
+        old.and_then(PublishedStyleRecord::comparison_view),
+        new.comparison_view(),
+    ) {
+        (Some(old), Some(new)) => super::style_invalidation::element_record_move_damage(&old, &new, facts),
+        _ => super::style_invalidation::unreadable_record_damage("PublishedStyleRecordDamageWithoutTable"),
+    }
 }
 
 /// # Safety

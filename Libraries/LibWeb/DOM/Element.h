@@ -369,7 +369,7 @@ public:
     // Compare the record an AfterSample installation left, now sampled, with the style the element
     // held before it, and apply the result to the element's layout node. `sample_damage` is what the
     // engine answered that move damages with the sample, where it did.
-    CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleDrainScope const&, CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation, CSS::StyleEffectDrain* = nullptr, Optional<u32> sample_damage = {});
+    CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleDrainScope const&, CSS::PublishedStyleRecord const* style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation, CSS::StyleEffectDrain* = nullptr, Optional<u32> sample_damage = {});
     void apply_display_none_change(CSS::StyleDrainScope const&, bool display_none_ignoring_animations_changed, bool became_display_none);
     // Republishes which animations this element references, for a record the engine settled whose
     // animation declarations moved.

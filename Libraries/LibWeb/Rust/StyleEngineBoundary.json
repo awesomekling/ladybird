@@ -305,7 +305,6 @@
     "style_engine_content_counter_styles_changed",
     "style_engine_discard_container_effects",
     "style_engine_discard_style_transaction_outputs",
-    "style_engine_element_record_damage",
     "style_engine_native_container_effect",
     "style_engine_native_container_effect_count",
     "style_engine_native_container_effects_release",
