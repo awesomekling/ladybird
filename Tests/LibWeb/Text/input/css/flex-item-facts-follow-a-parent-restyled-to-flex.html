@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    .flex { display: flex; }
+    .grid { display: grid; }
+</style>
+<body>
+<script>
+    // Containers flip between flow, flex and grid while children come and go, frame after frame. Whether a child is a
+    // flex or grid item is its parent's style, which reaches the render owner as the parent's own change; a child laid
+    // out as an item always gets a formatting context of its own.
+    asyncTest(async done => {
+        const containers = [];
+        for (let i = 0; i < 40; ++i) {
+            const container = document.createElement("div");
+            container.innerHTML = "<div>one</div><div>two <span>three</span></div>";
+            document.body.append(container);
+            containers.push(container);
+        }
+        for (let round = 0; round < 30; ++round) {
+            for (const [i, container] of containers.entries()) {
+                if ((i + round) % 3 == 0) {
+                    container.className = round % 2 ? "flex" : "grid";
+                    const child = document.createElement("div");
+                    child.textContent = `new ${round}`;
+                    container.append(child);
+                } else if ((i + round) % 3 == 1) {
+                    container.className = "";
+                    container.firstElementChild.remove();
+                    container.prepend(document.createElement("div"));
+                    container.firstElementChild.textContent = "x";
+                }
+            }
+            await new Promise(requestAnimationFrame);
+            if (round % 5 == 0)
+                document.body.offsetWidth;
+        }
+        println(`containers laid out: ${containers.filter(container => container.offsetWidth > 0).length}`);
+        done();
+    });
+</script>

@@ -2805,16 +2805,19 @@ impl super::StyleEngineState {
 }
 
 impl super::RetainedState {
-    pub(crate) fn committed_container_box_applies(&self, committed_record: u64, current_record: u64) -> bool {
-        if committed_record == current_record {
+    pub(crate) fn committed_container_box_applies(
+        &self,
+        committed: &super::published_record::PublishedStyleRecord,
+        current_record: u64,
+    ) -> bool {
+        if committed.style_record == current_record {
             return true;
         }
         self.computed_group_sets
-            .style_record_payloads(committed_record)
-            .zip(self.computed_group_sets.style_record_payloads(current_record))
-            .is_some_and(|(committed, current)| {
+            .style_record_payloads(current_record)
+            .is_some_and(|current| {
                 let committed = crate::css::computed_value_views::ComputedValuesView::new(
-                    crate::css::host_shared::SharedPayload::as_pointer_slice(committed),
+                    crate::css::host_shared::SharedPayload::as_pointer_slice(committed.payloads.as_slice()),
                 );
                 let current = crate::css::computed_value_views::ComputedValuesView::new(
                     crate::css::host_shared::SharedPayload::as_pointer_slice(current),

@@ -2713,13 +2713,14 @@ impl RetainedState {
                                     }
                                     StyleNodeID::from_raw(*basis_raw).is_some_and(|basis| {
                                         self.container_query_inputs(basis).is_some_and(|inputs| {
-                                            self.layout_style_snapshots.row(basis).is_some_and(|snapshot| {
-                                                snapshot.has_committed_box
-                                                    && self.committed_container_box_applies(
-                                                        snapshot.style_record,
+                                            self.layout_style_snapshots.committed_box_style(basis).is_some_and(
+                                                |committed| {
+                                                    self.committed_container_box_applies(
+                                                        &committed,
                                                         inputs.style_record,
                                                     )
-                                            })
+                                                },
+                                            )
                                         })
                                     })
                                 }))

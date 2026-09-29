@@ -2464,13 +2464,9 @@ impl<'pass> FlexFormattingContext<'pass> {
         }
 
         self.flex_items[index].content_baselines =
-            match formatting_context::layout_inside_child(run, None, None, node, LayoutMode::Normal, input, false) {
-                ChildLayoutOutcome::Created(result) => result.baselines,
-                ChildLayoutOutcome::ReenterCurrent => {
-                    self.run(run, input);
-                    self.item_used(index).content_baselines_from_cells()
-                }
-                ChildLayoutOutcome::Skipped => self.item_used(index).content_baselines_from_cells(),
+            match formatting_context::layout_inside_independent_child(run, None, node, input) {
+                Some(result) => result.baselines,
+                None => self.item_used(index).content_baselines_from_cells(),
             };
 
         let container_inline_size = self.container_used().content_inline_size.get();

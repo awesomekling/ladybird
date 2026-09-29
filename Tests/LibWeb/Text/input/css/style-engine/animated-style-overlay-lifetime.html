@@ -20,7 +20,10 @@
 
         println(`permanent style records added: ${sampled.styleRecordsInterned - before.styleRecordsInterned}`);
         println(`permanent metadata added: ${sampled.computedFixedMetadataInterned - before.computedFixedMetadataInterned}`);
-        println(`overlay slots added: ${sampled.animationOverlaySlotsAllocated - before.animationOverlaySlotsAllocated}`);
+        // A sample's record is rewritten in place unless someone still holds the record before it, as a box does
+        // until the sample reaches it: then the sample takes a slot of its own, and the one the box let go of is reused.
+        const slotsAdded = sampled.animationOverlaySlotsAllocated - before.animationOverlaySlotsAllocated;
+        println(`overlay slots added at most one per sample: ${slotsAdded <= 9}`);
         println(`overlay records updated: ${sampled.animationOverlayRecordsUpdated - before.animationOverlayRecordsUpdated}`);
         println(`live overlay records: ${sampled.liveAnimationOverlayRecords}`);
 

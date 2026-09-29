@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    @keyframes slide {
+        from { transform: translateX(0); }
+        to { transform: translateX(100px); }
+    }
+    .animated { animation: slide 100s linear; }
+</style>
+<body>
+<script>
+    // A box holds the style its element's animation sampled for it until the element's next style reaches the render
+    // owner. Elements whose animations are cancelled and which leave the document in the same task leave boxes holding
+    // records the engine no longer assigns, which their detachment still pins.
+    asyncTest(async done => {
+        let removed = 0;
+        for (let round = 0; round < 20; ++round) {
+            const elements = [];
+            for (let i = 0; i < 30; ++i) {
+                const element = document.createElement("div");
+                element.className = "animated";
+                element.textContent = "animated";
+                document.body.append(element);
+                elements.push(element);
+            }
+            await new Promise(requestAnimationFrame);
+            await new Promise(requestAnimationFrame);
+            for (const element of elements) {
+                for (const animation of element.getAnimations())
+                    animation.cancel();
+                element.remove();
+                ++removed;
+            }
+            await new Promise(requestAnimationFrame);
+        }
+        println(`removed: ${removed}`);
+        done();
+    });
+</script>

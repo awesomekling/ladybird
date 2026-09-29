@@ -3817,7 +3817,8 @@ impl LayoutNodeArena {
         {
             self.derive_containing_block_establishment_flags_of_children(slot);
         }
-        self.refresh_ancestor_facts_of_anonymous_children(slot);
+        self.derive_ancestor_facts_for_node(slot);
+        self.refresh_ancestor_facts_of_children(slot);
     }
 
     pub(crate) fn enroll_text_node_for_content_sync(&self, node: NodeSlotId) {
@@ -4971,17 +4972,17 @@ impl LayoutNodeArena {
         data.ancestor_facts.replace(facts) != facts
     }
 
-    /// A style change reaches the anonymous boxes below the node without rebuilding them, and
-    /// they take some of their ancestor facts from it.
-    fn refresh_ancestor_facts_of_anonymous_children(&self, parent: NodeSlotId) {
+    /// A style change reaches the boxes below the node without rebuilding them, and they take their ancestor facts
+    /// from it: whether their parent is a flex or grid container, above all, which the tree they were built into may
+    /// have said before the node's style did.
+    fn refresh_ancestor_facts_of_children(&self, parent: NodeSlotId) {
         let mut child = self.data(parent).first_child.get();
         while !child.is_invalid() {
-            let data = self.data(child);
-            if super::node_facts::has_flag(data, NodeFlag::Anonymous) && self.derive_ancestor_facts_for_node(child) {
+            if self.derive_ancestor_facts_for_node(child) {
                 self.bump_fragment_cache_epoch_of_self_and_ancestors(child);
-                self.refresh_ancestor_facts_of_anonymous_children(child);
+                self.refresh_ancestor_facts_of_children(child);
             }
-            child = data.next_sibling.get();
+            child = self.data(child).next_sibling.get();
         }
     }
 

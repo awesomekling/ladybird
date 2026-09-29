@@ -2178,6 +2178,25 @@ pub(crate) fn layout_inside_child(
     ChildLayoutOutcome::Created(result)
 }
 
+/// Lays out a child that establishes a formatting context of its own, as every flex and grid item does, whatever its
+/// facts say: an item whose facts lag its container's style still gets a context of its own rather than re-entering
+/// its container's. Returns None where the child's layout was skipped.
+pub(crate) fn layout_inside_independent_child(
+    run: &FormattingContextRun,
+    parent_grid: Option<&grid_formatting_context::GridFormattingContext>,
+    child: Node,
+    input: LayoutInput,
+) -> Option<ChildLayoutResult> {
+    match layout_inside_child(run, None, parent_grid, child, LayoutMode::Normal, input, true) {
+        ChildLayoutOutcome::Created(result) => Some(result),
+        ChildLayoutOutcome::Skipped => None,
+        ChildLayoutOutcome::ReenterCurrent => {
+            debug_assert!(false, "an independent child run re-entered its parent's context");
+            None
+        }
+    }
+}
+
 /// Runs a table cell's committing layout while its table still sizes rows, beside the cell's record, and keeps the
 /// outputs in the run cache. The cell's committing run, once the rows are sized, replays them: its input differs only
 /// in the intrinsic block padding, which the contents of an eligible cell never observe (see

@@ -3221,20 +3221,7 @@ impl<'pass> GridFormattingContext<'pass> {
                 sizing,
                 participation: ParticipationInParentFormattingContext::Item,
             };
-            match formatting_context::layout_inside_child(
-                run,
-                None,
-                Some(self),
-                item.box_,
-                LayoutMode::Normal,
-                input,
-                false,
-            ) {
-                ChildLayoutOutcome::Created(_) | ChildLayoutOutcome::Skipped => {}
-                ChildLayoutOutcome::ReenterCurrent => {
-                    self.run(run, input);
-                }
-            };
+            formatting_context::layout_inside_independent_child(run, Some(self), item.box_, input);
             let offset = FfiCssPixelPoint {
                 x: area.offset.inline_offset + self.item_margin_box_start(item, Axis::Column),
                 y: area.offset.block_offset + self.item_margin_box_start(item, Axis::Row),
