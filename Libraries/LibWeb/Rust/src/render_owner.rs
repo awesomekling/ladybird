@@ -1200,15 +1200,15 @@ pub(crate) fn send_arena_change(document: DocumentId, change: ArenaChange) -> Ch
     if HELD.with_borrow(|held| !held.changes.is_empty() && held.document != document) {
         send_held_changes();
     }
-    let batch_is_open = HELD.with_borrow_mut(|held| {
+    let holds_on = HELD.with_borrow_mut(|held| {
         if held.changes.is_empty() {
             held.document = document;
             held.first = seq;
         }
         held.changes.push(change);
-        held.open_batches > 0
+        held.open_batches > 0 && held.changes.len() < HeldChanges::MOST_PER_MESSAGE
     });
-    if !batch_is_open {
+    if !holds_on {
         send_held_changes();
     }
     seq
@@ -1223,6 +1223,12 @@ struct HeldChanges {
     document: DocumentId,
     first: ChangeSeq,
     changes: Vec<ArenaChange>,
+}
+
+impl HeldChanges {
+    /// The most changes a batch holds before it sends them: the owner takes in the first changes of a long drain
+    /// while the main thread writes the rest, rather than all of them once the unit that comes after is waited for.
+    const MOST_PER_MESSAGE: usize = 256;
 }
 
 /// Sends the owner what the calling document thread holds, as one message.
