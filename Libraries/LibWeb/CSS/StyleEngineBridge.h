@@ -456,6 +456,13 @@ public:
     // it in the drain's waves too, and the identity is not issued again until the removal has crossed. Until then,
     // the drain skips its answers.
     void note_style_node_retired(StyleNodeID);
+    // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
+    // The before-change style of a target in the style stabilization epoch: the first record named for it, which the
+    // engine's passes decide the target's transitions against too, and which stays live while it is held here, until
+    // the epoch commits or the target's identity retires.
+    void record_transition_baseline(StyleDrainScope const&, StyleNodeID, u8 pseudo_kind, RefPtr<PublishedStyleRecord const>);
+    [[nodiscard]] RefPtr<PublishedStyleRecord const> transition_baseline(StyleNodeID, u8 pseudo_kind) const;
+    void release_transition_baselines(StyleDrainScope const&);
     [[nodiscard]] bool style_node_was_retired_beside_pass(StyleNodeID style_node) const { return m_style_nodes_retired_beside_pass.contains(style_node); }
     // A submitted pass counts an element's siblings as they were when it was submitted. An element whose first record
     // reading a tree-counting function comes from that pass is not known to read one while its siblings change beside
@@ -539,6 +546,8 @@ private:
     i64 m_submitted_style_transaction_microseconds { 0 };
     bool m_submitted_pass_in_flight { false };
     HashTable<StyleNodeID> m_style_nodes_retired_beside_pass;
+    // By style node and pseudo-element kind (see transition_baseline_key()).
+    HashMap<u64, NonnullRefPtr<PublishedStyleRecord const>> m_transition_baselines;
     HashTable<StyleNodeID> m_parents_whose_children_changed_beside_pass;
     Vector<StyleDrainScope const*> m_effect_drain_scopes;
     // Drained from the front one input at a time, and a busy page queues thousands beside a pass.

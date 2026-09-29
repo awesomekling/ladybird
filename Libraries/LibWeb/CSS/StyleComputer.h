@@ -156,11 +156,14 @@ public:
 
     void begin_transition_stabilization_epoch();
     // Says whether a baseline was recorded, which is a main-side write.
-    void record_transition_stabilization_baseline(StyleDrainScope const&, DOM::AbstractElement, Optional<StyleRecordID> before_change_style_record = {}) const;
+    // Records the style the element holds as its before-change style for the epoch, or `before_change_style_record`,
+    // the style a row moved it away from, where one is named (none for a null one).
+    void record_transition_stabilization_baseline(StyleDrainScope const&, DOM::AbstractElement) const;
+    void record_transition_stabilization_baseline(StyleDrainScope const&, DOM::AbstractElement, RefPtr<PublishedStyleRecord const> before_change_style_record) const;
     void pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(StyleDrainScope const&, DOM::AbstractElement) const;
     // Runs the whole transition step for an installed record, against the record the element moved
     // away from. Returns what publishing a started transition's values invalidates.
-    [[nodiscard]] RequiredInvalidationAfterStyleChange run_transition_step_for_installed_record(StyleDrainScope const&, DOM::AbstractElement, StyleRecordID before_change_style_record, StyleEngineFFI::FfiTransitionStepDecidedInPass const* decided = nullptr) const;
+    [[nodiscard]] RequiredInvalidationAfterStyleChange run_transition_step_for_installed_record(StyleDrainScope const&, DOM::AbstractElement, RefPtr<PublishedStyleRecord const> before_change_style_record, StyleEngineFFI::FfiTransitionStepDecidedInPass const* decided = nullptr) const;
     void commit_transition_stabilization_epoch();
     void for_each_provisional_transition_effect_on_element(DOM::Element const&, Function<void(Animations::KeyframeEffect&)> const&) const;
 

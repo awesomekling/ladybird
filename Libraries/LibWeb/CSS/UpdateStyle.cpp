@@ -1034,12 +1034,16 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     }
                     apply_pseudo_animation_plan(to_underlying(PseudoElement::After));
                     bool const has_animation_effects = element->has_relevant_animations() || element->has_associated_animations();
+                    // The record the row moved away from, which the element held unless it held a composition over it.
+                    auto published_row_old_style_record = [&] {
+                        return old_style_record.value() == reaction.old_style_record ? old_published_style_record : scope.engine().publish_style_record(scope, StyleRecordID { reaction.old_style_record });
+                    };
                     // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
                     // Sampling the installed record can pin the epoch's baseline, and the record the
                     // element holds by then is the after-change one. A row that owes the whole step
                     // pins the record it moved away from first.
                     if (transition_debt == 2 && document.is_in_style_stabilization_epoch() && settled.has_style())
-                        document.style_computer().record_transition_stabilization_baseline(scope, settled, StyleRecordID { reaction.old_style_record });
+                        document.style_computer().record_transition_stabilization_baseline(scope, settled, published_row_old_style_record());
                     bool const compares_after_sample = engine_record_comparison == DOM::Element::EngineRecordComparison::AfterSample;
                     auto const row_sample_invalidation = compares_after_sample ? SampleInvalidation::AppliedByCaller : SampleInvalidation::Applied;
                     bool const installed_pass_sample = row_sampled_in_pass.present && settled.has_style()
@@ -1079,7 +1083,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                                 ? StyleEngineFFI::style_engine_take_transition_step_decided_in_pass(scope.engine().rust_handle(), reaction.style_node)
                                 : StyleEngineFFI::FfiTransitionStepDecidedInPass {};
                             auto step_invalidation = document.style_computer().run_transition_step_for_installed_record(scope,
-                                settled, StyleRecordID { reaction.old_style_record }, decided.present ? &decided : nullptr);
+                                settled, published_row_old_style_record(), decided.present ? &decided : nullptr);
                             if (!step_invalidation.is_none()) {
                                 row_effects.append_invalidation(StyleNodeID { reaction.style_node }, step_invalidation);
                                 transaction_invalidation |= step_invalidation;
@@ -1601,7 +1605,7 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     auto invalidation = element.apply_engine_computed_style_record(scope, StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, answer.row_facts, did_change_custom_properties,
         samples_over_the_record ? DOM::Element::EngineRecordComparison::AfterSample : DOM::Element::EngineRecordComparison::AtInstallation, engine_record_damage);
     if (!!old_style_record && element.associated_shadow_host_pseudo_element().has_value())
-        invalidation |= style_computer.run_transition_step_for_installed_record(scope, { element }, old_style_record);
+        invalidation |= style_computer.run_transition_step_for_installed_record(scope, { element }, old_published_style_record);
     auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope, engine.rust_handle(), element.style_node_id().value());
     ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(scope, container_effects.effects); };
     StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { element }, container_effects);

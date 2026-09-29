@@ -1409,6 +1409,37 @@ void StyleEngine::note_style_node_retired(StyleNodeID style_node)
 {
     if (m_submitted_pass_in_flight)
         m_style_nodes_retired_beside_pass.set(style_node);
+    // A retired identity can name another element before the epoch commits.
+    if (!m_transition_baselines.is_empty())
+        m_transition_baselines.remove_all_matching([&](u64 key, auto const&) { return key >> 8 == style_node.value(); });
+}
+
+static u64 transition_baseline_key(StyleNodeID style_node, u8 pseudo_kind)
+{
+    return (static_cast<u64>(style_node.value()) << 8) | pseudo_kind;
+}
+
+void StyleEngine::record_transition_baseline(StyleDrainScope const& scope, StyleNodeID style_node, u8 pseudo_kind, RefPtr<PublishedStyleRecord const> style_record)
+{
+    if (!style_record)
+        return;
+    auto key = transition_baseline_key(style_node, pseudo_kind);
+    if (m_transition_baselines.contains(key))
+        return;
+    send_transition_baseline(scope, style_node, pseudo_kind, style_record->identity());
+    m_transition_baselines.set(key, style_record.release_nonnull());
+}
+
+RefPtr<PublishedStyleRecord const> StyleEngine::transition_baseline(StyleNodeID style_node, u8 pseudo_kind) const
+{
+    return m_transition_baselines.get(transition_baseline_key(style_node, pseudo_kind)).value_or(nullptr);
+}
+
+void StyleEngine::release_transition_baselines(StyleDrainScope const& scope)
+{
+    // The engine unpins its own copies as the change reaches it; what this holds goes now.
+    send_release_transition_baselines(scope);
+    m_transition_baselines.clear();
 }
 
 StyleEngine::PublishedStyleTransaction StyleEngine::finish_submitted_style_transaction()
