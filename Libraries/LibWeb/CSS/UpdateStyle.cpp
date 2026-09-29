@@ -982,6 +982,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                         || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample);
                     auto old_originating_style = element->computed_style();
                     auto const old_style_record = element->style_record_identity();
+                    RefPtr<PublishedStyleRecord const> const old_published_style_record = element->published_style_record();
                     bool const old_is_list_item = old_originating_style && old_originating_style->display().is_list_item();
                     auto const previous_pseudo_deferral = g_deferring_engine_pseudo_installation;
                     g_deferring_engine_pseudo_installation = defer_pseudos;
@@ -1062,7 +1063,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                         sample_damage = sample_animations_for_installed_record(scope, settled, row_sample_invalidation, compares_after_sample ? old_style_record : StyleRecordID {});
                     }
                     if (compares_after_sample)
-                        invalidation = element->compare_engine_computed_style_record_after_sample(scope, old_style_record, invalidation, &row_effects, sample_damage);
+                        invalidation = element->compare_engine_computed_style_record_after_sample(scope, old_published_style_record, invalidation, &row_effects, sample_damage);
                     // The step runs here rather than after the batch: a descendant applied later
                     // reads this element's after-change style, which is what the step decides
                     // against, and the C++ computation this row replaces runs it inside itself.
@@ -1585,6 +1586,7 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
             pseudo_element_records[kind] = StyleRecordID { answer.record.pseudo_records[kind] };
     }
     auto old_style_record = element.style_record_identity();
+    RefPtr<PublishedStyleRecord const> const old_published_style_record = element.published_style_record();
     // A targeted record that drops the composition the element held is one its animations are
     // sampled over again. Compare it once, after that sample, or each step sees every animated
     // value move and asks for layout even when the composed style is unchanged.
@@ -1606,7 +1608,7 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     engine.acknowledge_engine_computed_record(scope, element.style_node_id());
     if (samples_over_the_record) {
         auto sample_damage = sample_animations_for_installed_record(scope, DOM::AbstractElement { element }, SampleInvalidation::AppliedByCaller, old_style_record);
-        invalidation = element.compare_engine_computed_style_record_after_sample(scope, old_style_record, invalidation, nullptr, sample_damage);
+        invalidation = element.compare_engine_computed_style_record_after_sample(scope, old_published_style_record, invalidation, nullptr, sample_damage);
     }
     return invalidation;
 }

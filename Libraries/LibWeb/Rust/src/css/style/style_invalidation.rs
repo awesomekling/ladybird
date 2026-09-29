@@ -5,6 +5,7 @@
  */
 
 use super::bridge::{self, FfiAnimationInvalidation, FfiStyleInvalidationField};
+use super::published_record::FfiElementDamageFacts;
 use super::{RetainedState, StyleNodeID};
 use crate::css::animated_overlay::{AnimatedOverlay, overlay_wins};
 use crate::css::computed_value_views::ComputedValuesView;
@@ -873,147 +874,13 @@ impl RetainedState {
             );
             return StyleInvalidation::full().pack();
         };
-        let old_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(old_record.payloads));
-        let new_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(new_record.payloads));
-        let old_table = unsafe { old_record.longhand_table.deref() };
-        let new_table = unsafe { new_record.longhand_table.deref() };
-        let all_groups_equal = old_record
-            .payloads
-            .iter()
-            .zip(new_record.payloads)
-            .enumerate()
-            .all(|(index, (&old, &new))| old == new || style_group_payloads_equal(index, old.as_ptr(), new.as_ptr()));
-        let can_skip = all_groups_equal
-            && std::ptr::eq(old_table, new_table)
-            && font_lists_equal
-            && old_record.animated_overlay.is_null()
-            && new_record.animated_overlay.is_null();
-        let mut result = StyleInvalidation::default();
-        if !font_lists_equal
-            || ((old_values.continue_() != crate::css::css_enums::continue_value::AUTO
-                || new_values.continue_() != crate::css::css_enums::continue_value::AUTO)
-                && old_values.display_before_box_type_transformation()
-                    != new_values.display_before_box_type_transformation())
-        {
-            result.any_computed_value_changed = true;
-            result.ensure_level(INVALIDATION_RELAYOUT);
-        }
-        if !can_skip {
-            // Equal resolved values can still inherit differently: currentcolor and an RGB color
-            // may paint the same here, but resolve to different colors in an inheriting child.
-            for (property, _) in old_table
-                .inheritance_dependent_values()
-                .chain(new_table.inheritance_dependent_values())
-            {
-                if !inheritance_dependent_value_changed(old_table, new_table, property) {
-                    continue;
-                }
-                result.any_computed_value_changed = true;
-                if property_metadata::property_is_inherited(property) {
-                    match property_metadata::property_style_group_index(property) {
-                        Some(group) if group < 7 => result.inherited_groups |= 1 << group,
-                        _ => result.inherited_groups = ALL_INHERITED_STYLE_GROUPS,
-                    }
-                } else {
-                    result.non_inherited_inheritance_source = true;
-                }
-            }
-            let old_writing_mode = old_values.writing_mode();
-            let old_direction = old_values.direction();
-            let new_writing_mode = new_values.writing_mode();
-            let new_direction = new_values.direction();
-            let mut effective_changed = [false; NUMBER_OF_LONGHAND_PROPERTIES];
-            for (index, changed) in effective_changed.iter_mut().enumerate() {
-                let property = FIRST_LONGHAND_PROPERTY_ID + index as u16;
-                let old_physical = if property_metadata::longhand_is_logical_alias(property) {
-                    crate::css::style_compute::map_logical_alias_to_physical(property, old_writing_mode, old_direction)
-                } else {
-                    property
-                };
-                let new_physical = if property_metadata::longhand_is_logical_alias(property) {
-                    crate::css::style_compute::map_logical_alias_to_physical(property, new_writing_mode, new_direction)
-                } else {
-                    property
-                };
-                let old_value = effective_value(&old_record, old_physical);
-                let new_value = effective_value(&new_record, new_physical);
-                if std::ptr::eq(old_value, new_value) || old_value == new_value {
-                    continue;
-                }
-                *changed = true;
-                result.any_computed_value_changed = true;
-                if property_metadata::property_is_inherited(property) {
-                    match property_metadata::property_style_group_index(new_physical) {
-                        Some(group) if group < 7 => result.inherited_groups |= 1 << group,
-                        _ => result.inherited_groups = ALL_INHERITED_STYLE_GROUPS,
-                    }
-                }
-                let mut invalidation = if element_propagates_overflow_to_viewport
-                    && matches!(property, property_id::OVERFLOW_X | property_id::OVERFLOW_Y)
-                {
-                    viewport_propagated_overflow_invalidation()
-                } else {
-                    property_invalidation(property, old_values, new_values)
-                };
-                if element_folds_transform_into_layout
-                    && matches!(
-                        property,
-                        property_id::TRANSFORM | property_id::TRANSLATE | property_id::ROTATE | property_id::SCALE
-                    )
-                {
-                    invalidation.ensure_level(INVALIDATION_RELAYOUT);
-                }
-                result.merge(invalidation);
-            }
-            let old_overlay = unsafe { old_record.animated_overlay.cast::<AnimatedOverlay>().as_ref() };
-            let new_overlay = unsafe { new_record.animated_overlay.cast::<AnimatedOverlay>().as_ref() };
-            if old_overlay.is_some() || new_overlay.is_some() {
-                for (index, effective_changed) in effective_changed.into_iter().enumerate() {
-                    if effective_changed {
-                        continue;
-                    }
-                    let property = FIRST_LONGHAND_PROPERTY_ID + index as u16;
-                    if old_overlay.and_then(|overlay| overlay.get(property)).is_none()
-                        && new_overlay.and_then(|overlay| overlay.get(property)).is_none()
-                    {
-                        continue;
-                    }
-                    let old_physical = crate::css::style_compute::map_logical_alias_to_physical(
-                        property,
-                        old_writing_mode,
-                        old_direction,
-                    );
-                    let new_physical = crate::css::style_compute::map_logical_alias_to_physical(
-                        property,
-                        new_writing_mode,
-                        new_direction,
-                    );
-                    let old_base = unsafe {
-                        old_record.longhand_values[usize::from(old_physical - FIRST_LONGHAND_PROPERTY_ID)]
-                            .cast::<StyleValueData>()
-                            .deref()
-                    };
-                    let new_base = unsafe {
-                        new_record.longhand_values[usize::from(new_physical - FIRST_LONGHAND_PROPERTY_ID)]
-                            .cast::<StyleValueData>()
-                            .deref()
-                    };
-                    if std::ptr::eq(old_base, new_base) || old_base == new_base {
-                        continue;
-                    }
-                    result.any_computed_value_changed = true;
-                    if !property_metadata::property_is_inherited(property) {
-                        result.non_inherited_inheritance_source = true;
-                    } else {
-                        match property_metadata::property_style_group_index(new_physical) {
-                            Some(group) if group < 7 => result.inherited_groups |= 1 << group,
-                            _ => result.inherited_groups = ALL_INHERITED_STYLE_GROUPS,
-                        }
-                    }
-                }
-            }
-        }
-        let packed = result.pack();
+        let packed = compare_record_views(
+            &old_record,
+            &new_record,
+            font_lists_equal,
+            element_folds_transform_into_layout,
+            element_propagates_overflow_to_viewport,
+        );
         if self.style_invalidation_cache.len() >= 4096 {
             self.style_invalidation_cache.clear();
         }
@@ -1044,62 +911,37 @@ impl RetainedState {
         old_style_record: u64,
         new_style_record: u64,
     ) -> u32 {
-        let (font_lists_equal, color_changed, stroke_uses_current_color, table_fixup_child_changed) = {
+        let moved = {
             let (Some(old_record), Some(new_record)) = (
                 self.computed_group_sets.style_record_view(old_style_record),
                 self.computed_group_sets.style_record_view(new_style_record),
             ) else {
                 return unreadable_record_damage("ElementRecordDamageRecordNotLive");
             };
-            let old_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(old_record.payloads));
-            let new_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(new_record.payloads));
-            let stroke_uses_current_color = |values: ComputedValuesView<'_>| {
-                let stroke = &values.inherited_svg().stroke;
-                stroke.kind != 0 && stroke.color_is_currentcolor
-            };
-            // The table fixup algorithm needs an authored box's display from before box type
-            // transformation. A flex or grid item can therefore keep the same blockified display
-            // while changing whether it needs anonymous table wrappers.
-            let is_table_fixup_child = |values: ComputedValuesView<'_>| {
-                let display = values.display_before_box_type_transformation();
-                display.is_table_row_group()
-                    || display.is_table_header_group()
-                    || display.is_table_footer_group()
-                    || display.is_table_column_group()
-                    || display.is_table_caption()
-            };
-            (
-                old_values
-                    .font()
-                    .font_cascade_list
-                    .equals(&new_values.font().font_cascade_list),
-                old_values.inherited_text().color != new_values.inherited_text().color,
-                stroke_uses_current_color(old_values) || stroke_uses_current_color(new_values),
-                is_table_fixup_child(old_values) != is_table_fixup_child(new_values),
-            )
+            RecordMove::between(&old_record, &new_record)
         };
-        let facts = self.computed_group_sets.adjustment_facts(node);
-        let is_svg_graphics_element = facts & bridge::element_adjustment_fact::IS_SVG_GRAPHICS_ELEMENT != 0;
+        let facts = self.element_damage_facts(node, is_pseudo_element);
         let packed = self.compare_style_records(
             old_style_record,
             new_style_record,
-            font_lists_equal,
-            is_svg_graphics_element && self.element_folds_transform_into_svg_container_layout(node),
-            !is_pseudo_element && self.element_propagates_overflow_to_viewport(node),
+            moved.font_lists_equal,
+            facts.folds_transform_into_svg_container_layout,
+            facts.propagates_overflow_to_viewport,
         );
-        let mut damage = StyleInvalidation::unpack(packed);
-        // An SVG currentColor stroke stores its resolved color alongside the fact that it came from
-        // currentColor. A color-only change can therefore alter the visible stroke width and the SVG
-        // container bounds without changing the stroke longhand itself.
-        if is_svg_graphics_element && color_changed && stroke_uses_current_color {
-            damage.ensure_level(INVALIDATION_RELAYOUT);
+        moved.damage(packed, facts, is_pseudo_element) | (packed & FfiStyleInvalidationField::CacheHit as u32)
+    }
+
+    /// What the engine holds of `node`'s place in the tree that a move of its records damages.
+    fn element_damage_facts(&self, node: StyleNodeID, is_pseudo_element: bool) -> FfiElementDamageFacts {
+        let is_svg_graphics_element = self.computed_group_sets.adjustment_facts(node)
+            & bridge::element_adjustment_fact::IS_SVG_GRAPHICS_ELEMENT
+            != 0;
+        FfiElementDamageFacts {
+            is_svg_graphics_element,
+            folds_transform_into_svg_container_layout: is_svg_graphics_element
+                && self.element_folds_transform_into_svg_container_layout(node),
+            propagates_overflow_to_viewport: !is_pseudo_element && self.element_propagates_overflow_to_viewport(node),
         }
-        // Generated pseudo-element boxes are anonymous, so fixup uses their adjusted display instead.
-        if !is_pseudo_element && table_fixup_child_changed {
-            damage.any_computed_value_changed = true;
-            damage.merge(StyleInvalidation::full());
-        }
-        damage.pack() | (packed & FfiStyleInvalidationField::CacheHit as u32)
     }
 
     /// What moving `node`'s pseudo-element of `pseudo_kind` from one record to another damages. Either
@@ -1277,6 +1119,231 @@ impl RetainedState {
         }
         false
     }
+}
+
+/// What a move from one record to another changes that the damage of the move reads beside the longhands.
+struct RecordMove {
+    font_lists_equal: bool,
+    color_changed: bool,
+    stroke_uses_current_color: bool,
+    table_fixup_child_changed: bool,
+}
+
+impl RecordMove {
+    fn between(
+        old_record: &super::computed::StyleRecordView<'_>,
+        new_record: &super::computed::StyleRecordView<'_>,
+    ) -> Self {
+        let old_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(old_record.payloads));
+        let new_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(new_record.payloads));
+        let stroke_uses_current_color = |values: ComputedValuesView<'_>| {
+            let stroke = &values.inherited_svg().stroke;
+            stroke.kind != 0 && stroke.color_is_currentcolor
+        };
+        // The table fixup algorithm needs an authored box's display from before box type
+        // transformation. A flex or grid item can therefore keep the same blockified display
+        // while changing whether it needs anonymous table wrappers.
+        let is_table_fixup_child = |values: ComputedValuesView<'_>| {
+            let display = values.display_before_box_type_transformation();
+            display.is_table_row_group()
+                || display.is_table_header_group()
+                || display.is_table_footer_group()
+                || display.is_table_column_group()
+                || display.is_table_caption()
+        };
+        Self {
+            font_lists_equal: old_values
+                .font()
+                .font_cascade_list
+                .equals(&new_values.font().font_cascade_list),
+            color_changed: old_values.inherited_text().color != new_values.inherited_text().color,
+            stroke_uses_current_color: stroke_uses_current_color(old_values) || stroke_uses_current_color(new_values),
+            table_fixup_child_changed: is_table_fixup_child(old_values) != is_table_fixup_child(new_values),
+        }
+    }
+
+    /// The damage of the move, from `packed`, what comparing its records damages.
+    fn damage(self, packed: u32, facts: FfiElementDamageFacts, is_pseudo_element: bool) -> u32 {
+        let mut damage = StyleInvalidation::unpack(packed);
+        // An SVG currentColor stroke stores its resolved color alongside the fact that it came from
+        // currentColor. A color-only change can therefore alter the visible stroke width and the SVG
+        // container bounds without changing the stroke longhand itself.
+        if facts.is_svg_graphics_element && self.color_changed && self.stroke_uses_current_color {
+            damage.ensure_level(INVALIDATION_RELAYOUT);
+        }
+        // Generated pseudo-element boxes are anonymous, so fixup uses their adjusted display instead.
+        if !is_pseudo_element && self.table_fixup_child_changed {
+            damage.any_computed_value_changed = true;
+            damage.merge(StyleInvalidation::full());
+        }
+        damage.pack()
+    }
+}
+
+/// What moving an element from the record `old_record` views to the one `new_record` views damages, as
+/// [`RetainedState::element_record_damage`] answers it, from the records alone and `facts`: a read of the two records
+/// that asks the engine nothing.
+pub(crate) fn element_record_move_damage(
+    old_record: &super::computed::StyleRecordView<'_>,
+    new_record: &super::computed::StyleRecordView<'_>,
+    facts: FfiElementDamageFacts,
+) -> u32 {
+    let moved = RecordMove::between(old_record, new_record);
+    let packed = compare_record_views(
+        old_record,
+        new_record,
+        moved.font_lists_equal,
+        facts.folds_transform_into_svg_container_layout,
+        facts.propagates_overflow_to_viewport,
+    );
+    moved.damage(packed, facts, false)
+}
+
+/// What moving an element from the record `old_record` views to the one `new_record` views damages, from the two
+/// records alone and what the element's place adds: whether its font lists are equal, whether it folds a transform
+/// into its SVG container's layout, and whether the viewport takes its overflow.
+fn compare_record_views(
+    old_record: &super::computed::StyleRecordView<'_>,
+    new_record: &super::computed::StyleRecordView<'_>,
+    font_lists_equal: bool,
+    element_folds_transform_into_layout: bool,
+    element_propagates_overflow_to_viewport: bool,
+) -> u32 {
+    let old_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(old_record.payloads));
+    let new_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(new_record.payloads));
+    let old_table = unsafe { old_record.longhand_table.deref() };
+    let new_table = unsafe { new_record.longhand_table.deref() };
+    let all_groups_equal = old_record
+        .payloads
+        .iter()
+        .zip(new_record.payloads)
+        .enumerate()
+        .all(|(index, (&old, &new))| old == new || style_group_payloads_equal(index, old.as_ptr(), new.as_ptr()));
+    let can_skip = all_groups_equal
+        && std::ptr::eq(old_table, new_table)
+        && font_lists_equal
+        && old_record.animated_overlay.is_null()
+        && new_record.animated_overlay.is_null();
+    let mut result = StyleInvalidation::default();
+    if !font_lists_equal
+        || ((old_values.continue_() != crate::css::css_enums::continue_value::AUTO
+            || new_values.continue_() != crate::css::css_enums::continue_value::AUTO)
+            && old_values.display_before_box_type_transformation()
+                != new_values.display_before_box_type_transformation())
+    {
+        result.any_computed_value_changed = true;
+        result.ensure_level(INVALIDATION_RELAYOUT);
+    }
+    if !can_skip {
+        // Equal resolved values can still inherit differently: currentcolor and an RGB color
+        // may paint the same here, but resolve to different colors in an inheriting child.
+        for (property, _) in old_table
+            .inheritance_dependent_values()
+            .chain(new_table.inheritance_dependent_values())
+        {
+            if !inheritance_dependent_value_changed(old_table, new_table, property) {
+                continue;
+            }
+            result.any_computed_value_changed = true;
+            if property_metadata::property_is_inherited(property) {
+                match property_metadata::property_style_group_index(property) {
+                    Some(group) if group < 7 => result.inherited_groups |= 1 << group,
+                    _ => result.inherited_groups = ALL_INHERITED_STYLE_GROUPS,
+                }
+            } else {
+                result.non_inherited_inheritance_source = true;
+            }
+        }
+        let old_writing_mode = old_values.writing_mode();
+        let old_direction = old_values.direction();
+        let new_writing_mode = new_values.writing_mode();
+        let new_direction = new_values.direction();
+        let mut effective_changed = [false; NUMBER_OF_LONGHAND_PROPERTIES];
+        for (index, changed) in effective_changed.iter_mut().enumerate() {
+            let property = FIRST_LONGHAND_PROPERTY_ID + index as u16;
+            let old_physical = if property_metadata::longhand_is_logical_alias(property) {
+                crate::css::style_compute::map_logical_alias_to_physical(property, old_writing_mode, old_direction)
+            } else {
+                property
+            };
+            let new_physical = if property_metadata::longhand_is_logical_alias(property) {
+                crate::css::style_compute::map_logical_alias_to_physical(property, new_writing_mode, new_direction)
+            } else {
+                property
+            };
+            let old_value = effective_value(old_record, old_physical);
+            let new_value = effective_value(new_record, new_physical);
+            if std::ptr::eq(old_value, new_value) || old_value == new_value {
+                continue;
+            }
+            *changed = true;
+            result.any_computed_value_changed = true;
+            if property_metadata::property_is_inherited(property) {
+                match property_metadata::property_style_group_index(new_physical) {
+                    Some(group) if group < 7 => result.inherited_groups |= 1 << group,
+                    _ => result.inherited_groups = ALL_INHERITED_STYLE_GROUPS,
+                }
+            }
+            let mut invalidation = if element_propagates_overflow_to_viewport
+                && matches!(property, property_id::OVERFLOW_X | property_id::OVERFLOW_Y)
+            {
+                viewport_propagated_overflow_invalidation()
+            } else {
+                property_invalidation(property, old_values, new_values)
+            };
+            if element_folds_transform_into_layout
+                && matches!(
+                    property,
+                    property_id::TRANSFORM | property_id::TRANSLATE | property_id::ROTATE | property_id::SCALE
+                )
+            {
+                invalidation.ensure_level(INVALIDATION_RELAYOUT);
+            }
+            result.merge(invalidation);
+        }
+        let old_overlay = unsafe { old_record.animated_overlay.cast::<AnimatedOverlay>().as_ref() };
+        let new_overlay = unsafe { new_record.animated_overlay.cast::<AnimatedOverlay>().as_ref() };
+        if old_overlay.is_some() || new_overlay.is_some() {
+            for (index, effective_changed) in effective_changed.into_iter().enumerate() {
+                if effective_changed {
+                    continue;
+                }
+                let property = FIRST_LONGHAND_PROPERTY_ID + index as u16;
+                if old_overlay.and_then(|overlay| overlay.get(property)).is_none()
+                    && new_overlay.and_then(|overlay| overlay.get(property)).is_none()
+                {
+                    continue;
+                }
+                let old_physical =
+                    crate::css::style_compute::map_logical_alias_to_physical(property, old_writing_mode, old_direction);
+                let new_physical =
+                    crate::css::style_compute::map_logical_alias_to_physical(property, new_writing_mode, new_direction);
+                let old_base = unsafe {
+                    old_record.longhand_values[usize::from(old_physical - FIRST_LONGHAND_PROPERTY_ID)]
+                        .cast::<StyleValueData>()
+                        .deref()
+                };
+                let new_base = unsafe {
+                    new_record.longhand_values[usize::from(new_physical - FIRST_LONGHAND_PROPERTY_ID)]
+                        .cast::<StyleValueData>()
+                        .deref()
+                };
+                if std::ptr::eq(old_base, new_base) || old_base == new_base {
+                    continue;
+                }
+                result.any_computed_value_changed = true;
+                if !property_metadata::property_is_inherited(property) {
+                    result.non_inherited_inheritance_source = true;
+                } else {
+                    match property_metadata::property_style_group_index(new_physical) {
+                        Some(group) if group < 7 => result.inherited_groups |= 1 << group,
+                        _ => result.inherited_groups = ALL_INHERITED_STYLE_GROUPS,
+                    }
+                }
+            }
+        }
+    }
+    result.pack()
 }
 
 const _: () = assert!(FIRST_LONGHAND_PROPERTY_ID <= LAST_LONGHAND_PROPERTY_ID);

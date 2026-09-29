@@ -1533,21 +1533,34 @@ static bool style_record_is_unchanged(CSS::StyleEngine::StyleRecordDelta const& 
     return !!delta.old_style_record && delta.old_style_record == delta.new_style_record;
 }
 
-static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidation_with_cache(CSS::StyleDrainScope const& scope, CSS::ComputedValues const& new_computed_values, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element, CSS::StyleEngine::StyleRecordDelta const& style_record_delta, Optional<u32> answered_damage = {})
+// What moving the element from the record `old_record` to `new_record` damages, read from the two records and what the
+// element's place in the tree adds, as the engine answers it.
+static u32 element_record_damage(Element const& element, CSS::PublishedStyleRecord const* old_record, CSS::PublishedStyleRecord const& new_record)
+{
+    bool const is_svg_graphics_element = is<SVG::SVGGraphicsElement>(element);
+    auto const* parent = element.parent_or_shadow_host_element();
+    // https://drafts.csswg.org/css-overflow-3/#overflow-propagation
+    bool const propagates_overflow_to_viewport = element.is_document_element()
+        || (parent && parent->is_document_element() && parent->is_html_html_element() && parent->first_child_of_type<HTML::HTMLBodyElement>() == &element);
+    CSS::StyleEngineFFI::FfiElementDamageFacts const facts {
+        .is_svg_graphics_element = is_svg_graphics_element,
+        .folds_transform_into_svg_container_layout = is_svg_graphics_element && parent && is<SVG::SVGElement>(*parent) && !parent->is_svg_foreign_object_element(),
+        .propagates_overflow_to_viewport = propagates_overflow_to_viewport,
+    };
+    return CSS::StyleEngineFFI::published_style_record_damage(old_record ? old_record->handle() : nullptr, new_record.handle(), facts);
+}
+
+static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidation_with_cache(CSS::StyleDrainScope const& scope, CSS::ComputedValues const& new_computed_values, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element, CSS::StyleEngine::StyleRecordDelta const& style_record_delta, CSS::PublishedStyleRecord const* old_record, CSS::PublishedStyleRecord const& new_record, Optional<u32> answered_damage = {})
 {
     CSS::StyleComputer::ComputedStyleInvalidation result;
     if (style_record_is_unchanged(style_record_delta)) {
         ++abstract_element.document().style_invalidation_counters().style_record_property_diffs_skipped;
         return result;
     }
-    // The engine reads what the move damages from the two records and its own facts of the element,
-    // and answers a record it computed with it.
+    // The engine answers what the move to a record it computed damages with the record; any other move reads it from
+    // the two records.
     auto packed = answered_damage.value_or_lazy_evaluated([&] {
-        return CSS::StyleEngineFFI::style_engine_element_record_damage(scope,
-            scope.engine().rust_handle(),
-            abstract_element.element().style_node_id().value(),
-            style_record_delta.old_style_record.value(),
-            style_record_delta.new_style_record.value());
+        return element_record_damage(abstract_element.element(), old_record, new_record);
     });
     if (packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::CacheHit))
         ++abstract_element.document().style_invalidation_counters().style_record_property_damage_cache_hits;
@@ -2339,7 +2352,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
                 answered_damage = engine_record_damage->packed;
             else
                 note_style_row_computed_damage_itself(*this);
-            result = compute_required_invalidation_with_cache(scope, *new_computed_values, old_state, abstract_element, style_record_delta, answered_damage);
+            result = compute_required_invalidation_with_cache(scope, *new_computed_values, old_state, abstract_element, style_record_delta, published_style_record(), *published_new_style_record, answered_damage);
             if (result.any_computed_value_changed)
                 counters.element_computed_style_changes++;
         }
@@ -2388,9 +2401,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     return result.invalidation;
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style_record_after_sample(CSS::StyleDrainScope const& scope, CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange invalidation, CSS::StyleEffectDrain* effect_drain, Optional<u32> sample_damage)
+CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style_record_after_sample(CSS::StyleDrainScope const& scope, CSS::PublishedStyleRecord const* published_style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange invalidation, CSS::StyleEffectDrain* effect_drain, Optional<u32> sample_damage)
 {
     auto const style_record = style_record_identity();
+    auto const style_record_before_installation = published_style_record_before_installation ? published_style_record_before_installation->identity() : CSS::StyleRecordID {};
     if (style_record != style_record_before_installation) {
         auto new_computed_values = computed_style();
         VERIFY(new_computed_values);
@@ -2404,7 +2418,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
             .old_style_record = style_record_before_installation,
             .new_style_record = style_record,
         };
-        auto result = compute_required_invalidation_with_cache(scope, *new_computed_values, old_state, abstract_element, style_record_delta, sample_damage);
+        auto result = compute_required_invalidation_with_cache(scope, *new_computed_values, old_state, abstract_element, style_record_delta, published_style_record_before_installation, *published_style_record(), sample_damage);
         if (result.any_computed_value_changed)
             document().style_invalidation_counters().element_computed_style_changes++;
         invalidation |= result.invalidation;
