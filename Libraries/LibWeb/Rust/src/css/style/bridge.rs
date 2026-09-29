@@ -3985,64 +3985,6 @@ impl StyleEngine {
     }
 }
 
-/// Computes what moving one of an element's pseudo-elements from one final style record to another
-/// damages, where either record can be zero. `counter_styles_changed` is the host's comparison of
-/// the counter styles the pseudo-element's box was built with.
-///
-/// # Safety
-/// `engine` must be live and every nonzero style record must remain pinned or assigned.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_pseudo_element_record_damage(
-    engine: StyleEngineInputHandle,
-    node: u32,
-    pseudo_kind: u8,
-    old_style_record: u64,
-    new_style_record: u64,
-    originating_style_record: u64,
-    counter_styles_changed: bool,
-) -> u32 {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_pseudo_element_record_damage",
-        crate::css::style::owner_calls::StyleQuery::PseudoElementRecordDamage {
-            node,
-            pseudo_kind,
-            old_style_record,
-            new_style_record,
-            originating_style_record,
-            counter_styles_changed,
-        },
-    )
-    .u32()
-}
-
-/// Answers [`style_engine_pseudo_element_record_damage`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_pseudo_element_record_damage`].
-pub(crate) unsafe fn owner_pseudo_element_record_damage(
-    engine: &mut StyleEngine,
-    node: u32,
-    pseudo_kind: u8,
-    old_style_record: u64,
-    new_style_record: u64,
-    originating_style_record: u64,
-    counter_styles_changed: bool,
-) -> u32 {
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return super::style_invalidation::unreadable_record_damage("PseudoElementRecordDamageWithoutStyleNode");
-    };
-    engine.pseudo_element_record_damage(
-        node,
-        pseudo_kind,
-        old_style_record,
-        new_style_record,
-        originating_style_record,
-        counter_styles_changed,
-    )
-}
-
 /// What the pass published for a row whose animations it sampled itself; `present` is false for a
 /// row the host samples.
 #[repr(C)]

@@ -241,8 +241,71 @@ pub unsafe extern "C" fn published_style_record_damage(
         old.and_then(PublishedStyleRecord::comparison_view),
         new.comparison_view(),
     ) {
-        (Some(old), Some(new)) => super::style_invalidation::element_record_move_damage(&old, &new, facts),
+        (Some(old), Some(new)) => super::style_invalidation::element_record_move_damage(&old, &new, facts, false),
         _ => super::style_invalidation::unreadable_record_damage("PublishedStyleRecordDamageWithoutTable"),
+    }
+}
+
+/// What moving the pseudo-element of `pseudo_kind` from the record `old` to the record `new` (either null for none)
+/// damages, beside its originating element's record `originating`, as the engine answers it: `counter_styles_changed`
+/// is the host's answer for the counter styles the pseudo-element's box was built with, and `facts` are the originating
+/// element's. A read of the records alone, which asks the engine nothing.
+///
+/// # Safety
+///
+/// `old`, `new` and `originating` must be null or live handles the engine handed out.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn published_pseudo_element_record_damage(
+    old: *const c_void,
+    new: *const c_void,
+    originating: *const c_void,
+    pseudo_kind: u8,
+    counter_styles_changed: bool,
+    facts: FfiElementDamageFacts,
+) -> u32 {
+    use super::style_invalidation::{PseudoElementMove, element_record_move_damage, pseudo_element_move_by_identity};
+    // SAFETY: Guaranteed by the caller.
+    let (old, new, originating) = unsafe {
+        (
+            old.cast::<PublishedStyleRecord>().as_ref(),
+            new.cast::<PublishedStyleRecord>().as_ref(),
+            originating.cast::<PublishedStyleRecord>().as_ref(),
+        )
+    };
+    let Some(originating) = originating else {
+        return super::style_invalidation::unreadable_record_damage(
+            "PublishedPseudoElementRecordDamageWithoutOriginating",
+        );
+    };
+    let identity = |record: Option<&PublishedStyleRecord>| record.map_or(0, |record| record.style_record);
+    if let Some(damage) = pseudo_element_move_by_identity(pseudo_kind, identity(old), identity(new)) {
+        return damage;
+    }
+    fn values(record: &PublishedStyleRecord) -> crate::css::computed_value_views::ComputedValuesView<'_> {
+        crate::css::computed_value_views::ComputedValuesView::new(SharedPayload::as_pointer_slice(
+            record.payloads.as_slice(),
+        ))
+    }
+    let shape = match PseudoElementMove::of(
+        pseudo_kind,
+        old.map(values),
+        new.map(values),
+        values(originating),
+        counter_styles_changed,
+    ) {
+        Ok(damage) => return damage,
+        Err(shape) => shape,
+    };
+    let facts = FfiElementDamageFacts {
+        propagates_overflow_to_viewport: false,
+        ..facts
+    };
+    match (
+        old.and_then(PublishedStyleRecord::comparison_view),
+        new.and_then(PublishedStyleRecord::comparison_view),
+    ) {
+        (Some(old), Some(new)) => shape.damage(element_record_move_damage(&old, &new, facts, true)),
+        _ => super::style_invalidation::unreadable_record_damage("PublishedPseudoElementRecordDamageWithoutTable"),
     }
 }
 

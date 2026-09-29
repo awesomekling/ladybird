@@ -951,126 +951,38 @@ impl RetainedState {
         originating_style_record: u64,
         counter_styles_changed: bool,
     ) -> u32 {
-        const AFTER: u8 = 0;
-        const BEFORE: u8 = 2;
-        const MARKER: u8 = 5;
-        const SELECTION: u8 = 6;
-        let unchanged = old_style_record != 0 && old_style_record == new_style_record;
-        // NB: Selection highlights do not generate boxes or affect layout.
-        if pseudo_kind == SELECTION {
-            if unchanged {
-                return 0;
-            }
-            return StyleInvalidation {
-                level: INVALIDATION_REPAINT,
-                repaint_selection: true,
-                any_computed_value_changed: true,
-                ..StyleInvalidation::default()
-            }
-            .pack();
+        if let Some(damage) = pseudo_element_move_by_identity(pseudo_kind, old_style_record, new_style_record) {
+            return damage;
         }
-        if unchanged || (old_style_record == 0 && new_style_record == 0) {
-            return 0;
-        }
-        // A zero record is an absent one; a nonzero record the engine cannot read is none at all.
-        let view = |record: u64| match record {
-            0 => Some(None),
-            record => self
-                .computed_group_sets
-                .style_record_view(record)
-                .map(|view| Some(ComputedValuesView::new(SharedPayload::as_pointer_slice(view.payloads)))),
-        };
-        let (Some(old_values), Some(new_values), Some(Some(originating_values))) = (
-            view(old_style_record),
-            view(new_style_record),
-            view(originating_style_record),
-        ) else {
-            return unreadable_record_damage("PseudoElementRecordDamageRecordNotLive");
-        };
-
-        // A non-inline generated box can split an inline originating element and mutate anonymous structure in
-        // its parent. Inline ::before and ::after boxes remain confined to the originating element's layout
-        // subtree.
-        let originating_is_inline_outside = originating_values.display().is_inline_outside();
-        let can_escape_originating_element = |values: Option<ComputedValuesView<'_>>| {
-            values.is_some_and(|values| {
-                let display = values.display();
-                originating_is_inline_outside
-                    && !display.is_none()
-                    && !display.is_contents()
-                    && !display.is_inline_outside()
-            })
-        };
-        // A marker box is always attached inside the originating box, as is a ::before or ::after box that
-        // cannot escape it, so replacing that box in place creates, removes, or rebuilds the pseudo-element
-        // box along with it.
-        let box_stays_inside_originating_box = pseudo_kind == MARKER
-            || ((pseudo_kind == BEFORE || pseudo_kind == AFTER)
-                && !can_escape_originating_element(old_values)
-                && !can_escape_originating_element(new_values));
-        let has_independent_content = |values: Option<ComputedValuesView<'_>>| {
-            let Some(values) = values else {
-                return true;
+        let shape = {
+            // A zero record is an absent one; a nonzero record the engine cannot read is none at all.
+            let view = |record: u64| match record {
+                0 => Some(None),
+                record => self
+                    .computed_group_sets
+                    .style_record_view(record)
+                    .map(|view| Some(ComputedValuesView::new(SharedPayload::as_pointer_slice(view.payloads)))),
             };
-            let display = values.display();
-            !display.is_list_item()
-                && !display.is_contents()
-                && values.counter_reset().is_empty()
-                && values.counter_increment().is_empty()
-                && values.counter_set().is_empty()
-                && (values.content_is_keyword() || values.content_is_strings_only())
-        };
-        let can_update_in_place = (pseudo_kind == BEFORE || pseudo_kind == AFTER)
-            && has_independent_content(old_values)
-            && has_independent_content(new_values);
-
-        let (Some(old_values), Some(new_values)) = (old_values, new_values) else {
-            let mut rebuild_root = if box_stays_inside_originating_box {
-                REBUILD_ROOT_SELF
-            } else {
-                REBUILD_ROOT_PARENT
+            let (Some(old_values), Some(new_values), Some(Some(originating_values))) = (
+                view(old_style_record),
+                view(new_style_record),
+                view(originating_style_record),
+            ) else {
+                return unreadable_record_damage("PseudoElementRecordDamageRecordNotLive");
             };
-            if rebuild_root == REBUILD_ROOT_SELF && can_update_in_place {
-                rebuild_root = REBUILD_ROOT_PSEUDO_ELEMENTS;
+            match PseudoElementMove::of(
+                pseudo_kind,
+                old_values,
+                new_values,
+                originating_values,
+                counter_styles_changed,
+            ) {
+                Ok(damage) => return damage,
+                Err(shape) => shape,
             }
-            let mut damage = StyleInvalidation::rebuild_layout_tree_from(rebuild_root);
-            damage.any_computed_value_changed = true;
-            return damage.pack();
         };
-        let old_display = old_values.display();
-        let new_display = new_values.display();
-
         let packed = self.element_record_damage(node, true, old_style_record, new_style_record);
-        let mut damage = StyleInvalidation::unpack(packed);
-        if counter_styles_changed {
-            damage.merge(StyleInvalidation::rebuild_layout_tree_from(REBUILD_ROOT_SELF));
-        }
-        // A display: contents pseudo-element has no principal layout node to receive its updated style. A
-        // list-item pseudo-element also owns a generated marker whose layout state is not updated through the
-        // originating element. Rebuild their layout subtrees when a style change otherwise requires relayout.
-        if damage.level >= INVALIDATION_RELAYOUT
-            && damage.level < INVALIDATION_REBUILD_LAYOUT_TREE
-            && (old_display.is_contents()
-                || old_display.is_list_item()
-                || new_display.is_contents()
-                || new_display.is_list_item())
-        {
-            damage.ensure_level(INVALIDATION_REBUILD_LAYOUT_TREE);
-        }
-        if damage.level >= INVALIDATION_REBUILD_LAYOUT_TREE && damage.rebuild_root != REBUILD_ROOT_PARENT {
-            if !box_stays_inside_originating_box {
-                damage.ensure_level(INVALIDATION_REBUILD_LAYOUT_TREE);
-            } else if damage.rebuild_root == REBUILD_ROOT_BOX_PRESENCE_CHANGE {
-                damage.rebuild_root = REBUILD_ROOT_SELF;
-            }
-        }
-        if damage.level >= INVALIDATION_REBUILD_LAYOUT_TREE
-            && damage.rebuild_root == REBUILD_ROOT_SELF
-            && can_update_in_place
-        {
-            damage.rebuild_root = REBUILD_ROOT_PSEUDO_ELEMENTS;
-        }
-        damage.pack() | (packed & FfiStyleInvalidationField::CacheHit as u32)
+        shape.damage(packed) | (packed & FfiStyleInvalidationField::CacheHit as u32)
     }
 
     // SVG container layout unions each child's bounding box mapped by the child's own transform. An
@@ -1111,6 +1023,156 @@ impl RetainedState {
             child = self.tree.next_element_sibling(candidate);
         }
         false
+    }
+}
+
+const PSEUDO_KIND_AFTER: u8 = 0;
+const PSEUDO_KIND_BEFORE: u8 = 2;
+const PSEUDO_KIND_MARKER: u8 = 5;
+const PSEUDO_KIND_SELECTION: u8 = 6;
+
+/// The damage of moving a pseudo-element of `pseudo_kind` from one record to another (zero for none) where the
+/// identities of the records decide it: a selection highlight, or a move to the same record or between no records.
+pub(crate) fn pseudo_element_move_by_identity(
+    pseudo_kind: u8,
+    old_style_record: u64,
+    new_style_record: u64,
+) -> Option<u32> {
+    let unchanged = old_style_record != 0 && old_style_record == new_style_record;
+    // NB: Selection highlights do not generate boxes or affect layout.
+    if pseudo_kind == PSEUDO_KIND_SELECTION {
+        if unchanged {
+            return Some(0);
+        }
+        return Some(
+            StyleInvalidation {
+                level: INVALIDATION_REPAINT,
+                repaint_selection: true,
+                any_computed_value_changed: true,
+                ..StyleInvalidation::default()
+            }
+            .pack(),
+        );
+    }
+    (unchanged || (old_style_record == 0 && new_style_record == 0)).then_some(0)
+}
+
+/// What a pseudo-element's move adds to what comparing its two records damages.
+pub(crate) struct PseudoElementMove {
+    old_display: crate::css::display::FfiDisplay,
+    new_display: crate::css::display::FfiDisplay,
+    box_stays_inside_originating_box: bool,
+    can_update_in_place: bool,
+    counter_styles_changed: bool,
+}
+
+impl PseudoElementMove {
+    /// The move of a pseudo-element of `pseudo_kind` from `old_values` to `new_values` (None for an absent record),
+    /// beside its originating element's `originating_values`: its damage where one of the records is absent, or what
+    /// finishes the damage of comparing the two.
+    pub(crate) fn of(
+        pseudo_kind: u8,
+        old_values: Option<ComputedValuesView<'_>>,
+        new_values: Option<ComputedValuesView<'_>>,
+        originating_values: ComputedValuesView<'_>,
+        counter_styles_changed: bool,
+    ) -> Result<u32, Self> {
+        // A non-inline generated box can split an inline originating element and mutate anonymous structure in
+        // its parent. Inline ::before and ::after boxes remain confined to the originating element's layout
+        // subtree.
+        let originating_is_inline_outside = originating_values.display().is_inline_outside();
+        let can_escape_originating_element = |values: Option<ComputedValuesView<'_>>| {
+            values.is_some_and(|values| {
+                let display = values.display();
+                originating_is_inline_outside
+                    && !display.is_none()
+                    && !display.is_contents()
+                    && !display.is_inline_outside()
+            })
+        };
+        // A marker box is always attached inside the originating box, as is a ::before or ::after box that
+        // cannot escape it, so replacing that box in place creates, removes, or rebuilds the pseudo-element
+        // box along with it.
+        let box_stays_inside_originating_box = pseudo_kind == PSEUDO_KIND_MARKER
+            || ((pseudo_kind == PSEUDO_KIND_BEFORE || pseudo_kind == PSEUDO_KIND_AFTER)
+                && !can_escape_originating_element(old_values)
+                && !can_escape_originating_element(new_values));
+        let has_independent_content = |values: Option<ComputedValuesView<'_>>| {
+            let Some(values) = values else {
+                return true;
+            };
+            let display = values.display();
+            !display.is_list_item()
+                && !display.is_contents()
+                && values.counter_reset().is_empty()
+                && values.counter_increment().is_empty()
+                && values.counter_set().is_empty()
+                && (values.content_is_keyword() || values.content_is_strings_only())
+        };
+        let can_update_in_place = (pseudo_kind == PSEUDO_KIND_BEFORE || pseudo_kind == PSEUDO_KIND_AFTER)
+            && has_independent_content(old_values)
+            && has_independent_content(new_values);
+        let (Some(old_values), Some(new_values)) = (old_values, new_values) else {
+            let mut rebuild_root = if box_stays_inside_originating_box {
+                REBUILD_ROOT_SELF
+            } else {
+                REBUILD_ROOT_PARENT
+            };
+            if rebuild_root == REBUILD_ROOT_SELF && can_update_in_place {
+                rebuild_root = REBUILD_ROOT_PSEUDO_ELEMENTS;
+            }
+            let mut damage = StyleInvalidation::rebuild_layout_tree_from(rebuild_root);
+            damage.any_computed_value_changed = true;
+            return Ok(damage.pack());
+        };
+        Err(Self {
+            old_display: old_values.display(),
+            new_display: new_values.display(),
+            box_stays_inside_originating_box,
+            can_update_in_place,
+            counter_styles_changed,
+        })
+    }
+
+    /// The damage of the move, from `packed`, what comparing its two records damages.
+    pub(crate) fn damage(self, packed: u32) -> u32 {
+        let Self {
+            old_display,
+            new_display,
+            box_stays_inside_originating_box,
+            can_update_in_place,
+            counter_styles_changed,
+        } = self;
+        let mut damage = StyleInvalidation::unpack(packed);
+        if counter_styles_changed {
+            damage.merge(StyleInvalidation::rebuild_layout_tree_from(REBUILD_ROOT_SELF));
+        }
+        // A display: contents pseudo-element has no principal layout node to receive its updated style. A
+        // list-item pseudo-element also owns a generated marker whose layout state is not updated through the
+        // originating element. Rebuild their layout subtrees when a style change otherwise requires relayout.
+        if damage.level >= INVALIDATION_RELAYOUT
+            && damage.level < INVALIDATION_REBUILD_LAYOUT_TREE
+            && (old_display.is_contents()
+                || old_display.is_list_item()
+                || new_display.is_contents()
+                || new_display.is_list_item())
+        {
+            damage.ensure_level(INVALIDATION_REBUILD_LAYOUT_TREE);
+        }
+        if damage.level >= INVALIDATION_REBUILD_LAYOUT_TREE && damage.rebuild_root != REBUILD_ROOT_PARENT {
+            if !box_stays_inside_originating_box {
+                damage.ensure_level(INVALIDATION_REBUILD_LAYOUT_TREE);
+            } else if damage.rebuild_root == REBUILD_ROOT_BOX_PRESENCE_CHANGE {
+                damage.rebuild_root = REBUILD_ROOT_SELF;
+            }
+        }
+        if damage.level >= INVALIDATION_REBUILD_LAYOUT_TREE
+            && damage.rebuild_root == REBUILD_ROOT_SELF
+            && can_update_in_place
+        {
+            damage.rebuild_root = REBUILD_ROOT_PSEUDO_ELEMENTS;
+        }
+        damage.pack()
     }
 }
 
@@ -1180,6 +1242,7 @@ pub(crate) fn element_record_move_damage(
     old_record: &super::computed::StyleRecordView<'_>,
     new_record: &super::computed::StyleRecordView<'_>,
     facts: FfiElementDamageFacts,
+    is_pseudo_element: bool,
 ) -> u32 {
     let moved = RecordMove::between(old_record, new_record);
     let packed = compare_record_views(
@@ -1189,7 +1252,7 @@ pub(crate) fn element_record_move_damage(
         facts.folds_transform_into_svg_container_layout,
         facts.propagates_overflow_to_viewport,
     );
-    moved.damage(packed, facts, false)
+    moved.damage(packed, facts, is_pseudo_element)
 }
 
 /// What moving an element from the record `old_record` views to the one `new_record` views damages, from the two

@@ -359,14 +359,6 @@ pub(crate) enum StyleQuery {
     Boundary(BoundaryRead),
     /// A style read the host answers synchronously, as a CSSOM read does.
     ReadDemand(super::bridge::RecordDemand),
-    PseudoElementRecordDamage {
-        node: u32,
-        pseudo_kind: u8,
-        old_style_record: u64,
-        new_style_record: u64,
-        originating_style_record: u64,
-        counter_styles_changed: bool,
-    },
     AssignedStyleRecord {
         node: u32,
         pseudo_kind: u8,
@@ -658,24 +650,6 @@ impl StyleQuery {
                 }
                 StyleAnswer::RecordDemand(answer)
             }
-            Self::PseudoElementRecordDamage {
-                node,
-                pseudo_kind,
-                old_style_record,
-                new_style_record,
-                originating_style_record,
-                counter_styles_changed,
-            } => StyleAnswer::U32(unsafe {
-                crate::css::style::bridge::owner_pseudo_element_record_damage(
-                    engine,
-                    node,
-                    pseudo_kind,
-                    old_style_record,
-                    new_style_record,
-                    originating_style_record,
-                    counter_styles_changed,
-                )
-            }),
             Self::AssignedStyleRecord { node, pseudo_kind } => StyleAnswer::U64(unsafe {
                 crate::css::style::bridge::owner_assigned_style_record(engine, node, pseudo_kind)
             }),
