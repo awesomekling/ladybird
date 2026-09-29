@@ -608,6 +608,13 @@ impl StyleEngineHandle {
         answers
     }
 
+    /// Whether whoever reached the engine last left the main thread news it has not adopted yet. A reach takes that
+    /// news back while it runs, so a reach the main thread does not wait for is made only once it has adopted it: the
+    /// main thread may be reading its answers for what that news brings.
+    pub(crate) fn has_unadopted_news(self) -> bool {
+        self.home().exchange().news.is_some()
+    }
+
     /// The document whose render state's arena links the engine, whose render owner owns it.
     pub(crate) fn document(self) -> crate::render_owner::DocumentId {
         self.home().document
