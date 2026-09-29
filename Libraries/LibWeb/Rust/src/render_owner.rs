@@ -1049,6 +1049,11 @@ pub(crate) fn take_in_sent_changes() {
             .values_mut()
             .filter(|state| state.take_in == TakeIn::AsTheOwnerIdles)
         {
+            // Only the owner leaves news, so what the main thread has adopted stays adopted until the reach below.
+            let engine = state.style_engine();
+            if !engine.is_null() && engine.has_unadopted_news() {
+                continue;
+            }
             state.apply_changes(EngineReach::OwnerBesideMain(&owner));
         }
     });
