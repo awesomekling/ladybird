@@ -12,7 +12,6 @@
 #include <LibWeb/Bindings/WebGL2RenderingContext.h>
 #include <LibWeb/HTML/HTMLCanvasElement.h>
 #include <LibWeb/HTML/OffscreenCanvas.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/WebGL/EventNames.h>
 #include <LibWeb/WebGL/WebGL2RenderingContext.h>
 #include <LibWeb/WebGL/WebGLContextEvent.h>

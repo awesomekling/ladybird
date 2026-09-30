@@ -18,6 +18,7 @@
 #include <LibWeb/Compositor/CompositorHost.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
@@ -37,7 +38,6 @@
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WindowProxy.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Loader/ContentBlocker.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
@@ -222,12 +222,12 @@ void Page::process_screenshot_requests()
             auto* dom_node = DOM::Node::from_unique_id(*task.node_id);
             if (dom_node)
                 dom_node->document().update_layout(DOM::UpdateLayoutReason::ProcessScreenshot);
-            auto const* layout_node = dom_node ? dom_node->layout_node() : nullptr;
-            if (!layout_node || !Painting::has_committed_box(*layout_node)) {
+            auto identity = DOM::NodeIdentity::of(dom_node);
+            if (!dom_node || !Painting::has_committed_box(dom_node->document(), identity)) {
                 client.page_did_take_screenshot({});
                 continue;
             }
-            auto rect = enclosing_device_rect(Painting::absolute_border_box_rect(*layout_node));
+            auto rect = enclosing_device_rect(Painting::absolute_border_box_rect(dom_node->document(), identity));
             auto bitmap_or_error = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, rect.size().to_type<int>());
             if (bitmap_or_error.is_error()) {
                 client.page_did_take_screenshot({});
@@ -241,9 +241,9 @@ void Page::process_screenshot_requests()
             });
         } else {
             navigable->active_document()->update_layout(DOM::UpdateLayoutReason::ProcessScreenshot);
-            auto const* layout_node = navigable->active_document()->layout_node();
-            VERIFY(layout_node && Painting::has_committed_box(*layout_node));
-            auto scrollable_overflow_rect = Painting::scrollable_overflow_rect(*layout_node);
+            auto const& document = *navigable->active_document();
+            VERIFY(Painting::has_committed_box(document, DOM::NodeIdentity::of_document()));
+            auto scrollable_overflow_rect = Painting::scrollable_overflow_rect(document, DOM::NodeIdentity::of_document());
             auto rect = enclosing_device_rect(scrollable_overflow_rect.value());
             auto bitmap_or_error = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, rect.size().to_type<int>());
             if (bitmap_or_error.is_error()) {
@@ -615,6 +615,11 @@ Compositing::KeyboardScrollState Page::take_keyboard_scroll_state_for_compositor
     m_keyboard_scroll_state_is_scrollable = state.target.has_value();
     m_keyboard_scroll_state_is_current = true;
     return state;
+}
+
+bool Page::keyboard_scroll_state_is_current(u64 generation) const
+{
+    return m_keyboard_scroll_state_is_current && generation == m_keyboard_scroll_state_generation;
 }
 
 void Page::invalidate_compositor_wheel_event_listener_state()

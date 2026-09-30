@@ -49,6 +49,10 @@ class CompositorConnection;
 class CompositorContextHandle;
 class CompositorHost;
 class CompositorHostBase;
+class NavigablePresenter;
+class PresentationSource;
+struct PublishedDisplayList;
+class Presentation;
 
 }
 
@@ -57,9 +61,12 @@ namespace Web::Painting {
 class BackingStore;
 class ChromeWidget;
 class ChromeWidgetRegistry;
+enum class FlightPaintDecline : u8;
 enum class PaintCommandCacheMode : u8;
 struct GradientPaintStyle;
 struct PatternPaintStyle;
+struct PendingDisplayListRecording;
+enum class RecordingRun : u8;
 class Scrollbar;
 
 }
@@ -226,6 +233,8 @@ class SubtleCrypto;
 
 namespace Web::CSS {
 
+enum class ElementBoxKind : u8;
+
 class AbstractImageStyleValue;
 class AbstractOrHypotheticalElement;
 class AnchorStyleValue;
@@ -238,7 +247,6 @@ class BorderImageSliceStyleValue;
 class BorderRadiusRectStyleValue;
 class BorderRadiusStyleValue;
 class CalculatedStyleValue;
-class CascadedProperties;
 class CustomPropertyData;
 class Clip;
 class ColorFilterStyleValue;
@@ -248,7 +256,6 @@ class ColorStyleValue;
 class ComputedStyleWorkingSet;
 class ComputedValues;
 class ComputedStyleRecordView;
-class LayoutStyle;
 class ConicGradientStyleValue;
 class ContainerQuery;
 class ContentStyleValue;
@@ -257,7 +264,6 @@ class CounterStyle;
 class CounterStyleStyleValue;
 class CounterStyleSystemStyleValue;
 class CounterStyleValue;
-class CountersSet;
 class CSSAnimation;
 class CSSConditionRule;
 class CSSContainerRule;
@@ -365,6 +371,7 @@ class Percentage;
 class PercentageStyleValue;
 class PositionStyleValue;
 class PropertyNameAndID;
+class PublishedStyleRecord;
 class RadialGradientStyleValue;
 class RadialSizeStyleValue;
 class RandomValueSharingStyleValue;
@@ -383,6 +390,8 @@ class Size;
 class ScrollbarColorStyleValue;
 class StringStyleValue;
 class StyleComputer;
+class StyleDrainScope;
+class StyleEffectDrain;
 class StylePropertyMap;
 class StylePropertyMapReadOnly;
 class StyleScope;
@@ -475,9 +484,7 @@ struct ComputationContext;
 struct CustomPropertyRegistration;
 struct LogicalAliasMappingContext;
 struct NormalGap;
-struct RandomCachingKey;
 struct RequiredInvalidationAfterStyleChange;
-struct TransitionProperties;
 
 // https://drafts.css-houdini.org/css-typed-om-1/#typedefdef-cssnumberish
 using CSSNumberish = Variant<double, GC::Ref<CSSNumericValue>>;
@@ -509,12 +516,12 @@ class AbortSignal;
 class AbstractElement;
 class AbstractRange;
 class AccessibilityTreeNode;
-class AnchorNameMap;
 class Attr;
 class CDATASection;
 class CaretPosition;
 class CharacterData;
 class Comment;
+class CommitMessages;
 class CustomEvent;
 class Document;
 class DocumentFragment;
@@ -532,22 +539,25 @@ class EventHandler;
 class EventTarget;
 class HTMLCollection;
 class IDLEventListener;
+class InvalidationJournal;
 class LiveNodeList;
 class MutationObserver;
 class MutationRecord;
 class NamedNodeMap;
 class Node;
 class NodeFilter;
+class NodeIdentity;
 class NodeIterator;
 class NodeList;
 class ParentNode;
 class Position;
 class ProcessingInstruction;
 class PseudoElement;
-class IsolatedSelectorQueryEngineCache;
 class QuerySelectorResultCache;
 class Range;
 class RegisteredObserver;
+class RenderInputs;
+class RenderInputsEntrance;
 class SelectorQuery;
 class ShadowRoot;
 class SlotRegistry;
@@ -958,13 +968,6 @@ class IntersectionObserverEntry;
 namespace Web::Layout {
 
 class ImageProvider;
-class Box;
-class Node;
-class NodeArena;
-class NodeWithStyle;
-class TextNode;
-class LayoutTreeBuilderAccess;
-class Viewport;
 
 }
 
@@ -1015,6 +1018,7 @@ class Notification;
 
 namespace Web::Painting {
 
+class BoxSlot;
 class BoxViewRepaintAccess;
 class DocumentPaintState;
 

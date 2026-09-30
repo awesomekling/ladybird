@@ -14,38 +14,55 @@
 #include <LibWeb/CSS/CSSNumericValue.h>
 #include <LibWeb/CSS/ComputedStyleWorkingSet.h>
 #include <LibWeb/CSS/ComputedValues.h>
+#include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/PublishedStyleRecord.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleDrainScope.h>
+#include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
-#include <LibWeb/Layout/Node.h>
+#include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
+#include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/SVG/SVGElement.h>
+#include <LibWeb/StyleDrainScopedFFI.h>
+#include <LibWeb/StyleEngineRustFFI.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
+
+namespace Web::CSS {
+
+bool deferring_engine_pseudo_installation();
+
+}
 
 namespace Web::Animations {
 
 GC_DEFINE_ALLOCATOR(AnimationEffect);
 
-AnimationUpdateContext::ElementData::ElementData() = default;
+AnimationUpdateContext::AnimationUpdateContext() = default;
 
-AnimationUpdateContext::ElementData::ElementData(CSS::StyleRecordID style_record_before_update, RefPtr<CSS::ComputedStyleWorkingSet> target_style)
-    : style_record_before_update(style_record_before_update)
-    , target_style(move(target_style))
+static DOM::Document* s_document_with_open_batch_publication { nullptr };
+static bool s_open_batch_publication_published { false };
+
+AnimationUpdateContext::BatchPublication::BatchPublication(DOM::Document& document)
+    : m_previous_document(s_document_with_open_batch_publication)
+    , m_previous_published(s_open_batch_publication_published)
 {
+    s_document_with_open_batch_publication = &document;
+    s_open_batch_publication_published = false;
 }
 
-AnimationUpdateContext::ElementData::ElementData(ElementData&&) = default;
-
-AnimationUpdateContext::ElementData& AnimationUpdateContext::ElementData::operator=(ElementData&&) = default;
-
-AnimationUpdateContext::ElementData::~ElementData() = default;
-
-AnimationUpdateContext::AnimationUpdateContext() = default;
+AnimationUpdateContext::BatchPublication::~BatchPublication()
+{
+    s_document_with_open_batch_publication = m_previous_document;
+    s_open_batch_publication_published = m_previous_published;
+}
 
 Bindings::FillMode css_fill_mode_to_bindings_fill_mode(CSS::AnimationFillMode mode)
 {
@@ -293,6 +310,13 @@ void AnimationEffect::normalize_specified_timing()
             m_iteration_duration = TimeValue { TimeValue::Type::Milliseconds, m_specified_iteration_duration.get<double>() };
         }
     }
+    timing_changed();
+}
+
+void AnimationEffect::timing_changed()
+{
+    if (m_associated_animation)
+        m_associated_animation->invalidate_style_timing_row();
 }
 
 // https://www.w3.org/TR/web-animations-1/#dom-animationeffect-updatetiming
@@ -812,169 +836,312 @@ void AnimationEffect::visit_edges(GC::Cell::Visitor& visitor)
     visitor.visit(m_associated_animation);
 }
 
-static ReadonlySpan<CSS::ComputedValuesFFI::FfiAnimatedOverlayEntry> animated_overlay_entries(CSS::ComputedValuesFFI::AnimatedOverlay const* overlay)
+enum class InstalledInArena {
+    No,
+    Yes,
+    // Installed, and presented on the render side (a render clock tick): nothing to repaint.
+    YesAndPresented,
+};
+
+// Install the record a sample of an element's animations published, and apply what publishing it
+// over the element's record invalidated: the element's and its layout node's style, the pseudo-element
+// styles and descendants that inherit from it, and, unless the caller compares the element's style
+// itself, what layout and paint need. Where the render side installed the record in the arena, this
+// applies its adoption log entry: the arena row and its layout mark are there already.
+static void apply_animation_overlay(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation, InstalledInArena installed_in_arena)
 {
-    if (!overlay)
-        return {};
-    size_t count = 0;
-    auto const* entries = CSS::ComputedValuesFFI::rust_animated_overlay_entries(overlay, &count);
-    return { entries, count };
+    GC::Ref<DOM::Element> target = element.element();
+    auto invalidation = CSS::decode_style_invalidation(animated_property_invalidation.invalidation);
+    target->refresh_computed_style(scope, element.pseudo_element(), new_style_record);
+    if (auto* svg_element = as_if<SVG::SVGElement>(*target); svg_element && !element.pseudo_element().has_value())
+        svg_element->note_svg_paint_resource_description_may_have_changed();
+
+    // Box-type, overflow, and text-alignment adjustments consume the unadjusted base values,
+    // which an animation-only overlay update deliberately does not reconstruct. Publish an
+    // exact feedback action so the ordinary reaction path re-cascades that base before the
+    // frame becomes observable.
+    if (animated_property_invalidation.requires_base_style_recomputation)
+        target->document().render_inputs_for_write().style_engine().record_derived_element_style_input_change(
+            target->style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
+
+    // The pseudo-elements inherit from the composition: the next pass settles them over it, as the ordinary
+    // transaction settles the descendants below.
+    if (!element.pseudo_element().has_value() && invalidation.inherited_style_changed() && !CSS::deferring_engine_pseudo_installation()) {
+        scope.engine().set_sampled_composition_identity(scope, target->style_node_id(), target->style_record_identity());
+        target->settle_pseudo_elements_over_moved_composition(scope);
+    }
+
+    // An animated value can be inherited through shadow and slot boundaries. Publish the exact
+    // flat-tree descendants as one feedback batch; the ordinary transaction owns their style
+    // materialization and observer consequences.
+    if (!element.pseudo_element().has_value()) {
+        auto inherited_style_groups = invalidation.inherited_style_groups_changed();
+        if (!invalidation.inherited_style_changed()) {
+            auto shadow_root = target->shadow_root();
+            auto child_explicit_inheritance_groups = target->children_explicitly_inherited_non_inherited_style_groups();
+            if (shadow_root)
+                child_explicit_inheritance_groups |= shadow_root->children_explicitly_inherited_non_inherited_style_groups();
+            auto descendants_may_observe_non_inherited_properties = (child_explicit_inheritance_groups & animated_property_invalidation.changed_non_inherited_style_groups) != 0
+                || invalidation.recompute_descendant_styles
+                || invalidation.needs_layout_tree_rebuild()
+                || target->is_html_slot_element();
+            if (descendants_may_observe_non_inherited_properties)
+                inherited_style_groups = CSS::RequiredInvalidationAfterStyleChange::all_inherited_style_groups;
+        }
+        if (inherited_style_groups != 0)
+            target->document().render_inputs_for_write().style_engine().record_flat_tree_descendant_style_input_changes(
+                target->style_node_id(),
+                CSS::StyleEngine::InheritedStyle,
+                inherited_style_groups);
+    }
+
+    // NB: refresh_computed_style() already publishes the new record to the layout node. Only
+    // inherited values and image resources require the additional C++ style side effects.
+    auto apply_box_style_side_effects = [&](Painting::BoxSlot const& box, CSS::PublishedStyleRecord const* style_record) {
+        if (!box)
+            return;
+        if (animated_property_invalidation.requires_layout_node_style_application && style_record)
+            Layout::apply_style_to_box(box, *style_record);
+        else if (animated_property_invalidation.requires_style_resource_update)
+            Layout::attach_style_resources_to_box(box);
+    };
+    if (!element.pseudo_element().has_value())
+        apply_box_style_side_effects(Painting::BoxSlot::bound_to(*target), target->published_style_record());
+    else
+        apply_box_style_side_effects(Painting::BoxSlot::of_pseudo_element(*target, element.pseudo_element().value()), target->published_style_record(element.pseudo_element()));
+
+    if (caller_applies_invalidation)
+        return;
+
+    if (invalidation.needs_relayout()) {
+        // The arena marked the layout itself as it installed the style.
+        if (installed_in_arena != InstalledInArena::No)
+            (void)target->document().render_inputs_for_write();
+        else
+            target->set_needs_layout_update(DOM::SetNeedsLayoutReason::KeyframeEffect);
+    }
+    if (invalidation.needs_layout_tree_rebuild()) {
+        auto rebuild_root = element.pseudo_element().has_value()
+            ? CSS::LayoutTreeRebuildRoot::Parent
+            : invalidation.layout_tree_rebuild_root();
+        target->set_needs_layout_tree_rebuild(DOM::SetNeedsLayoutTreeUpdateReason::KeyframeEffect, rebuild_root);
+    }
+    if (invalidation.accumulated_visual_contexts() != CSS::AccumulatedVisualContextInvalidation::None) {
+        auto scope = invalidation.accumulated_visual_contexts() == CSS::AccumulatedVisualContextInvalidation::Rebuild
+            ? DOM::Document::AccumulatedVisualContextUpdateScope::Structure
+            : DOM::Document::AccumulatedVisualContextUpdateScope::Values;
+        // NB: Element-reference pseudo elements (e.g. ::placeholder) are not synthetic, so schedule their
+        //     layout node directly instead of going through the owning element.
+        if (element.pseudo_element().has_value()) {
+            if (auto pseudo_element_box = Painting::BoxSlot::of_pseudo_element(*target, element.pseudo_element().value()))
+                element.document().schedule_accumulated_visual_context_update(pseudo_element_box, scope);
+        } else {
+            element.document().schedule_accumulated_visual_context_update(target, scope);
+        }
+    }
+
+    if (installed_in_arena == InstalledInArena::YesAndPresented)
+        return;
+    auto repaint_box = element.pseudo_element().has_value()
+        ? Painting::BoxSlot::of_pseudo_element(*target, *element.pseudo_element())
+        : Painting::BoxSlot::bound_to(*target);
+    if (Painting::has_committed_box(repaint_box))
+        Painting::repaint_after_style_change(repaint_box, invalidation);
+}
+
+void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation)
+{
+    apply_animation_overlay(scope, element, animated_property_invalidation, new_style_record, caller_applies_invalidation, InstalledInArena::No);
+}
+
+// Send the render owner a sample's record to install over the element's box ahead of the host, where the render side
+// can: the owner adopts it for the element at once, and lays the box out again as the sample asks. The render side
+// leaves a pseudo-element, a composition its caller compares itself, and one that rebuilds the layout tree to the host.
+static bool install_animation_sample_in_arena(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation)
+{
+    if (element.pseudo_element().has_value() || caller_applies_invalidation)
+        return false;
+    auto invalidation = CSS::decode_style_invalidation(animated_property_invalidation.invalidation);
+    if (invalidation.needs_layout_tree_rebuild())
+        return false;
+    GC::Ref<DOM::Element> target = element.element();
+    auto* layout_arena = Layout::document_layout_arena_if_created(target->document());
+    if (!layout_arena)
+        return false;
+    Layout::RustFFI::layout_arena_install_animation_sample(layout_arena, target->style_node_id().value(), new_style_record.value(), invalidation.needs_relayout());
+    apply_animation_overlay(scope, element, animated_property_invalidation, new_style_record, caller_applies_invalidation, InstalledInArena::Yes);
+    return true;
+}
+
+// The environment a sample composed an element's or pseudo-element's animated custom properties
+// into, viewed as its own, or its record's environment again where the sample animated none; and
+// what that moves, recorded for the next transaction.
+void install_sampled_custom_property_environment(CSS::StyleDrainScope const& scope, DOM::AbstractElement abstract_element, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample)
+{
+    auto& element = const_cast<DOM::Element&>(abstract_element.element());
+    // The engine takes what the sample moved the element to itself where it can, and named what a
+    // pseudo-element's sample moved it to as it settled it.
+    if (!sample.custom_property_environment_named
+        && !CSS::StyleEngineFFI::style_engine_install_sampled_custom_property_environment(scope.engine().rust_handle(), element.style_node_id().value(),
+            CSS::pseudo_element_to_ffi(abstract_element.pseudo_element()), sample.custom_property_environment)) {
+        auto data = element.custom_property_data(abstract_element.pseudo_element());
+        RefPtr<CSS::CustomPropertyData const> base = data;
+        if (data && data->is_animation_overlay_for(abstract_element))
+            base = data->parent();
+        RefPtr<CSS::CustomPropertyData const> installed = base;
+        if (sample.custom_property_environment != 0) {
+            VERIFY(sample.custom_property_store);
+            installed = CSS::CustomPropertyData::view_animation_overlay(sample.custom_property_store, sample.custom_property_environment, base, abstract_element);
+        }
+        element.replace_custom_property_data(scope, abstract_element.pseudo_element(), installed);
+    }
+    auto& style_engine = scope.engine();
+    if (sample.custom_property_reactions & 1)
+        style_engine.record_derived_element_style_input_change(element.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
+    if (!abstract_element.pseudo_element().has_value() && (sample.custom_property_reactions & 2)) {
+        style_engine.record_flat_tree_descendant_style_input_changes(
+            element.style_node_id(),
+            CSS::StyleEngine::InheritedStyle,
+            CSS::RequiredInvalidationAfterStyleChange::all_inherited_style_groups);
+    }
+}
+
+// Install what an engine sample of an element's animations over the record `style_record_before_update` published,
+// and record what the sample found out on the element and its parent. Where the render side installed the sample's
+// record in the arena already, the element adopts it.
+static void install_taken_engine_sample(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleRecordID style_record_before_update, bool caller_applies_invalidation, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample, InstalledInArena installed_in_arena)
+{
+    GC::Ref<DOM::Element> target = element.element();
+    auto& document = target->document();
+    if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_VAR)
+        target->set_style_uses_var_css_function();
+    if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_ATTR)
+        target->set_style_uses_attr_css_function();
+    if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_IF)
+        target->set_style_uses_if_css_function();
+    if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_INHERIT)
+        target->set_style_uses_inherit_css_function();
+    if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_DASHED_FUNCTION)
+        target->set_style_uses_custom_function();
+    if (sample.uses_tree_counting_function)
+        target->set_style_uses_tree_counting_function();
+    if (sample.custom_property_environment_moved)
+        install_sampled_custom_property_environment(scope, element, sample);
+    // The sample moved nothing the record composed.
+    if (sample.style_record == style_record_before_update.value())
+        return;
+    if (sample.rebuilt_every_group)
+        document.style_invalidation_counters().animated_style_full_builds++;
+    else
+        document.style_invalidation_counters().animated_style_overlay_builds++;
+    // A keyframe-borne `inherit` on a non-inherited property leaves the same mark on the parent a
+    // full style computation does.
+    if (auto style_groups = sample.keyframes_inherited_non_inherited_style_groups; style_groups != 0) {
+        if (style_groups == NumericLimits<u32>::max())
+            style_groups = CSS::ComputedValues::all_style_groups;
+        if (auto* parent = target->parent()) {
+            parent->add_children_explicitly_inherited_non_inherited_style_groups(style_groups);
+            auto parent_style_node = is<DOM::Element>(*parent) ? as<DOM::Element>(*parent).style_node_id()
+                : is<DOM::ShadowRoot>(*parent)                 ? as<DOM::ShadowRoot>(*parent).style_node_id()
+                                                               : CSS::StyleNodeID {};
+            if (parent_style_node != 0)
+                scope.engine().record_children_explicitly_inherit(parent_style_node);
+        }
+    }
+    // What the sample's container units read of the element's containers.
+    auto container_effects = CSS::StyleEngineFFI::style_engine_take_container_effects(scope, scope.engine().rust_handle(), target->style_node_id().value());
+    ScopeGuard release_container_effects = [&] { CSS::StyleEngineFFI::style_engine_native_container_effects_release(scope, container_effects.effects); };
+    CSS::StyleComputer::record_container_query_effects(scope, element, container_effects);
+    if (!sample.overlay_is_empty && document.is_in_style_stabilization_epoch()
+        && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))
+        document.style_computer().record_transition_stabilization_baseline(scope, element);
+    if (installed_in_arena != InstalledInArena::No)
+        apply_animation_overlay(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, caller_applies_invalidation, installed_in_arena);
+    else if (!install_animation_sample_in_arena(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, caller_applies_invalidation))
+        apply_published_animation_overlay(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, caller_applies_invalidation);
+}
+
+void adopt_clock_tick_sample(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleRecordID style_record_before_tick, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample, [[maybe_unused]] CSS::PublishedStyleRecord const& sampled_record, bool installed_in_arena, bool presented_on_render_side)
+{
+    // The caller holds the sample's record, so the engine still holds it for the element to install.
+    ASSERT(sampled_record.identity().value() == sample.style_record);
+    auto installed = InstalledInArena::No;
+    if (installed_in_arena)
+        installed = presented_on_render_side ? InstalledInArena::YesAndPresented : InstalledInArena::Yes;
+    install_taken_engine_sample(scope, element, style_record_before_tick, false, sample, installed);
+}
+
+void AnimationUpdateContext::publish_animation_inputs_before_sample(DOM::Element& element)
+{
+    auto& document = element.document();
+    if (&document == s_document_with_open_batch_publication && s_open_batch_publication_published) {
+        document.publish_dirty_animation_timing_rows();
+        return;
+    }
+    document.publish_animation_environment_for_style_update();
+    if (&document == s_document_with_open_batch_publication)
+        s_open_batch_publication_published = true;
+}
+
+// Install what the engine's samples of the updated elements published, in the drain `scope` proves.
+static void install_engine_samples(CSS::StyleDrainScope const& scope, HashMap<DOM::AbstractElement, AnimationUpdateContext::ElementData>& elements)
+{
+    // The engine samples the effects the element's timing rows name, which include the transitions a
+    // step provisionally started and a dirty effect that just became irrelevant, whose terminal
+    // contribution the sample removes. It samples every element over the record it holds in one go,
+    // and publishes each composition as its record. An element the engine cannot sample keeps the
+    // composition it holds.
+    struct SampledElement {
+        DOM::AbstractElement element;
+        AnimationUpdateContext::ElementData data;
+    };
+    Vector<SampledElement> sampled_elements;
+    Vector<CSS::StyleEngineFFI::FfiInstalledRecord> records;
+    for (auto& it : elements) {
+        auto const& element = it.key;
+        // Disconnected elements no longer have a style-engine row to publish refreshed
+        // animation style into.
+        auto style_node = element.element().style_node_id();
+        if (!it.value.style_record_before_update || style_node == 0 || element.style_record_identity() != it.value.style_record_before_update)
+            continue;
+        sampled_elements.append({ element, it.value });
+        records.append({ style_node.value(), CSS::pseudo_element_to_ffi(element.pseudo_element()), it.value.style_record_before_update.value(), it.value.compared_with.value() });
+    }
+    if (records.is_empty())
+        return;
+    Vector<CSS::StyleEngineFFI::FfiRowSampledInPass> samples;
+    samples.resize(records.size());
+    auto& document = sampled_elements.first().element.element().document();
+    CSS::StyleEngineFFI::style_engine_sample_installed_records(scope.engine().rust_handle(), records.data(), records.size(), samples.data(), Layout::document_layout_arena_if_created(document));
+    for (size_t i = 0; i < samples.size(); ++i) {
+        auto& [element, data] = sampled_elements[i];
+        // An earlier entry already republished this style with the current animation values.
+        if (!samples[i].present || element.style_record_identity() != data.style_record_before_update)
+            continue;
+        install_taken_engine_sample(scope, element, data.style_record_before_update, data.caller_applies_invalidation, samples[i], InstalledInArena::No);
+        if (data.damage && samples[i].damage && element.style_record_identity().value() == samples[i].style_record)
+            *data.damage = samples[i].damage;
+    }
 }
 
 AnimationUpdateContext::~AnimationUpdateContext()
 {
-    for (auto& it : elements) {
-        auto style = it.value.target_style;
-        if (!style)
-            continue;
-        auto& element = it.key;
-        GC::Ref<DOM::Element> target = element.element();
-        // Disconnected elements no longer have a style-engine row to publish refreshed
-        // animation style into.
-        if (target->style_node_id() == 0)
-            continue;
-        // An earlier entry already republished this style with the current animation values.
-        if (element.style_record_identity() != it.value.style_record_before_update)
-            continue;
-        // Provisionally started transitions are not associated with the element yet, so they are
-        // never among the collected effects, but their values are already part of the published
-        // style. Collect them first, in composite order below every associated effect, or this
-        // update would rebuild the style without them.
-        GC::ConservativeVector<GC::Ref<KeyframeEffect>> effects_to_collect;
-        target->document().style_computer().for_each_provisional_transition_effect(element, [&](KeyframeEffect& effect) {
-            effects_to_collect.append(effect);
-        });
-        for (auto& animation : target->associated_animations_in_composite_order()) {
-            if (animation->is_idle() || !animation->effect() || !is<KeyframeEffect>(*animation->effect()))
-                continue;
-            auto& effect = static_cast<KeyframeEffect&>(*animation->effect());
-            if (effect.target() != target || effect.pseudo_element_type() != element.pseudo_element())
-                continue;
-            effects_to_collect.append(effect);
-        }
-        // A dirty effect may have just become irrelevant. Include it once so rebuilding the
-        // animated overlay removes its terminal contribution.
-        for (auto& dirty_effect : it.value.effects) {
-            if (!effects_to_collect.contains_slow(dirty_effect))
-                effects_to_collect.append(dirty_effect);
-        }
-        if (!effects_to_collect.is_empty())
-            target->document().style_computer().collect_animations_into(element, effects_to_collect.span(), *style, CSS::StyleComputer::AnimationRefresh::Yes);
-        auto& style_computer = target->document().style_computer();
-        if (!style_computer.style_engine().animation_overlay_changed(it.value.style_record_before_update, style->animated_overlay()))
-            continue;
-
-        auto computed_values = [&] {
-            auto previous_values = element.computed_style();
-            if (previous_values)
-                return style_computer.build_animated_computed_values(*style, element, element.style_scope(), *previous_values);
-            return style_computer.build_computed_values(*style, element, element.style_scope());
-        }();
-        Array<void const*, to_underlying(CSS::StyleGroupIndex::Count)> payloads;
-        for (size_t index = 0; index < payloads.size(); ++index)
-            payloads[index] = computed_values->style_group_payload(static_cast<CSS::StyleGroupIndex>(index));
-        auto animated_property_invalidation = style_computer.style_engine().compare_animation_overlay(
-            it.value.style_record_before_update,
-            style->animated_overlay(),
-            payloads,
-            !element.pseudo_element().has_value() && target->is_document_element());
-        auto invalidation = CSS::decode_style_invalidation(animated_property_invalidation.invalidation);
-        if (style->animated_overlay() && !animated_overlay_entries(style->animated_overlay()).is_empty()
-            && target->document().is_in_style_stabilization_epoch()
-            && (target->document().style_stabilization_has_style_reactions() || animated_property_invalidation.requires_base_style_recomputation)) {
-            target->document().style_computer().record_transition_stabilization_baseline(element);
-        }
-        auto publication = target->document().style_computer().publish_animation_overlay(element, *computed_values);
-        target->refresh_computed_style(element.pseudo_element(), publication.new_style_record);
-        if (auto* svg_element = as_if<SVG::SVGElement>(*target); svg_element && !element.pseudo_element().has_value())
-            svg_element->note_svg_paint_resource_description_may_have_changed();
-
-        // Box-type, overflow, and text-alignment adjustments consume the unadjusted base values,
-        // which an animation-only overlay update deliberately does not reconstruct. Publish an
-        // exact feedback action so the ordinary reaction path re-cascades that base before the
-        // frame becomes observable.
-        if (animated_property_invalidation.requires_base_style_recomputation)
-            target->document().style_computer().style_engine().record_element_style_input_change(target->style_node_id());
-
-        if (!element.pseudo_element().has_value() && invalidation.inherited_style_changed()) {
-            // Recomputing pseudo-element styles can start transitions, which stay provisional until a stabilization
-            // epoch commits them. This update also runs outside any style update (for example when an inert animation
-            // is disassociated from its target), so hold an epoch open around it.
-            auto& document = target->document();
-            document.begin_style_stabilization_epoch();
-            ScopeGuard end_stabilization_epoch = [&] {
-                document.end_style_stabilization_epoch();
-            };
-            invalidation |= target->recompute_pseudo_element_styles();
-        }
-
-        // An animated value can be inherited through shadow and slot boundaries. Publish the exact
-        // flat-tree descendants as one feedback batch; the ordinary transaction owns their style
-        // materialization and observer consequences.
-        if (!element.pseudo_element().has_value()) {
-            auto inherited_style_groups = invalidation.inherited_style_groups_changed();
-            if (!invalidation.inherited_style_changed()) {
-                auto shadow_root = target->shadow_root();
-                auto child_explicit_inheritance_groups = target->children_explicitly_inherited_non_inherited_style_groups();
-                if (shadow_root)
-                    child_explicit_inheritance_groups |= shadow_root->children_explicitly_inherited_non_inherited_style_groups();
-                auto descendants_may_observe_non_inherited_properties = (child_explicit_inheritance_groups & animated_property_invalidation.changed_non_inherited_style_groups) != 0
-                    || invalidation.recompute_descendant_styles
-                    || invalidation.needs_layout_tree_rebuild()
-                    || target->is_html_slot_element();
-                if (descendants_may_observe_non_inherited_properties)
-                    inherited_style_groups = CSS::RequiredInvalidationAfterStyleChange::all_inherited_style_groups;
-            }
-            if (inherited_style_groups != 0)
-                target->document().style_computer().style_engine().record_flat_tree_descendant_style_input_changes(
-                    target->style_node_id(),
-                    CSS::StyleEngine::InheritedStyle,
-                    inherited_style_groups);
-        }
-
-        // NB: refresh_computed_style() already publishes the new record to the layout node. Only
-        // inherited values and image resources require the additional C++ style side effects.
-        auto apply_layout_node_style_side_effects = [&](Layout::NodeWithStyle& layout_node, CSS::StyleRecordID style_record) {
-            if (animated_property_invalidation.requires_layout_node_style_application)
-                layout_node.apply_style(style_record);
-            else if (animated_property_invalidation.requires_style_resource_update)
-                layout_node.attach_style_resources();
-        };
-        if (!element.pseudo_element().has_value()) {
-            if (auto* layout_node = target->unsafe_layout_node())
-                apply_layout_node_style_side_effects(*layout_node, target->style_record_identity());
-        } else if (auto pseudo_element_node = target->pseudo_element_unsafe_layout_node(element.pseudo_element().value())) {
-            apply_layout_node_style_side_effects(*pseudo_element_node, target->style_record_identity(element.pseudo_element()));
-        }
-
-        if (invalidation.needs_relayout())
-            target->set_needs_layout_update(DOM::SetNeedsLayoutReason::KeyframeEffect);
-        if (invalidation.needs_layout_tree_rebuild()) {
-            auto rebuild_root = element.pseudo_element().has_value()
-                ? CSS::LayoutTreeRebuildRoot::Parent
-                : invalidation.layout_tree_rebuild_root();
-            target->set_needs_layout_tree_rebuild(DOM::SetNeedsLayoutTreeUpdateReason::KeyframeEffect, rebuild_root);
-        }
-        if (invalidation.accumulated_visual_contexts() != CSS::AccumulatedVisualContextInvalidation::None) {
-            auto scope = invalidation.accumulated_visual_contexts() == CSS::AccumulatedVisualContextInvalidation::Rebuild
-                ? DOM::Document::AccumulatedVisualContextUpdateScope::Structure
-                : DOM::Document::AccumulatedVisualContextUpdateScope::Values;
-            // NB: Element-reference pseudo elements (e.g. ::placeholder) are not synthetic, so schedule their
-            //     layout node directly instead of going through the owning element.
-            if (element.pseudo_element().has_value()) {
-                if (auto pseudo_element_node = target->pseudo_element_unsafe_layout_node(element.pseudo_element().value()))
-                    element.document().schedule_accumulated_visual_context_update(*pseudo_element_node, scope);
-            } else {
-                element.document().schedule_accumulated_visual_context_update(target, scope);
-            }
-        }
-
-        auto* repaint_layout_node = element.pseudo_element().has_value()
-            ? target->pseudo_element_unsafe_layout_node(*element.pseudo_element())
-            : target->unsafe_layout_node();
-        if (repaint_layout_node && Painting::has_committed_box(*repaint_layout_node))
-            Painting::repaint_after_style_change(*repaint_layout_node, invalidation);
+    // Building the overlay below is a style computation, and it samples each effect from the timing
+    // the document published rather than from the effect. Whatever this update moved - a timeline
+    // that ticked, a start time a pending task committed, an effect script detached from its
+    // animation - moved it after the last publication, so what moved is published here, the last
+    // moment before the stage reads.
+    if (elements.is_empty())
+        return;
+    publish_animation_inputs_before_sample(elements.begin()->key.element());
+    if (drain_scope) {
+        install_engine_samples(*drain_scope, elements);
+        return;
     }
+    // Installing what the engine published for the elements is the drain of that publication.
+    CSS::StyleEffectDrain::install(elements.begin()->key.element().document(), [&](CSS::StyleDrainScope const& scope) {
+        install_engine_samples(scope, elements);
+    });
 }
 
 }

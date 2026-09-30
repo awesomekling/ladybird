@@ -7,6 +7,8 @@
 
 #include <AK/ByteString.h>
 #include <AK/HashTable.h>
+#include <AK/Mutex.h>
+#include <AK/Singleton.h>
 #include <AK/String.h>
 #include <AK/TypeCasts.h>
 #include <LibCore/Resource.h>
@@ -21,6 +23,11 @@
 namespace Web::Platform {
 
 static FontPlugin* s_the;
+
+// The generic-font memo is filled from wherever a font is resolved, which is no longer only the
+// document thread: the style stage resolves from a published @font-face table and the process-wide
+// font services, and this is one of them.
+static Singleton<Mutex> s_generic_font_cache_mutex;
 
 FontPlugin& FontPlugin::the()
 {
@@ -82,6 +89,7 @@ void FontPlugin::set_system_font_family(FlyString system_font_family)
     if (m_system_font_family == system_font_family)
         return;
     m_system_font_family = move(system_font_family);
+    MutexLocker locker { *s_generic_font_cache_mutex };
     m_generic_font_cache.clear();
 }
 
@@ -122,6 +130,7 @@ FlyString FontPlugin::generic_font_name(GenericFont generic_font, int weight, in
         return "SerenitySans"_fly_string;
 
     GenericFontKey key { generic_font, weight, slope };
+    MutexLocker locker { *s_generic_font_cache_mutex };
     return m_generic_font_cache.ensure(key, [&] {
         return compute_generic_font_name(generic_font, weight, slope);
     });

@@ -34,6 +34,8 @@ set(SOURCES
     Compositor/CompositorConnection.cpp
     Compositor/CompositorHost.cpp
     Compositor/CompositorHostBase.cpp
+    Compositor/NavigablePresenter.cpp
+    Compositor/RenderClock.cpp
     Compression/CompressionStream.cpp
     Compression/DecompressionStream.cpp
     ContentSecurityPolicy/BlockingAlgorithms.cpp
@@ -86,7 +88,6 @@ set(SOURCES
     Crypto/SubtleCrypto.cpp
     CSS/Angle.cpp
     CSS/AnimationEvent.cpp
-    CSS/CascadedProperties.cpp
     CSS/Clip.cpp
     CSS/ComputedStyleWorkingSet.cpp
     CSS/ComputedValues.cpp
@@ -173,11 +174,11 @@ set(SOURCES
     CSS/FontFaceSet.cpp
     CSS/FontFaceSetLoadEvent.cpp
     CSS/FontFeatureData.cpp
+    CSS/FontResolution.cpp
     CSS/Frequency.cpp
     CSS/HypotheticalElement.cpp
     CSS/Invalidation/AdoptedStyleSheetInvalidator.cpp
     CSS/Invalidation/AttributeInvalidator.cpp
-    CSS/Invalidation/ContainerQueryInvalidator.cpp
     CSS/Invalidation/CustomElementInvalidator.cpp
     CSS/Invalidation/EmbeddedContentInvalidator.cpp
     CSS/Invalidation/ElementStateInvalidator.cpp
@@ -206,6 +207,7 @@ set(SOURCES
     CSS/Parser/RuleContext.cpp
     CSS/Parser/SelectorParsing.cpp
     CSS/Percentage.cpp
+    CSS/PublishedStyleRecord.cpp
     CSS/Ratio.cpp
     CSS/Resolution.cpp
     CSS/ResolvedTransform.cpp
@@ -294,12 +296,12 @@ set(SOURCES
     DOM/AbstractRange.cpp
     DOM/AccessibilityTreeNode.cpp
     DOM/AdoptedStyleSheets.cpp
-    DOM/AnchorNameMap.cpp
     DOM/Attr.cpp
     DOM/CDATASection.cpp
     DOM/CaretPosition.cpp
     DOM/CharacterData.cpp
     DOM/Comment.cpp
+    DOM/CommitMessages.cpp
     DOM/CustomEvent.cpp
     DOM/Document.cpp
     DOM/DocumentFragment.cpp
@@ -319,6 +321,7 @@ set(SOURCES
     DOM/EventTarget.cpp
     DOM/HTMLCollection.cpp
     DOM/IDLEventListener.cpp
+    DOM/InvalidationJournal.cpp
     DOM/LiveNodeList.cpp
     DOM/MutationObserver.cpp
     DOM/MutationRecord.cpp
@@ -326,6 +329,7 @@ set(SOURCES
     DOM/NamedNodeMap.cpp
     DOM/Node.cpp
     DOM/NodeFilter.cpp
+    DOM/NodeIdentity.cpp
     DOM/NodeIterator.cpp
     DOM/NodeList.cpp
     DOM/NodeOperations.cpp
@@ -335,6 +339,7 @@ set(SOURCES
     DOM/PseudoElement.cpp
     DOM/QualifiedName.cpp
     DOM/Range.cpp
+    DOM/RenderInputs.cpp
     DOM/SelectorQuery.cpp
     DOM/ShadowRoot.cpp
     DOM/Slot.cpp
@@ -506,6 +511,10 @@ set(SOURCES
     HTML/ErrorInformation.cpp
     HTML/EventHandler.cpp
     HTML/EventLoop/EventLoop.cpp
+    HTML/EventLoop/FrameCompletion.cpp
+    HTML/EventLoop/FrameInFlightReferences.cpp
+    HTML/EventLoop/FrameScheduler.cpp
+    HTML/EventLoop/MainThreadPhases.cpp
     HTML/EventLoop/Task.cpp
     HTML/EventLoop/TaskQueue.cpp
     HTML/EventNames.cpp
@@ -755,15 +764,10 @@ set(SOURCES
     Internals/XRTest.cpp
     IntersectionObserver/IntersectionObserver.cpp
     IntersectionObserver/IntersectionObserverEntry.cpp
-    Layout/Box.cpp
     Layout/ImageProvider.cpp
     Layout/LayoutRustBridge.cpp
-    Layout/Node.cpp
-    Layout/NodeArena.cpp
-    Layout/TextNode.cpp
     Layout/TreeBuilder.cpp
     Layout/UpdateLayout.cpp
-    Layout/Viewport.cpp
     Loader/ContentBlocker.cpp
     Loader/FileRequest.cpp
     Loader/GeneratedPagesLoader.cpp
@@ -806,16 +810,20 @@ set(SOURCES
     Page/ScreenWakeLockHandle.cpp
     Painting/Blending.cpp
     Painting/BoxModelMetrics.cpp
+    Painting/BoxSlot.cpp
     Painting/BoxViews.cpp
     Painting/PaintFacts.cpp
     Painting/ChromeWidget.cpp
     Painting/DocumentPaintState.cpp
     Painting/HitTestDisplayList.cpp
     Painting/CompositorAnimationEffectState.cpp
+    Painting/HitTestResult.cpp
     Painting/PaintingRustBridge.cpp
+    Painting/QueryView.cpp
     Painting/ResizeHandle.cpp
     Painting/Scrollbar.cpp
     Painting/Scrolling.cpp
+    Painting/StyleImageObservers.cpp
     Painting/ScrollSnap.cpp
     Painting/SvgPaintResources.cpp
     PerformanceTimeline/EntryTypes.cpp
@@ -1202,10 +1210,14 @@ foreach(angle_target IN LISTS ANGLE_TARGETS)
     target_compile_options(LibWeb PRIVATE $<TARGET_PROPERTY:${angle_target},INTERFACE_COMPILE_OPTIONS>)
 endforeach()
 
+set(libweb_rust_features style-recording)
+if (ENABLE_THREAD_SANITIZER)
+    list(APPEND libweb_rust_features thread-sanitizer)
+endif()
 import_rust_crate(
     MANIFEST_PATH Rust/Cargo.toml
     CRATE_NAME libweb_rust
-    FEATURES style-recording
+    FEATURES ${libweb_rust_features}
     FFI_HEADERS
         HTML/Parser/RustFFI.h
         RustFFI.h
@@ -1217,7 +1229,9 @@ import_rust_crate(
         StyleEngineRustFFI.h
         StyleEngineBridgeGenerated.h
         StyleEngineBridgeGenerated.inc
+        StyleDrainScopedFFI.h
         StyleEngineStateFactsGenerated.inc
+        SelectorStateFactsGenerated.inc
         Layout/TreeBuilderRustFFI.h
         Layout/LayoutRustFFI.h
 )

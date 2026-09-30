@@ -7,12 +7,12 @@
 #include <AK/Math.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/HTML/LocalNavigable.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Page/AutoScrollHandler.h>
 #include <LibWeb/Page/MiddleButtonScrollHandler.h>
 #include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/Scrolling.h>
 
 namespace Web {
 
@@ -26,18 +26,18 @@ MiddleButtonScrollHandler::MiddleButtonScrollHandler(DOM::Element& container, CS
     , m_origin(origin)
     , m_mouse_position(origin)
 {
-    auto const* layout_node = m_container_element->document().layout_node();
-    if (layout_node && Painting::has_committed_box(*layout_node))
-        Painting::set_needs_repaint(*layout_node, InvalidateDisplayList::PaintCommands);
+    auto& document = m_container_element->document();
+    if (document.has_committed_viewport_box())
+        document.invalidation_journal().note_needs_repaint(DOM::NodeIdentity::of_document(), InvalidateDisplayList::PaintCommands);
 }
 
 MiddleButtonScrollHandler::~MiddleButtonScrollHandler()
 {
     if (!m_container_element->document().layout_is_up_to_date())
         return;
-    auto const* layout_node = m_container_element->document().layout_node();
-    if (layout_node && Painting::has_committed_box(*layout_node))
-        Painting::set_needs_repaint(*layout_node, InvalidateDisplayList::PaintCommands);
+    auto& document = m_container_element->document();
+    if (document.has_committed_viewport_box())
+        document.invalidation_journal().note_needs_repaint(DOM::NodeIdentity::of_document(), InvalidateDisplayList::PaintCommands);
 }
 
 void MiddleButtonScrollHandler::visit_edges(JS::Cell::Visitor& visitor) const
@@ -45,17 +45,17 @@ void MiddleButtonScrollHandler::visit_edges(JS::Cell::Visitor& visitor) const
     visitor.visit(m_container_element);
 }
 
-GC::Ptr<DOM::Element> MiddleButtonScrollHandler::find_scrollable_ancestor(DOM::Document& document, Layout::Node& layout_node)
+GC::Ptr<DOM::Element> MiddleButtonScrollHandler::find_scrollable_ancestor(DOM::Document& document, Painting::BoxSlot const& box)
 {
     // AutoScrollHandler::find_scrollable_ancestor begins with the node's containing block. For middle mouse
     // scrolling, we want to include the node itself. This allows clicking in dead space to begin scrolling.
-    if (Painting::could_be_scrolled_by_wheel_event(layout_node)) {
-        if (auto* element = as_if<DOM::Element>(layout_node.dom_node()))
+    if (Painting::could_be_scrolled_by_wheel_event(box)) {
+        if (auto* element = as_if<DOM::Element>(box.dom_node().ptr()))
             return element;
     }
 
-    if (auto* containing_block = layout_node.containing_block(); containing_block) {
-        if (auto container = AutoScrollHandler::find_scrollable_ancestor(*containing_block))
+    if (auto containing_block = box.containing_block()) {
+        if (auto container = AutoScrollHandler::find_scrollable_ancestor(containing_block))
             return container;
     }
 
@@ -76,8 +76,8 @@ void MiddleButtonScrollHandler::perform_tick()
     m_container_element->document().update_layout(DOM::UpdateLayoutReason::AutoScrollSelection);
     m_mouse_has_moved_beyond_dead_zone = true;
 
-    auto* layout_node = AutoScrollHandler::auto_scroll_layout_node(m_container_element);
-    if (!layout_node)
+    auto box = AutoScrollHandler::auto_scroll_box(m_container_element);
+    if (!box)
         return;
 
     auto speed_x = clamp(distance_x * SPEED_FACTOR, -MAX_SPEED_PER_SECOND, MAX_SPEED_PER_SECOND);
@@ -100,7 +100,7 @@ void MiddleButtonScrollHandler::perform_tick()
             m_scroll_gesture_hold = make<HTML::UserScrollGestureHold>(*navigable);
         navigable->note_user_scroll_input_intent(Compositing::SnapSelectionStrategy::Type::EndPosition);
     }
-    Painting::scroll_by(*layout_node, scroll_x, scroll_y);
+    Painting::scroll_by(box, scroll_x, scroll_y);
 }
 
 }

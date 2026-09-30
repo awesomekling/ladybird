@@ -9,7 +9,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/GraphemeEdgeTracker.h>
-#include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/VisualLines.h>
 
 namespace Web {
@@ -20,11 +20,11 @@ Vector<VisualLine> collect_visual_lines(DOM::Text const& dom_node)
 
     // NB: Unlike the callers below, this one is also reached from serialization and caret queries
     //     that do not update layout first, so it has to read whatever layout it finds.
-    auto const* layout_node = as_if<Layout::TextNode>(dom_node.unsafe_layout_node());
-    if (!layout_node)
+    auto box = Painting::BoxSlot::bound_to(dom_node);
+    if (!box.is_text())
         return lines;
 
-    Layout::RustFFI::layout_arena_text_visual_lines(layout_node->arena_handle(), Layout::Node::slot_id(layout_node), &lines,
+    Layout::RustFFI::layout_arena_text_visual_lines(box.arena(), box.slot(), &lines,
         [](void* context, Layout::RustFFI::FfiVisualLine line) {
             static_cast<Vector<VisualLine>*>(context)->append({
                 .start_offset = line.start_offset,
@@ -115,11 +115,11 @@ static Optional<CSSPixels> caret_inline_coordinate(DOM::Text const& dom_node, Vi
 {
     if (!line.has_fragments)
         return {};
-    auto const* layout_node = dom_node.layout_node();
-    if (!layout_node)
+    auto box = Painting::BoxSlot::bound_to(dom_node);
+    if (!box)
         return {};
     auto result = Layout::RustFFI::layout_arena_visual_line_caret_inline_coordinate(
-        layout_node->arena_handle(), line.owner_paintable, line.line_index, Layout::Node::slot_id(layout_node), offset);
+        box.arena(), line.owner_paintable, line.line_index, box.slot(), offset);
     if (!result.has_value)
         return {};
     return result.value;
@@ -129,11 +129,11 @@ static size_t offset_in_visual_line_closest_to_inline_coordinate(DOM::Text const
 {
     if (!line.has_fragments || !inline_coordinate.has_value())
         return line.start_offset;
-    auto const* layout_node = dom_node.layout_node();
-    if (!layout_node)
+    auto box = Painting::BoxSlot::bound_to(dom_node);
+    if (!box)
         return line.start_offset;
     return Layout::RustFFI::layout_arena_visual_line_offset_closest_to_inline_coordinate(
-        layout_node->arena_handle(), line.owner_paintable, line.line_index, Layout::Node::slot_id(layout_node),
+        box.arena(), line.owner_paintable, line.line_index, box.slot(),
         *inline_coordinate, line.start_offset);
 }
 
@@ -141,7 +141,7 @@ Optional<CursorLinePosition> compute_cursor_position_on_next_line(DOM::Text cons
 {
     // NB: The layout update is best-effort; a detached document may still have no layout node.
     auto lines = visual_lines_with_up_to_date_layout(dom_node);
-    if (!as_if<Layout::TextNode>(dom_node.layout_node()))
+    if (!Painting::BoxSlot::bound_to(dom_node).is_text())
         return {};
 
     auto line_index = visual_line_index_for_offset(lines, current_offset, affinity);
@@ -159,7 +159,7 @@ Optional<CursorLinePosition> compute_cursor_position_on_previous_line(DOM::Text 
 {
     // NB: The layout update is best-effort; a detached document may still have no layout node.
     auto lines = visual_lines_with_up_to_date_layout(dom_node);
-    if (!as_if<Layout::TextNode>(dom_node.layout_node()))
+    if (!Painting::BoxSlot::bound_to(dom_node).is_text())
         return {};
 
     auto line_index = visual_line_index_for_offset(lines, current_offset, affinity);

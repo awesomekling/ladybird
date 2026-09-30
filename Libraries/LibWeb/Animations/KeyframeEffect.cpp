@@ -27,7 +27,7 @@
 #include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/Node.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::Animations {
@@ -905,6 +905,20 @@ Optional<CSS::PseudoElement> KeyframeEffect::pseudo_element_type() const
     return m_target_pseudo_selector->type();
 }
 
+// Everything that invalidates an effect's preparation - its keyframes, its composite operation, the
+// animation or the element it belongs to - is also what makes the description the style stage holds
+// for it stale, so this is the one funnel that republishes it.
+void KeyframeEffect::invalidate_animation_preparation()
+{
+    // The style drain of a pass in flight reads the effect's preparation on the main thread, so it drains before the
+    // preparation goes stale.
+    if (m_target_element)
+        m_target_element->document().join_frame_before_style_drain_reads();
+    ++m_animation_preparation_generation;
+    if (m_target_element)
+        m_target_element->invalidate_animation_timing_rows();
+}
+
 void KeyframeEffect::set_composite(Bindings::CompositeOperation value)
 {
     m_composite = value;
@@ -1084,19 +1098,19 @@ bool KeyframeEffect::can_skip_per_frame_style_update() const
                 .target_style_generation = target->animation_style_generation(),
                 .target_subtree_style_generation = target->animation_subtree_style_generation(),
                 .target_is_connected = target->is_connected(),
-                .layout_node = target->unsafe_layout_node(),
+                .box_slot_index = Painting::BoxSlot::bound_to(*target).slot().index,
                 .result = result,
             };
         }
         return result;
     };
     if (target && target->document().layout_is_up_to_date()) {
-        auto const* layout_node = target->unsafe_layout_node();
+        auto const box_slot_index = Painting::BoxSlot::bound_to(*target).slot().index;
         if (m_can_skip_per_frame_style_update_cache.has_value()
             && m_can_skip_per_frame_style_update_cache->target_style_generation == target->animation_style_generation()
             && m_can_skip_per_frame_style_update_cache->target_subtree_style_generation == target->animation_subtree_style_generation()
             && m_can_skip_per_frame_style_update_cache->target_is_connected == target->is_connected()
-            && m_can_skip_per_frame_style_update_cache->layout_node == layout_node) {
+            && m_can_skip_per_frame_style_update_cache->box_slot_index == box_slot_index) {
             ++target->document().style_invalidation_counters().animation_style_skip_cache_hits;
             return m_can_skip_per_frame_style_update_cache->result;
         }
@@ -1143,19 +1157,20 @@ bool KeyframeEffect::can_skip_per_frame_style_update() const
 
     if (!target->document().layout_is_up_to_date())
         return false;
-    auto const* layout_node = target->unsafe_layout_node();
-    if (!layout_node || layout_node->visibility() != CSS::Visibility::Hidden)
+    // A text box holds no style of its own, and has no visibility to read.
+    auto visibility_of = [](Painting::BoxSlot const& box) -> Optional<CSS::Visibility> {
+        if (auto const* inherited_box_values = box.style_group<CSS::ComputedValues::InheritedBoxValues>())
+            return static_cast<CSS::Visibility>(inherited_box_values->visibility);
+        return {};
+    };
+    auto box = Painting::BoxSlot::bound_to(*target);
+    if (visibility_of(box) != CSS::Visibility::Hidden)
         return cache_result(false);
 
-    bool has_visible_descendant = false;
-    layout_node->for_each_in_inclusive_subtree_of_type<Layout::NodeWithStyle>([&](auto const& descendant) {
-        if (descendant.visibility() != CSS::Visibility::Visible)
-            return TraversalDecision::Continue;
-        has_visible_descendant = true;
-        return TraversalDecision::Break;
-    });
-    if (has_visible_descendant)
-        return cache_result(false);
+    for (auto descendant = box; descendant; descendant = descendant.next_in_pre_order(box)) {
+        if (visibility_of(descendant) == CSS::Visibility::Visible)
+            return cache_result(false);
+    }
 
     return cache_result(true);
 }
@@ -1187,17 +1202,28 @@ bool KeyframeEffect::can_skip_per_frame_animation_tick() const
     if ((m_is_compositor_driven || m_is_compositor_replaced) && (!isinf(iteration_count()) || m_is_observation_relevant_compositor_animation))
         return true;
 
-    // Script animations do not dispatch CSS animation events, even when an ancestor listens for them.
-    if (auto animation = associated_animation(); animation && !animation->is_css_animation())
-        return true;
-
     // NB: Infinite effects cannot reach their natural end, and finite offscreen paint effects have an end timer.
     //     Neither needs a continuous tick for animationend listeners.
     // NB: Starting or cancelling an active animation requests an update independently of playback.
     //     Only iteration events require future updates while a visually throttled effect runs.
-    auto only_iteration_events_require_a_tick = phase == Phase::Active;
-    auto has_css_animation_event_listener_requiring_animation_tick = [only_iteration_events_require_a_tick](DOM::EventTarget const& event_target) {
-        if (only_iteration_events_require_a_tick)
+    return !css_animation_events_are_heard(phase == Phase::Active);
+}
+
+bool KeyframeEffect::css_animation_iteration_events_are_heard() const
+{
+    return css_animation_events_are_heard(true);
+}
+
+// Whether a listener on the target, the nodes its events bubble to or its window hears the CSS animation events of the
+// effect that need a tick: only its iteration events if `only_iteration_events`.
+bool KeyframeEffect::css_animation_events_are_heard(bool only_iteration_events) const
+{
+    // Script animations do not dispatch CSS animation events, even when an ancestor listens for them.
+    if (auto animation = associated_animation(); animation && !animation->is_css_animation())
+        return false;
+
+    auto hears_css_animation_events = [only_iteration_events](DOM::EventTarget const& event_target) {
+        if (only_iteration_events)
             return event_target.has_event_listener(HTML::EventNames::animationiteration)
                 || event_target.has_event_listener(HTML::EventNames::webkitAnimationIteration);
 
@@ -1211,24 +1237,21 @@ bool KeyframeEffect::can_skip_per_frame_animation_tick() const
     auto target = this->target();
     VERIFY(target);
     for (auto* node = static_cast<DOM::Node*>(target.ptr()); node;) {
-        if (has_css_animation_event_listener_requiring_animation_tick(*node))
-            return false;
+        if (hears_css_animation_events(*node))
+            return true;
         if (auto assigned_slot = DOM::assigned_slot_for_node(*node))
             node = assigned_slot.ptr();
         else
             node = node->parent_or_shadow_host();
     }
-    if (auto window = target->document().window(); window && has_css_animation_event_listener_requiring_animation_tick(*window))
-        return false;
-
-    return true;
+    auto window = target->document().window();
+    return window && hears_css_animation_events(*window);
 }
 
 static bool is_in_display_none_subtree_ignoring_animations(DOM::AbstractElement abstract_element)
 {
     if (abstract_element.pseudo_element().has_value()) {
-        auto const& style_engine = abstract_element.document().style_computer().style_engine();
-        if (CSS::style_record_display_is_none(style_engine, abstract_element.style_record_identity()))
+        if (CSS::style_record_display_is_none(abstract_element.published_style_record()))
             return true;
     }
     return abstract_element.element().has_inclusive_ancestor_with_display_none_ignoring_animations();
@@ -1254,18 +1277,9 @@ void KeyframeEffect::update_computed_properties(AnimationUpdateContext& context)
 
 void KeyframeEffect::update_computed_properties_for_style(AnimationUpdateContext& context, DOM::AbstractElement abstract_element)
 {
-    auto& style_computer = abstract_element.element().document().style_computer();
-    auto& element_data = context.elements.ensure(abstract_element, [&abstract_element, &style_computer] {
-        auto style_record = abstract_element.style_record_identity();
-        if (!style_record)
-            return AnimationUpdateContext::ElementData {};
-        auto computed_properties = style_computer.reconstruct_computed_properties_for_animation(style_record);
-        return AnimationUpdateContext::ElementData { style_record, move(computed_properties) };
+    context.elements.ensure(abstract_element, [&abstract_element] {
+        return AnimationUpdateContext::ElementData { .style_record_before_update = abstract_element.style_record_identity() };
     });
-
-    if (!element_data.target_style)
-        return;
-    element_data.effects.append(*this);
 }
 
 Bindings::CompositeOperation css_animation_composition_to_bindings_composite_operation(CSS::AnimationComposition composition)

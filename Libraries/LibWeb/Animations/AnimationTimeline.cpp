@@ -55,6 +55,9 @@ Optional<TimeValue> AnimationTimeline::current_time_for_observation()
         if (!effect || !is<KeyframeEffect>(*effect))
             continue;
         auto& keyframe_effect = static_cast<KeyframeEffect&>(*effect);
+        // A clock lease ticks the effect at every rendering update, which moves the timeline to the time it shows.
+        if (keyframe_effect.is_clock_driven())
+            continue;
         if (keyframe_effect.per_frame_animation_tick_was_skipped() || keyframe_effect.can_skip_per_frame_animation_tick()) {
             has_animation_without_per_frame_tick = true;
             break;
@@ -135,6 +138,7 @@ bool AnimationTimeline::is_inactive() const
 
 AnimationTimeline::AnimationTimeline(GC::Ref<DOM::Document> document)
     : m_associated_document(document)
+    , m_style_engine_identity(document->allocate_animation_timeline_identity())
 {
     m_associated_document->associate_with_timeline(*this);
 }

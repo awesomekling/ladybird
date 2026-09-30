@@ -12,21 +12,23 @@
 #include <LibWeb/CSS/CSSAnimation.h>
 #include <LibWeb/CSS/CSSAnimationProperties.h>
 #include <LibWeb/CSS/CSSTransition.h>
+#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/StyleValueRustFFI.h>
 
 namespace Web::Animations {
 
 struct Animatable::Transition {
     AK_ALLOC_WITH_KMALLOC;
 
-    HashMap<CSS::PropertyID, size_t> transition_attribute_indices;
-    Vector<TransitionAttributes> transition_attributes;
     HashMap<CSS::PropertyID, GC::Ref<CSS::CSSTransition>> associated_transitions;
 };
 
 Animatable::Impl::~Impl() = default;
+
+static Animatable::AnimationTimingRowCounters s_animation_timing_row_counters;
 
 static WebIDL::ExceptionOr<Animatable::GetAnimationsOptions> get_animations_options_from_bindings(Bindings::GetAnimationsOptions const& options)
 {
@@ -201,24 +203,14 @@ bool Animatable::has_relevant_animations() const
     return false;
 }
 
-bool Animatable::has_relevant_animations_other_than_transitions() const
-{
-    if (!m_impl)
-        return false;
-
-    for (auto const& animation : m_impl->associated_animations) {
-        if (!animation->is_css_transition() && animation->is_relevant())
-            return true;
-    }
-
-    return false;
-}
-
 void Animatable::associate_with_animation(GC::Ref<Animation> animation)
 {
     auto& impl = ensure_impl();
     if (impl.associated_animations.contains_slow(animation))
         return;
+    // The style drain of a pass in flight reads the animations the element holds on the main thread, so it drains
+    // before the association changes them.
+    as<DOM::Element>(*this).document().join_frame_before_style_drain_reads();
     impl.associated_animations.append(animation);
     impl.is_sorted_by_composite_order = false;
     // The style engine computes no record for an element whose animations compose its style.
@@ -228,6 +220,8 @@ void Animatable::associate_with_animation(GC::Ref<Animation> animation)
 
     as<DOM::Element>(*this).document().associate_with_animation(animation);
     animation->did_associate_with_target();
+
+    invalidate_animation_timing_rows();
 }
 
 void Animatable::disassociate_with_animation(GC::Ref<Animation> animation)
@@ -241,6 +235,8 @@ void Animatable::disassociate_with_animation(GC::Ref<Animation> animation)
         as<DOM::Element>(*this).change_associated_animation_count_in_subtree(-1);
 
     as<DOM::Element>(*this).document().disassociate_with_animation(animation);
+
+    invalidate_animation_timing_rows();
 }
 
 void Animatable::on_document_changed(DOM::Document& old_document, DOM::Document& new_document)
@@ -252,6 +248,9 @@ void Animatable::on_document_changed(DOM::Document& old_document, DOM::Document&
         old_document.disassociate_with_animation(animation);
         new_document.associate_with_animation(animation);
     }
+    // The old document may never publish again, and the element publishes to the style engine of the one it is in.
+    if (m_impl->timing_rows_are_dirty)
+        new_document.note_dirty_animation_timing_rows({}, static_cast<DOM::Element&>(*this));
 }
 
 void Animatable::cancel_css_animations_and_transitions()
@@ -260,63 +259,57 @@ void Animatable::cancel_css_animations_and_transitions()
         return;
 
     GC::RootVector<GC::Ref<Animation>> animations_to_cancel;
-    for (auto& animations : m_impl->css_defined_animations) {
+    for (size_t index = 0; index < m_impl->css_defined_animations.size(); ++index) {
+        auto& animations = m_impl->css_defined_animations[index];
         if (!animations)
+            continue;
+        if (animations->is_empty())
             continue;
         for (auto& animation : *animations)
             animations_to_cancel.append(animation);
         animations->clear();
+        publish_css_defined_animations(index);
     }
-    for (auto& transition : m_impl->transitions) {
-        if (!transition)
+    for (size_t index = 0; index < m_impl->transitions.size(); ++index) {
+        auto& transition = m_impl->transitions[index];
+        if (!transition || transition->associated_transitions.is_empty())
             continue;
         for (auto& animation : transition->associated_transitions)
             animations_to_cancel.append(animation.value);
         transition->associated_transitions.clear();
-        transition->transition_attribute_indices.clear();
-        transition->transition_attributes.clear();
+        CSS::CSSTransition::publish_transitions(as<DOM::Element>(*this), index == 0 ? Optional<CSS::PseudoElement> {} : static_cast<CSS::PseudoElement>(index - 1));
     }
     m_impl->has_css_defined_animations = false;
 
     for (auto& animation : animations_to_cancel)
         animation->cancel(Animation::ShouldInvalidate::No);
+
+    invalidate_animation_timing_rows();
 }
 
-void Animatable::add_transitioned_properties(Optional<CSS::PseudoElement> pseudo_element, Vector<CSS::TransitionProperties> const& transitions)
-{
-    auto* maybe_transition = ensure_transition(pseudo_element);
-    if (!maybe_transition)
-        return;
-
-    auto& transition = *maybe_transition;
-    for (size_t i = 0; i < transitions.size(); i++) {
-        size_t index_of_this_transition = transition.transition_attributes.size();
-        transition.transition_attributes.empend(transitions[i].delay, transitions[i].duration, transitions[i].timing_function, transitions[i].transition_behavior);
-
-        for (auto const& property : transitions[i].properties)
-            transition.transition_attribute_indices.set(property, index_of_this_transition);
-    }
-}
-
+// The longhands the element's installed style gives a matching transition-property entry. The
+// engine reads them from the style's transition longhands. A declaration whose delay and duration
+// are each the single value 0s starts nothing, so it has none unless the element already holds a
+// transition, which such an entry could still cancel.
 Vector<CSS::PropertyID> Animatable::property_ids_with_matching_transition_property_entry(Optional<CSS::PseudoElement> pseudo_element) const
 {
-    auto const* maybe_transition = transition_if_exists(pseudo_element);
-
-    if (!maybe_transition)
+    auto& element = const_cast<DOM::Element&>(static_cast<DOM::Element const&>(*this));
+    auto const* style_record = DOM::AbstractElement { element, pseudo_element }.published_style_record();
+    if (!style_record)
         return {};
-
-    return maybe_transition->transition_attribute_indices.keys();
-}
-
-Optional<Animatable::TransitionAttributes const&> Animatable::property_transition_attributes(Optional<CSS::PseudoElement> pseudo_element, CSS::PropertyID property) const
-{
-    auto const* maybe_transition = transition_if_exists(pseudo_element);
-    if (!maybe_transition)
+    auto const& style = style_record->view();
+    if (!style.longhand_table)
         return {};
-    auto& transition = *maybe_transition;
-    if (auto maybe_attr_index = transition.transition_attribute_indices.get(property); maybe_attr_index.has_value())
-        return transition.transition_attributes[maybe_attr_index.value()];
-    return {};
+    if (CSS::StyleValueFFI::rust_transition_delay_and_duration_are_single_zero(style.longhand_table)
+        && property_ids_with_existing_transitions(pseudo_element).is_empty())
+        return {};
+    auto entries = CSS::StyleValueFFI::rust_transition_entries(style.longhand_table);
+    Vector<CSS::PropertyID> property_ids;
+    property_ids.ensure_capacity(entries.count);
+    for (auto const& entry : ReadonlySpan<CSS::StyleValueFFI::FfiTransitionEntry> { entries.entries, entries.count })
+        property_ids.unchecked_append(static_cast<CSS::PropertyID>(entry.property_id));
+    CSS::StyleValueFFI::rust_transition_entries_release(entries.storage);
+    return property_ids;
 }
 
 Vector<CSS::PropertyID> Animatable::property_ids_with_existing_transitions(Optional<CSS::PseudoElement> pseudo_element) const
@@ -348,6 +341,7 @@ void Animatable::set_transition(Optional<CSS::PseudoElement> pseudo_element, CSS
     auto& transition = *maybe_transition;
     VERIFY(!transition.associated_transitions.contains(property));
     transition.associated_transitions.set(property, animation);
+    CSS::CSSTransition::publish_transitions(as<DOM::Element>(*this), pseudo_element);
 }
 
 void Animatable::remove_transition(Optional<CSS::PseudoElement> pseudo_element, CSS::PropertyID property_id)
@@ -360,17 +354,7 @@ void Animatable::remove_transition(Optional<CSS::PseudoElement> pseudo_element, 
     VERIFY(removed_transition.has_value());
     transition.associated_transitions.remove(property_id);
     removed_transition.value()->schedule_disassociation_from_target();
-}
-
-void Animatable::clear_registered_transitions(Optional<CSS::PseudoElement> pseudo_element)
-{
-    auto maybe_transition = ensure_transition(pseudo_element);
-    if (!maybe_transition)
-        return;
-
-    auto& transition = *maybe_transition;
-    transition.transition_attribute_indices.clear();
-    transition.transition_attributes.clear();
+    CSS::CSSTransition::publish_transitions(as<DOM::Element>(*this), pseudo_element);
 }
 
 void Animatable::visit_edges(JS::Cell::Visitor& visitor)
@@ -449,7 +433,286 @@ void Animatable::set_css_defined_animations(Optional<CSS::PseudoElement> pseudo_
     //     is one flag for all of them.
     if (!animations.is_empty())
         impl.has_css_defined_animations = true;
+    // A timing row says whether its animation's owning element lists it (see publish_animation_timing_rows()), so the
+    // rows of every animation the list named or names move with it.
+    auto invalidate_style_timing_rows_of = [](Vector<GC::Ref<CSS::CSSAnimation>> const* list) {
+        if (!list)
+            return;
+        for (auto const& animation : *list)
+            animation->invalidate_style_timing_row();
+    };
+    invalidate_style_timing_rows_of(impl.css_defined_animations[index].ptr());
+    invalidate_style_timing_rows_of(&animations);
     impl.css_defined_animations[index] = make<Vector<GC::Ref<CSS::CSSAnimation>>>(move(animations));
+    publish_css_defined_animations(index);
+}
+
+// The style stage decides which animation each of an element's animation definitions claims, so the
+// names of the animations it already has are an input to it rather than something it asks for.
+void Animatable::publish_css_defined_animations(size_t index)
+{
+    auto* element = as_if<DOM::Element>(*this);
+    if (!element)
+        return;
+
+    Vector<Utf16FlyString> names;
+    // Beside each name, the definition the plan last applied to that animation. A plan whose
+    // definitions all equal these changes nothing when it is applied, and the computation that
+    // decides that needs no help from the host to see it.
+    Vector<u64> definition_words;
+    if (auto const& animations = m_impl->css_defined_animations[index]) {
+        names.ensure_capacity(animations->size());
+        definition_words.ensure_capacity(animations->size() * CSS::AppliedAnimationDefinitionRow::word_count);
+        for (auto const& animation : *animations) {
+            names.unchecked_append(animation->animation_name());
+            auto row = animation->applied_definition_row();
+            definition_words.append(row.words, CSS::AppliedAnimationDefinitionRow::word_count);
+        }
+    }
+    CSS::record_element_css_defined_animations(*element, static_cast<u8>(index), names, definition_words);
+}
+
+// An animation that has been cancelled, replaced, or has finished without filling leaves its target's list at the next
+// animation frame (see Animation::disassociate_from_target_if_inert()). Until then it has no row to publish, as an
+// animation that is not relevant only becomes relevant again when the host moves its timing, and that republishes the
+// list. A style change can cancel and restart a transition any number of times before that frame, and every style
+// update would otherwise republish and redescribe each of the dead ones. A CSS animation stays, as the next plan of the
+// element that lists it can play it again.
+//
+// NB: The rows are published again when an animation's timing moves, not when its timeline's time does. On a timeline
+//     whose time only increases, an animation that is not relevant stays so until its timing moves. On any other one
+//     it can become relevant again, so it keeps its row until it leaves.
+static bool is_leaving_its_target(Animation const& animation)
+{
+    if (!animation.disassociation_from_target_pending() || is<CSS::CSSAnimation>(animation))
+        return false;
+    if (auto timeline = animation.timeline(); timeline && !timeline->is_monotonically_increasing())
+        return false;
+    return !animation.is_relevant();
+}
+
+void Animatable::invalidate_animation_timing_rows()
+{
+    auto& impl = ensure_impl();
+    if (exchange(impl.timing_rows_are_dirty, true))
+        return;
+    // NB: Every Animatable is an Element.
+    auto& element = static_cast<DOM::Element&>(*this);
+    element.document().note_dirty_animation_timing_rows({}, element);
+}
+
+// Which of the animations an element holds are relevant is a question about the WAAPI timing
+// model, not about the GC heap: it is answered from the animation's own timing and the current time
+// of its timeline. Publish the timing, once per list, so the style stage can answer it itself.
+void Animatable::publish_animation_timing_rows(Badge<DOM::Document>)
+{
+    // NB: Every Animatable is an Element.
+    auto* element = static_cast<DOM::Element*>(this);
+    if (m_impl)
+        m_impl->timing_rows_are_dirty = false;
+
+    auto slot_of = [](KeyframeEffect const& effect) {
+        auto pseudo_element = effect.pseudo_element_type();
+        return pseudo_element.has_value() ? static_cast<u8>(to_underlying(*pseudo_element) + 1) : static_cast<u8>(0);
+    };
+
+    // A transition the style computation has provisionally started is sampled by the pass that
+    // started it, and by every animated style update until the stabilization epoch commits, but it
+    // is not associated with the element yet. Publish its timing too, or the one computation that
+    // samples it has nothing to sample it from.
+    // OPTIMIZATION: There are none outside a style update that starts transitions, so no vector is rooted for them.
+    Optional<GC::ConservativeVector<GC::Ref<KeyframeEffect>>> provisional_effect_storage;
+    element->document().style_computer().for_each_provisional_transition_effect_on_element(*element, [&](KeyframeEffect& effect) {
+        if (!provisional_effect_storage.has_value())
+            provisional_effect_storage.emplace();
+        provisional_effect_storage->append(effect);
+    });
+    ReadonlySpan<GC::Ref<KeyframeEffect>> provisional_effects;
+    if (provisional_effect_storage.has_value())
+        provisional_effects = provisional_effect_storage->span();
+    // An element whose only animation is a provisionally started transition has no animation state
+    // of its own yet, and one with neither has nothing to publish and nothing published.
+    if (!m_impl && provisional_effects.is_empty())
+        return;
+    auto& impl = ensure_impl();
+
+    // OPTIMIZATION: An element holds a few animations, and every style update rebuilds its rows to
+    //               learn that they have not moved, so the buffers they are built in start inline.
+    Vector<u8, 4> slots_with_rows;
+    auto note_slot_of = [&](KeyframeEffect const& effect) {
+        auto slot = slot_of(effect);
+        if (!slots_with_rows.contains_slow(slot))
+            slots_with_rows.append(slot);
+    };
+    for (auto const& effect : provisional_effects)
+        note_slot_of(*effect);
+    for (auto const& animation : impl.associated_animations) {
+        auto effect = animation->effect();
+        if (!effect || !is<KeyframeEffect>(*effect) || is_leaving_its_target(*animation))
+            continue;
+        note_slot_of(static_cast<KeyframeEffect const&>(*effect));
+    }
+
+    Vector<u32, 4 * Animation::StyleTimingRow::word_count> words;
+    Vector<u64, 4 * Animation::StyleTimingRow::TimeCount> times;
+    // The `linear()` stops the rows name by range, input and output interleaved as raw `f64` bits.
+    // The rows are reordered below and this buffer is not, so a range stays the one it was appended
+    // at.
+    Vector<u64> linear_points;
+    Vector<GC::Ref<KeyframeEffect>, 4> effects_in_order;
+    // A CSS animation keeps the place in its owning element's `animation-name` list it was given
+    // when a plan last applied a definition to it, and script can revive one the element has since
+    // stopped listing. Its place is then one another animation holds, so the key alone says nothing
+    // about which of the two the element's next plan works on. Say on the row whether the element
+    // really lists this animation there.
+    auto listed_by_owning_element = [](Animation& animation) -> u32 {
+        auto owning_element = animation.owning_element();
+        if (!owning_element.has_value())
+            return 0;
+        auto const* css_defined_animations = owning_element->element().css_defined_animations(owning_element->pseudo_element());
+        if (!css_defined_animations)
+            return 0;
+        auto index = animation.class_specific_composite_order_key();
+        if (index >= css_defined_animations->size() || &*css_defined_animations->at(index) != &animation)
+            return 0;
+        return Animation::StyleTimingRow::listed_by_owning_element;
+    };
+    auto append_row = [&](KeyframeEffect& keyframe_effect, Animation& animation, u32 extra_flags) {
+        auto row = animation.style_timing_row(linear_points);
+        row.effect_identity = keyframe_effect.animation_preparation_identity();
+        auto const* css_animation = as_if<CSS::CSSAnimation>(animation);
+        auto const play_state_overridden = css_animation && css_animation->script_overrode_play_state()
+            ? Animation::StyleTimingRow::css_play_state_overridden_by_script
+            : 0;
+        words.append(row.flags | extra_flags | listed_by_owning_element(animation) | play_state_overridden);
+        words.append(row.timeline_identity);
+        words.append(bit_cast<u32>(row.easing_interval_count));
+        words.append(static_cast<u32>(row.effect_identity));
+        words.append(static_cast<u32>(row.effect_identity >> 32));
+        words.append(static_cast<u32>(row.composite_class)
+            | (static_cast<u32>(row.composite_owning_slot) << 8)
+            | (static_cast<u32>(row.composite_transition_property) << 16));
+        words.append(row.composite_owning_node);
+        words.append(row.composite_class_key);
+        words.append(row.global_list_order);
+        words.append(row.first_linear_point);
+        words.append(row.linear_point_count);
+        for (auto time : row.times)
+            times.append(bit_cast<u64>(time));
+        effects_in_order.append(keyframe_effect);
+    };
+    // The order the animations happen to sit in the element's list is the order they were
+    // associated in. The composite order is the one a consumer of the published list needs, and
+    // every number it is decided by travels on the row, so the mirror sorts the list rather than
+    // the element sorting its own animations for the occasion.
+    Vector<u32> ordered_words;
+    Vector<u64> ordered_times;
+    Vector<GC::Ref<KeyframeEffect>> ordered_effects;
+    Vector<u32> order;
+    auto put_rows_in_composite_order = [&] {
+        auto row_count = effects_in_order.size();
+        order.resize(row_count);
+        CSS::StyleValueFFI::rust_animation_timing_rows_composite_order(words.data(), row_count, order.data());
+        ordered_words.clear_with_capacity();
+        ordered_times.clear_with_capacity();
+        ordered_effects.clear_with_capacity();
+        for (auto index : order) {
+            ordered_words.append(words.data() + index * Animation::StyleTimingRow::word_count, Animation::StyleTimingRow::word_count);
+            ordered_times.append(times.data() + index * Animation::StyleTimingRow::TimeCount, Animation::StyleTimingRow::TimeCount);
+            ordered_effects.append(effects_in_order[index]);
+        }
+    };
+    // The rows and descriptions a list publishes are a function of what it is built from here, so
+    // a list built the same as it was last published has nothing new to tell the engine. Every
+    // style update republishes every animated element, and most of them have not moved.
+    auto published_list = [&](u8 slot) -> Impl::PublishedTimingRows* {
+        for (auto& published : impl.published_timing_rows) {
+            if (published.slot == slot)
+                return &published;
+        }
+        return nullptr;
+    };
+    Vector<u64, 4> effect_generations;
+    for (auto slot : slots_with_rows) {
+        words.clear_with_capacity();
+        times.clear_with_capacity();
+        linear_points.clear_with_capacity();
+        effects_in_order.clear_with_capacity();
+        for (auto& effect : provisional_effects) {
+            if (slot_of(*effect) != slot)
+                continue;
+            if (auto animation = effect->associated_animation())
+                append_row(*effect, *animation, Animation::StyleTimingRow::not_associated);
+        }
+        for (auto const& animation : impl.associated_animations) {
+            auto effect = animation->effect();
+            if (!effect || !is<KeyframeEffect>(*effect) || is_leaving_its_target(*animation))
+                continue;
+            auto& keyframe_effect = static_cast<KeyframeEffect&>(*effect);
+            if (slot_of(keyframe_effect) != slot)
+                continue;
+            append_row(keyframe_effect, *animation, 0);
+        }
+        effect_generations.clear_with_capacity();
+        for (auto const& effect : effects_in_order)
+            effect_generations.append(effect->animation_preparation_generation());
+
+        auto* published = published_list(slot);
+        if (published && !impl.published_timing_rows_are_stale
+            && published->words == words && published->times == times
+            && published->linear_points == linear_points && published->effect_generations == effect_generations) {
+            ++s_animation_timing_row_counters.lists_unchanged;
+            continue;
+        }
+
+        put_rows_in_composite_order();
+        CSS::record_element_animation_timing_rows(*element, slot, ordered_words, ordered_times, linear_points);
+        CSS::record_element_animation_effect_descriptions(*element, slot, ordered_effects);
+        ++s_animation_timing_row_counters.lists_published;
+        s_animation_timing_row_counters.rows_published += ordered_effects.size();
+        if (!published) {
+            impl.published_timing_rows.append({});
+            published = &impl.published_timing_rows.last();
+            published->slot = slot;
+        }
+        published->words.clear_with_capacity();
+        published->words.append(words.data(), words.size());
+        published->times.clear_with_capacity();
+        published->times.append(times.data(), times.size());
+        published->linear_points.clear_with_capacity();
+        published->linear_points.append(linear_points.data(), linear_points.size());
+        published->effect_generations.clear_with_capacity();
+        published->effect_generations.append(effect_generations.data(), effect_generations.size());
+    }
+
+    impl.published_timing_rows.remove_all_matching([&](auto const& published) {
+        if (slots_with_rows.contains_slow(published.slot))
+            return false;
+        CSS::record_element_animation_timing_rows(*element, published.slot, {}, {}, {});
+        CSS::record_element_animation_effect_descriptions(*element, published.slot, {});
+        return true;
+    });
+    impl.published_timing_rows_are_stale = false;
+}
+
+void Animatable::note_animation_timing_rows_identity_changed()
+{
+    if (!m_impl)
+        return;
+    m_impl->published_timing_rows_are_stale = true;
+    invalidate_animation_timing_rows();
+    // The row of an animation this element owns names it by its style node, whichever element the animation targets.
+    for (auto const& animations : m_impl->css_defined_animations) {
+        if (!animations)
+            continue;
+        for (auto const& animation : *animations)
+            animation->invalidate_style_timing_row();
+    }
+}
+
+Animatable::AnimationTimingRowCounters Animatable::animation_timing_row_counters()
+{
+    return s_animation_timing_row_counters;
 }
 
 Animatable::Impl& Animatable::ensure_impl() const

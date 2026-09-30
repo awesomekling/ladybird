@@ -29,6 +29,7 @@
 #include <LibURL/Parser.h>
 #include <LibWeb/ARIA/AriaData.h>
 #include <LibWeb/ARIA/StateAndProperties.h>
+#include <LibWeb/Animations/Animatable.h>
 #include <LibWeb/Animations/DocumentTimeline.h>
 #include <LibWeb/Bindings/Internals.h>
 #include <LibWeb/Bindings/Intrinsics.h>
@@ -47,6 +48,8 @@
 #include <LibWeb/CSS/PseudoElement.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleSheetState.h>
+#include <LibWeb/Compositor/CompositorFrame.h>
+#include <LibWeb/Compositor/NavigablePresenter.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/EventTarget.h>
@@ -62,6 +65,10 @@
 #include <LibWeb/HTML/AutoplaySettings.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameCompletion.h>
+#include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
+#include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/HTML/EventLoop/TaskQueue.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
@@ -81,9 +88,9 @@
 #include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/Internals/InternalGamepad.h>
 #include <LibWeb/Internals/Internals.h>
-#include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/TreeBuilderRustFFI.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Loader/ContentBlocker.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Page/EventHandler.h>
@@ -128,6 +135,25 @@ static Compositing::ScrollGesturePhase scroll_gesture_phase_from(Bindings::Scrol
 }
 
 GC_DEFINE_ALLOCATOR(Internals);
+
+// The row the node, or its pseudo-element of the given kind, is bound to in its document's arena; an invalid slot if
+// there is none.
+static Compositing::RustFFI::NodeSlotId bound_slot_of(DOM::Node const& node, Optional<CSS::PseudoElement> pseudo_element = {})
+{
+    auto* arena = Layout::document_layout_arena_if_created(node.document());
+    if (!arena)
+        return Compositing::RustFFI::NodeSlotId_INVALID;
+    if (node.is_document())
+        return Layout::RustFFI::layout_arena_bound_viewport_row(arena).slot;
+    auto style_node = DOM::NodeIdentity::of(node).style_node();
+    u8 generated_for = pseudo_element.has_value() ? static_cast<u8>(to_underlying(*pseudo_element)) + 1 : 0;
+    return Layout::RustFFI::layout_arena_bound_row_of(arena, style_node.value(), generated_for).slot;
+}
+
+static bool is_valid_slot(Compositing::RustFFI::NodeSlotId slot)
+{
+    return slot.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX;
+}
 
 static GC::Ptr<HTML::LocalNavigable> local_root_of(HTML::Window const& window)
 {
@@ -181,20 +207,20 @@ u64 Internals::visual_context_pending_dirty_box_count()
     auto& document = window().associated_document();
     if (!document.has_committed_viewport_box())
         return 0;
-    return Layout::RustFFI::layout_arena_visual_context_pending_dirty_box_count(document.layout_node_arena().handle());
+    return Layout::RustFFI::layout_arena_visual_context_pending_dirty_box_count(Layout::document_layout_arena(document));
 }
 
 u64 Internals::layout_tree_pre_order_label_violation_count()
 {
     auto& document = window().associated_document();
     return Layout::RustFFI::layout_arena_pre_order_label_violation_count(
-        document.layout_node_arena().handle(), Painting::viewport_row_slot(document));
+        Layout::document_layout_arena(document), Painting::viewport_row_slot(document));
 }
 
 u64 Internals::layout_tree_pre_order_relabel_count()
 {
     auto& document = window().associated_document();
-    return Layout::RustFFI::layout_arena_pre_order_relabel_count(document.layout_node_arena().handle());
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(document)).pre_order_relabels;
 }
 
 u64 Internals::visual_context_tree_node_count()
@@ -238,19 +264,27 @@ GC::Ref<JS::Object> Internals::visual_context_node_indices(DOM::Element& element
     auto& document = window().associated_document();
     document.update_layout(DOM::UpdateLayoutReason::Debugging);
     document.update_paint_and_hit_testing_properties_if_needed();
-    auto const* layout_node = element.layout_node();
+    auto slot = bound_slot_of(element);
+    auto* arena = Layout::document_layout_arena_if_created(document);
+    auto has_committed_box = is_valid_slot(slot) && Layout::RustFFI::layout_arena_has_committed_box(arena, slot);
     auto owned_indices_as_array = [&](Layout::RustFFI::FfiVisualContextBoxNodeList list) -> GC::Ref<JS::Array> {
         Vector<u32> indices;
-        if (layout_node)
-            indices = Painting::rust_owned_visual_context_node_indices(*layout_node, list);
+        if (has_committed_box) {
+            indices.resize(Layout::RustFFI::layout_arena_paintable_visual_context_node_count(arena, slot, list));
+            if (!indices.is_empty())
+                Layout::RustFFI::layout_arena_paintable_visual_context_copy_node_indices(arena, slot, list, indices.data(), indices.size());
+        }
         return JS::Array::create_from<u32>(realm, indices.span(), [](u32 index) { return JS::Value { index }; });
+    };
+    auto has_compositor_animation_frame = [&](Layout::RustFFI::CompositorAnimationFrameKind kind) {
+        return is_valid_slot(slot) && Layout::RustFFI::layout_arena_node_has_compositor_animation_frame(arena, slot, kind);
     };
     auto object = JS::Object::create(realm, nullptr);
     object->define_direct_property("spatial"_utf16_fly_string, owned_indices_as_array(Layout::RustFFI::FfiVisualContextBoxNodeList::SpatialNodes), JS::default_attributes);
     object->define_direct_property("clips"_utf16_fly_string, owned_indices_as_array(Layout::RustFFI::FfiVisualContextBoxNodeList::ClipNodes), JS::default_attributes);
     object->define_direct_property("effects"_utf16_fly_string, owned_indices_as_array(Layout::RustFFI::FfiVisualContextBoxNodeList::EffectNodes), JS::default_attributes);
-    object->define_direct_property("needsCompositorEffectsLayer"_utf16_fly_string, JS::Value(layout_node && layout_node->needs_compositor_effects_layer()), JS::default_attributes);
-    object->define_direct_property("needsCompositorBackgroundColorFrame"_utf16_fly_string, JS::Value(layout_node && layout_node->needs_compositor_background_color_frame()), JS::default_attributes);
+    object->define_direct_property("needsCompositorEffectsLayer"_utf16_fly_string, JS::Value(has_compositor_animation_frame(Layout::RustFFI::CompositorAnimationFrameKind::Opacity)), JS::default_attributes);
+    object->define_direct_property("needsCompositorBackgroundColorFrame"_utf16_fly_string, JS::Value(has_compositor_animation_frame(Layout::RustFFI::CompositorAnimationFrameKind::BackgroundColor)), JS::default_attributes);
     return object;
 }
 
@@ -291,8 +325,17 @@ void Internals::send_mismatched_visual_context_tree_update_to_compositor()
     document.update_paint_and_hit_testing_properties_if_needed();
 
     // Send a bare visual-context-tree update carrying that new structural epoch *without* re-recording the display list —
-    // deliberately reproducing the peer inconsistency behind issue #10368.
-    navigable->compositor_context().update_visual_context_tree(document_paint_state.visual_context_tree(document), {});
+    // deliberately reproducing the peer inconsistency behind issue #10368. A frame in flight that presents to the context
+    // is taken in first, so it does not land after this one.
+    (void)navigable->presenter();
+    Compositor::CompositorFrame frame;
+    frame.context_id = navigable->compositor_context().id();
+    frame.visual_context_tree_update = Compositor::CompositorFrame::VisualContextTreeUpdate {
+        .visual_context_tree = document_paint_state.visual_context_tree(document),
+        .resource_transaction = {},
+    };
+    if (auto frame_sink = navigable->compositor_context().prepare_to_submit_frame(frame))
+        frame_sink->submit(move(frame));
 }
 
 // https://web-platform-tests.org/writing-tests/reftests.html#components-of-a-reftest
@@ -642,15 +685,17 @@ void Internals::mouse_down(double x, double y, WebIDL::UnsignedShort click_count
 void Internals::mouse_down_on_scrollbar_dragged_by_compositor(double x, double y, DOM::Element& scroller, bool vertical)
 {
     scroller.document().update_layout(DOM::UpdateLayoutReason::InternalsHitTest);
-    auto const* scrolling_box = scroller.layout_node();
-    VERIFY(scrolling_box);
-    auto scroller_stable_node_id = Painting::async_scroll_node_stable_id(*scrolling_box);
-    VERIFY(scroller_stable_node_id.has_value());
+    VERIFY(is_valid_slot(bound_slot_of(scroller)));
+    auto scroller_stable_node_id = Compositing::AsyncScrollNodeStableID {
+        .node_id = scroller.unique_id(),
+        .kind = Compositing::async_scroll_node_kind_for(Compositing::CompositorScrollNodeKind::Element),
+        .pseudo_element_type = 0,
+    };
 
     auto& page = this->page();
     auto position = page.css_to_device_point({ x, y });
     page.handle_mousedown(position, position, UIEvents::MouseButton::Primary, 0, 0, 1,
-        Compositing::ScrollbarDraggedByCompositor { .scroller_stable_node_id = *scroller_stable_node_id, .vertical = vertical });
+        Compositing::ScrollbarDraggedByCompositor { .scroller_stable_node_id = scroller_stable_node_id, .vertical = vertical });
 }
 
 void Internals::mouse_up(double x, double y, WebIDL::UnsignedShort button, WebIDL::UnsignedShort modifiers)
@@ -979,10 +1024,10 @@ WebIDL::UnsignedLongLong Internals::full_layout_count()
 
 void Internals::begin_layout_trace()
 {
-    Layout::RustFFI::layout_arena_begin_layout_trace(window().associated_document().layout_node_arena().handle(),
-        [](void* node_shell, void* sink, void (*append)(void*, u8 const*, size_t)) {
-            auto description = static_cast<Layout::Node const*>(node_shell)->debug_description();
-            append(sink, description.bytes().data(), description.bytes().size());
+    auto& document = window().associated_document();
+    Layout::RustFFI::layout_arena_begin_layout_trace(Layout::document_layout_arena(document), &document,
+        [](void* context, u32 node, void* sink, void (*append)(void*, u8 const*, size_t)) {
+            Painting::describe_dom_node_for_debug(*static_cast<DOM::Document*>(context), node, sink, append);
         });
 }
 
@@ -994,7 +1039,7 @@ void Internals::update_layout_for_testing()
 Utf16String Internals::take_layout_trace()
 {
     StringBuilder builder;
-    Layout::RustFFI::layout_arena_take_layout_trace(window().associated_document().layout_node_arena().handle(), &builder,
+    Layout::RustFFI::layout_arena_take_layout_trace(Layout::document_layout_arena(window().associated_document()), &builder,
         [](void* context, u8 const* bytes, size_t length) {
             static_cast<StringBuilder*>(context)->append(StringView { bytes, length });
         });
@@ -1003,17 +1048,22 @@ Utf16String Internals::take_layout_trace()
 
 WebIDL::UnsignedLongLong Internals::table_cell_measurement_cache_miss_count()
 {
-    return window().associated_document().layout_node_arena().table_cell_measurement_cache_miss_count();
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(window().associated_document())).table_cell_measurement_cache_misses;
 }
 
 WebIDL::UnsignedLongLong Internals::intrinsic_inline_measurement_count()
 {
-    return window().associated_document().layout_node_arena().intrinsic_inline_measurement_count();
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(window().associated_document())).intrinsic_inline_measurements;
+}
+
+WebIDL::UnsignedLongLong Internals::retained_inline_item_count()
+{
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(window().associated_document())).retained_inline_items;
 }
 
 WebIDL::UnsignedLongLong Internals::intrinsic_measurement_count()
 {
-    return window().associated_document().layout_node_arena().intrinsic_measurement_count();
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(window().associated_document())).intrinsic_measurements;
 }
 
 WebIDL::UnsignedLongLong Internals::accumulated_visual_context_tree_build_count()
@@ -1028,13 +1078,13 @@ void Internals::begin_display_list_trace()
 {
     auto& document = window().associated_document();
     (void)document.paint_state().take_recording_traces();
-    Layout::RustFFI::layout_arena_set_recording_trace_enabled(document.layout_node_arena().handle(), true);
+    Layout::RustFFI::layout_arena_set_recording_trace_enabled(Layout::document_layout_arena(document), true);
 }
 
 Utf16String Internals::take_display_list_trace()
 {
     auto& document = window().associated_document();
-    Layout::RustFFI::layout_arena_set_recording_trace_enabled(document.layout_node_arena().handle(), false);
+    Layout::RustFFI::layout_arena_set_recording_trace_enabled(Layout::document_layout_arena(document), false);
     StringBuilder builder;
     for (auto const& trace : document.paint_state().take_recording_traces())
         builder.append(trace);
@@ -1158,12 +1208,14 @@ bool Internals::headless()
 
 bool Internals::needs_repaint()
 {
+    window().associated_document().drain_invalidation_journal();
     auto local_root = local_root_of(window());
     return local_root && local_root->needs_repaint();
 }
 
 bool Internals::needs_display_list_record()
 {
+    window().associated_document().drain_invalidation_journal();
     auto local_root = local_root_of(window());
     return local_root && local_root->needs_to_record_display_list();
 }
@@ -1192,12 +1244,12 @@ Utf16String Internals::dump_layout_tree(GC::Ref<DOM::Node> node)
 {
     node->document().update_layout(DOM::UpdateLayoutReason::Debugging);
 
-    auto* layout_node = node->layout_node();
-    if (!layout_node)
+    auto box = Painting::BoxSlot::bound_to(*node);
+    if (!box)
         return "(no layout node)"_utf16;
 
     StringBuilder builder;
-    Web::dump_tree(builder, *layout_node);
+    Painting::dump_layout_tree(builder, box, false);
     return dump_string_to_utf16(builder.to_string_without_validation());
 }
 
@@ -1215,7 +1267,7 @@ Utf16String Internals::stacking_context_structure_verification_report()
     document.update_paint_and_hit_testing_properties_if_needed();
     StringBuilder builder;
     Layout::RustFFI::layout_arena_stacking_context_structure_verification_report(
-        document.layout_node_arena().handle(), Painting::viewport_row_slot(document), &builder,
+        Layout::document_layout_arena(document), Painting::viewport_row_slot(document), &builder,
         [](void* context, u8 const* bytes, size_t byte_count) {
             static_cast<StringBuilder*>(context)->append(StringView { bytes, byte_count });
         });
@@ -1516,6 +1568,160 @@ void Internals::reset_style_invalidation_counters()
     window().associated_document().reset_style_invalidation_counters();
 }
 
+u64 Internals::clock_ticks_presented() const
+{
+    return Layout::RustFFI::rust_clock_ticks_presented();
+}
+
+u64 Internals::clock_ticks_received() const
+{
+    auto counters = Layout::RustFFI::rust_render_clock_counters();
+    return counters.ticks_posted + counters.ticks_folded;
+}
+
+// A test asks about the render clock as the rendering updates it ran left it: they end first, and grant the leases the
+// render clock ticks.
+static HTML::FrameScheduler& frame_scheduler_after_rendering_updates()
+{
+    auto& frame_scheduler = HTML::main_thread_event_loop().frame_scheduler();
+    if (frame_scheduler.state() == HTML::FrameScheduler::State::InFlight || frame_scheduler.state() == HTML::FrameScheduler::State::CommittedTailPending)
+        (void)frame_scheduler.finish_frame_now();
+    return frame_scheduler;
+}
+
+bool Internals::render_clock_ticks(DOM::Document const& document) const
+{
+    return frame_scheduler_after_rendering_updates().render_clock_ticks(document);
+}
+
+GC::Ptr<Geometry::DOMRect> Internals::presented_border_box(DOM::Element const& element) const
+{
+    auto answer = Layout::RustFFI::render_owner_committed_border_box(element.document().render_document_id(), element.style_node_id().value());
+    if (!answer.has_box)
+        return nullptr;
+    CSSPixelRect rect = answer.rect;
+    return Geometry::DOMRect::create(rect.x().to_double(), rect.y().to_double(), rect.width().to_double(), rect.height().to_double());
+}
+
+void Internals::set_render_clock_suspended(bool suspended)
+{
+    HTML::main_thread_event_loop().frame_scheduler().set_render_clock_suspended(suspended);
+}
+
+GC::Ref<WebIDL::Promise> Internals::inject_clock_tick(double frame_time_ms)
+{
+    auto promise = WebIDL::create_promise_for(window());
+    auto frame_time = window().associated_document().relevant_settings_object().time_origin() + frame_time_ms;
+    // Beside a frame the test holds, the tick waits behind the held run, as a display tick would.
+    auto held_at = Layout::RustFFI::FfiStageHoldPoint::BeforeRun;
+    auto& frame_scheduler = Layout::RustFFI::rust_stage_thread_wait_for_held_stage(0, &held_at) ? HTML::main_thread_event_loop().frame_scheduler() : frame_scheduler_after_rendering_updates();
+    frame_scheduler.inject_render_clock_tick(frame_time, [window = GC::Root { window() }, promise = GC::Root { promise }](bool ticked) {
+        HTML::TemporaryExecutionContext execution_context { window->principal_realm() };
+        WebIDL::resolve_promise(*promise, JS::Value(ticked));
+    });
+    return promise;
+}
+
+GC::Ref<JS::Object> Internals::get_render_clock_counters() const
+{
+    auto& realm = HTML::relevant_realm(window());
+    auto counters = Layout::RustFFI::rust_render_clock_counters();
+    auto object = JS::Object::create(realm, nullptr);
+    auto define = [&](StringView name, u64 value) {
+        object->define_direct_property(Utf16FlyString::from_utf8(name), JS::Value(static_cast<double>(value)), JS::default_attributes);
+    };
+    define("ticksPosted"sv, counters.ticks_posted);
+    define("ticksFolded"sv, counters.ticks_folded);
+    define("ticksRun"sv, counters.ticks_run);
+    define("ticksPresentedByMain"sv, counters.ticks_presented_by_main);
+    define("ticksDroppedWithoutClock"sv, counters.ticks_dropped_without_clock);
+    define("ticksDroppedPaused"sv, counters.ticks_dropped_paused);
+    define("ticksDroppedNeedingMain"sv, counters.ticks_dropped_needing_main);
+    define("ticksDroppedStale"sv, counters.ticks_dropped_stale);
+    define("ticksInstalled"sv, counters.ticks_installed);
+    define("ticksLaidOut"sv, counters.ticks_laid_out);
+    define("ticksPresented"sv, counters.ticks_presented);
+    define("ticksNeedingMain"sv, counters.ticks_needing_main);
+    define("ticksMovingVisualContexts"sv, counters.ticks_moving_visual_contexts);
+    define("ticksAskingMainToAdopt"sv, counters.ticks_asking_main_to_adopt);
+    return object;
+}
+
+GC::Ref<JS::Object> Internals::get_animation_timing_row_counters() const
+{
+    auto& realm = HTML::relevant_realm(window());
+    auto counters = Animations::Animatable::animation_timing_row_counters();
+    auto object = JS::Object::create(realm, nullptr);
+    object->define_direct_property("listsPublished"_utf16_fly_string, JS::Value(static_cast<double>(counters.lists_published)), JS::default_attributes);
+    object->define_direct_property("listsUnchanged"_utf16_fly_string, JS::Value(static_cast<double>(counters.lists_unchanged)), JS::default_attributes);
+    object->define_direct_property("rowsPublished"_utf16_fly_string, JS::Value(static_cast<double>(counters.rows_published)), JS::default_attributes);
+    return object;
+}
+
+GC::Ref<JS::Object> Internals::join_counters_object() const
+{
+    auto& realm = HTML::relevant_realm(window());
+    auto const& counters_by_reason = window().associated_document().join_counters();
+
+    auto counters_object = [&](DOM::Document::JoinCounters const& counters) {
+        auto object = JS::Object::create(realm, nullptr);
+        object->define_direct_property("calls"_utf16_fly_string, JS::Value(counters.calls), JS::default_attributes);
+        object->define_direct_property("joins"_utf16_fly_string, JS::Value(counters.joins), JS::default_attributes);
+        object->define_direct_property("cleanReads"_utf16_fly_string, JS::Value(counters.clean_reads), JS::default_attributes);
+        object->define_direct_property("nested"_utf16_fly_string, JS::Value(counters.nested), JS::default_attributes);
+        object->define_direct_property("totalNanoseconds"_utf16_fly_string, JS::Value(counters.total_nanoseconds), JS::default_attributes);
+        object->define_direct_property("cleanReadNanoseconds"_utf16_fly_string, JS::Value(counters.clean_read_nanoseconds), JS::default_attributes);
+        object->define_direct_property("maxNanoseconds"_utf16_fly_string, JS::Value(counters.max_nanoseconds), JS::default_attributes);
+        object->define_direct_property("joinsThatPublishedNothing"_utf16_fly_string, JS::Value(counters.joins_that_published_nothing), JS::default_attributes);
+        return object;
+    };
+
+    DOM::Document::JoinCounters totals;
+    auto by_reason = JS::Object::create(realm, nullptr);
+    for (size_t reason = 0; reason < DOM::update_layout_reason_count; ++reason) {
+        auto const& counters = counters_by_reason[reason];
+        totals.calls += counters.calls;
+        totals.joins += counters.joins;
+        totals.clean_reads += counters.clean_reads;
+        totals.nested += counters.nested;
+        totals.total_nanoseconds += counters.total_nanoseconds;
+        totals.clean_read_nanoseconds += counters.clean_read_nanoseconds;
+        totals.max_nanoseconds = max(totals.max_nanoseconds, counters.max_nanoseconds);
+        totals.joins_that_published_nothing += counters.joins_that_published_nothing;
+        if (counters.calls == 0)
+            continue;
+        auto name = Utf16FlyString::from_utf16(DOM::to_string(static_cast<DOM::UpdateLayoutReason>(reason)));
+        by_reason->define_direct_property(name, counters_object(counters), JS::default_attributes);
+    }
+
+    auto object = JS::Object::create(realm, nullptr);
+    object->define_direct_property("totals"_utf16_fly_string, counters_object(totals), JS::default_attributes);
+    object->define_direct_property("byReason"_utf16_fly_string, by_reason, JS::default_attributes);
+    auto const& document = window().associated_document();
+    object->define_direct_property("layoutCommitGeneration"_utf16_fly_string, JS::Value(document.layout_commit_generation()), JS::default_attributes);
+    object->define_direct_property("styleTransactionVersion"_utf16_fly_string, JS::Value(document.style_computer().style_engine().published_transaction_version().transaction), JS::default_attributes);
+    object->define_direct_property("styleProgramVersion"_utf16_fly_string, JS::Value(document.style_computer().style_engine().published_transaction_version().program), JS::default_attributes);
+    return object;
+}
+
+void Internals::reset_join_counters()
+{
+    window().associated_document().reset_join_counters();
+}
+
+void Internals::dump_join_counters() const
+{
+    window().associated_document().dump_join_counters();
+}
+
+Utf16String Internals::layout_overlap_blocker() const
+{
+    auto blocker = window().associated_document().layout_overlap_blocker();
+    if (!blocker.has_value())
+        return {};
+    return Utf16String::from_utf16(DOM::to_string(*blocker));
+}
+
 GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
 {
     auto& realm = HTML::relevant_realm(window());
@@ -1541,17 +1747,229 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
     object->define_direct_property("domManipulationTasksBetweenUpdates"_utf16_fly_string, JS::Value(counters.dom_manipulation_tasks_between_updates), JS::default_attributes);
     object->define_direct_property("domManipulationTaskMicrosecondsBetweenUpdates"_utf16_fly_string, JS::Value(counters.dom_manipulation_task_microseconds_between_updates), JS::default_attributes);
     object->define_direct_property("paints"_utf16_fly_string, JS::Value(counters.paints), JS::default_attributes);
+
+    object->define_direct_property("framesSubmitted"_utf16_fly_string, JS::Value(counters.frames_submitted), JS::default_attributes);
+    object->define_direct_property("framesConsumed"_utf16_fly_string, JS::Value(counters.frames_consumed), JS::default_attributes);
+    auto frames_lockstep = JS::Object::create(realm, nullptr);
+    for (size_t reason = 0; reason < counters.frames_lockstep.size(); ++reason) {
+        auto name = Utf16FlyString::from_utf8(HTML::EventLoop::frame_lockstep_reason_name(static_cast<HTML::EventLoop::FrameLockstepReason>(reason)));
+        frames_lockstep->define_direct_property(name, JS::Value(counters.frames_lockstep[reason]), JS::default_attributes);
+    }
+    object->define_direct_property("framesLockstep"_utf16_fly_string, frames_lockstep, JS::default_attributes);
+    object->define_direct_property("framesDropped"_utf16_fly_string, JS::Value(counters.frames_dropped), JS::default_attributes);
+    object->define_direct_property("tasksStartedWithFrameInFlight"_utf16_fly_string, JS::Value(counters.tasks_started_with_frame_in_flight), JS::default_attributes);
+    object->define_direct_property("frameInFlightNanoseconds"_utf16_fly_string, JS::Value(counters.frame_in_flight_nanoseconds), JS::default_attributes);
+    object->define_direct_property("overlapTaskNanoseconds"_utf16_fly_string, JS::Value(counters.overlap_task_nanoseconds), JS::default_attributes);
+    object->define_direct_property("mainHalfNanoseconds"_utf16_fly_string, JS::Value(counters.main_half_nanoseconds), JS::default_attributes);
+    object->define_direct_property("observableStepsNanoseconds"_utf16_fly_string, JS::Value(counters.observable_steps_nanoseconds), JS::default_attributes);
+    object->define_direct_property("consumeCommitNanoseconds"_utf16_fly_string, JS::Value(counters.consume_commit_nanoseconds), JS::default_attributes);
+    object->define_direct_property("consumeTailNanoseconds"_utf16_fly_string, JS::Value(counters.consume_tail_nanoseconds), JS::default_attributes);
+    object->define_direct_property("submitToConsumeNanoseconds"_utf16_fly_string, JS::Value(counters.submit_to_consume_nanoseconds), JS::default_attributes);
+    object->define_direct_property("maxSubmitToConsumeNanoseconds"_utf16_fly_string, JS::Value(counters.max_submit_to_consume_nanoseconds), JS::default_attributes);
+    auto journal_entries = JS::Object::create(realm, nullptr);
+    for (size_t kind = 0; kind < counters.journal_entries_during_flight.size(); ++kind) {
+        auto name = Utf16FlyString::from_utf8(HTML::EventLoop::journal_entry_kind_name(static_cast<HTML::EventLoop::JournalEntryKind>(kind)));
+        journal_entries->define_direct_property(name, JS::Value(counters.journal_entries_during_flight[kind]), JS::default_attributes);
+    }
+    object->define_direct_property("journalEntriesDuringFlight"_utf16_fly_string, journal_entries, JS::default_attributes);
+
+    object->define_direct_property("finishedFrameConsumerCalls"_utf16_fly_string, JS::Value(counters.finished_frame_consumer_calls), JS::default_attributes);
+    object->define_direct_property("renderingTaskBlockedOnFrameNanoseconds"_utf16_fly_string, JS::Value(counters.rendering_task_blocked_on_frame_nanoseconds), JS::default_attributes);
+    object->define_direct_property("renderingTasksHeld"_utf16_fly_string, JS::Value(counters.rendering_tasks_held), JS::default_attributes);
+    object->define_direct_property("renderingTasksAheadOfQueue"_utf16_fly_string, JS::Value(counters.rendering_tasks_ahead_of_queue), JS::default_attributes);
+    object->define_direct_property("layoutOverlapEligibleUpdates"_utf16_fly_string, JS::Value(counters.layout_overlap_eligible_updates), JS::default_attributes);
+    auto layout_overlap_blocked_updates = JS::Object::create(realm, nullptr);
+    for (size_t blocker = 0; blocker < counters.layout_overlap_blocked_updates.size(); ++blocker) {
+        auto name = Utf16FlyString::from_utf16(DOM::to_string(static_cast<DOM::LayoutOverlapBlocker>(blocker)));
+        layout_overlap_blocked_updates->define_direct_property(name, JS::Value(counters.layout_overlap_blocked_updates[blocker]), JS::default_attributes);
+    }
+    object->define_direct_property("layoutOverlapBlockedUpdates"_utf16_fly_string, layout_overlap_blocked_updates, JS::default_attributes);
+    auto rendering_updates_by_frames_submitted = JS::Array::create_from<u64>(realm, counters.rendering_updates_by_frames_submitted.span(), [](u64 updates) { return JS::Value(updates); });
+    object->define_direct_property("renderingUpdatesByFramesSubmitted"_utf16_fly_string, rendering_updates_by_frames_submitted, JS::default_attributes);
+    auto recordings_waited_for = JS::Object::create(realm, nullptr);
+    for (size_t origin = 0; origin < counters.recordings_waited_for.size(); ++origin) {
+        auto by_origin = JS::Object::create(realm, nullptr);
+        by_origin->define_direct_property("count"_utf16_fly_string, JS::Value(counters.recordings_waited_for[origin]), JS::default_attributes);
+        by_origin->define_direct_property("nanoseconds"_utf16_fly_string, JS::Value(counters.recording_wait_nanoseconds[origin]), JS::default_attributes);
+        auto name = Utf16FlyString::from_utf8(Painting::recording_origin_name(static_cast<Painting::RecordingOrigin>(origin)));
+        recordings_waited_for->define_direct_property(name, by_origin, JS::default_attributes);
+    }
+    object->define_direct_property("recordingsWaitedFor"_utf16_fly_string, recordings_waited_for, JS::default_attributes);
+    auto flight_paint = JS::Object::create(realm, nullptr);
+    flight_paint->define_direct_property("sealed"_utf16_fly_string, JS::Value(counters.flight_paint_seals), JS::default_attributes);
+    for (size_t decline = 0; decline < counters.flight_paint_declines.size(); ++decline) {
+        auto name = Utf16FlyString::from_utf8(Painting::flight_paint_decline_name(static_cast<Painting::FlightPaintDecline>(decline)));
+        flight_paint->define_direct_property(name, JS::Value(counters.flight_paint_declines[decline]), JS::default_attributes);
+    }
+    object->define_direct_property("flightPaintSeals"_utf16_fly_string, flight_paint, JS::default_attributes);
+    // Flights by why they ended, and by the last stage they ran.
+    static constexpr Array flight_end_reasons { "done"sv, "stageRunsOnMain"sv, "paintNotSealed"sv, "roundLeftWork"sv, "svgPaintResources"sv, "vectorImages"sv, "noViewport"sv, "hostLeftWork"sv, "preempted"sv };
+    static constexpr Array flight_stages { "style"sv, "rounds"sv, "paintPrep"sv, "record"sv, "present"sv };
+    auto flight_ends = JS::Object::create(realm, nullptr);
+    for (size_t reason = 0; reason < flight_end_reasons.size(); ++reason) {
+        auto by_stage = JS::Object::create(realm, nullptr);
+        for (size_t stage = 0; stage < flight_stages.size(); ++stage) {
+            auto count = Layout::RustFFI::rust_flight_ends(static_cast<Layout::RustFFI::FfiFlightEndReason>(reason), static_cast<Layout::RustFFI::FfiFlightStage>(stage));
+            by_stage->define_direct_property(Utf16FlyString::from_utf8(flight_stages[stage]), JS::Value(count), JS::default_attributes);
+        }
+        flight_ends->define_direct_property(Utf16FlyString::from_utf8(flight_end_reasons[reason]), by_stage, JS::default_attributes);
+    }
+    object->define_direct_property("flightEnds"_utf16_fly_string, flight_ends, JS::default_attributes);
+    object->define_direct_property("frameCompletionsPosted"_utf16_fly_string, JS::Value(HTML::FrameCompletion::the().posted_count()), JS::default_attributes);
+    object->define_direct_property("frameCompletionsDelivered"_utf16_fly_string, JS::Value(HTML::FrameCompletion::the().delivered_count()), JS::default_attributes);
+
+    // Retirement is counted apart from frames dropped: a retired frame was made for render state
+    // that was destroyed while it ran.
+    auto retirement = Layout::RustFFI::rust_frame_retirement_counters();
+    object->define_direct_property("documentsDestroyed"_utf16_fly_string, JS::Value(retirement.documents_destroyed), JS::default_attributes);
+    object->define_direct_property("documentsBecameInactive"_utf16_fly_string, JS::Value(retirement.documents_became_inactive), JS::default_attributes);
+    object->define_direct_property("documentsFinalized"_utf16_fly_string, JS::Value(retirement.documents_finalized), JS::default_attributes);
+    object->define_direct_property("compositorContextsRetired"_utf16_fly_string, JS::Value(retirement.compositor_contexts_retired), JS::default_attributes);
+    object->define_direct_property("framesWaitedForByRetirement"_utf16_fly_string, JS::Value(retirement.frames_waited_for), JS::default_attributes);
+    object->define_direct_property("framesRetired"_utf16_fly_string, JS::Value(retirement.frames_retired), JS::default_attributes);
     return object;
 }
 
 void Internals::reset_rendering_scheduler_counters()
 {
     HTML::main_thread_event_loop().reset_rendering_scheduler_counters();
+    Layout::RustFFI::rust_reset_frame_retirement_counters();
+    Layout::RustFFI::rust_reset_flight_ends();
+    HTML::MainThreadPhases::reset();
 }
 
-void Internals::set_manual_rendering_opportunities(bool enabled)
+void Internals::set_main_thread_phase_profile_enabled(bool enabled)
 {
-    page().client().set_manual_rendering_opportunities(enabled);
+    HTML::MainThreadPhases::set_enabled(enabled);
+}
+
+String Internals::get_main_thread_phase_profile() const
+{
+    return HTML::MainThreadPhases::report_as_json();
+}
+
+static bool hold_next_submitted_stage(StringView label, Utf16String const& point, GC::Ptr<DOM::Document> document)
+{
+    Layout::RustFFI::FfiStageHoldPoint hold_point;
+    if (point == "before-run"sv)
+        hold_point = Layout::RustFFI::FfiStageHoldPoint::BeforeRun;
+    else if (point == "mid-recording"sv && label.starts_with("recording"sv))
+        hold_point = Layout::RustFFI::FfiStageHoldPoint::MidRecording;
+    else if (point == "before-completion"sv)
+        hold_point = Layout::RustFFI::FfiStageHoldPoint::BeforeCompletion;
+    else
+        return false;
+    void* arena = nullptr;
+    if (document) {
+        // A document without an arena has no stage to hold.
+        auto* node_arena = Layout::document_layout_arena_if_created(*document);
+        if (!node_arena)
+            return false;
+        arena = node_arena;
+    }
+    Layout::RustFFI::rust_stage_thread_hold_next_submitted_stage(reinterpret_cast<u8 const*>(label.characters_without_null_termination()), label.length(), hold_point, arena);
+    return true;
+}
+
+bool Internals::hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
+{
+    // A flight that goes on from the layout pass records in its record stage: whichever of the two records first is held.
+    if (point == "before-completion"sv)
+        return hold_next_submitted_stage("recording|flight:recorded"sv, point, document);
+    return hold_next_submitted_stage("recording|flight:record"sv, point, document);
+}
+
+bool Internals::hold_next_layout_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
+{
+    // A flight runs the layout pass as its layout stage: that is held before it runs, and the flight once it has laid
+    // out (not a flight that ran only the style pass before it).
+    return hold_next_submitted_stage(point == "before-run"sv ? "flight:layout"sv : "flight:laid-out"sv, point, document);
+}
+
+bool Internals::hold_next_clock_tick(Utf16String const& point, GC::Ptr<DOM::Document> document)
+{
+    return hold_next_submitted_stage("clock"sv, point, document);
+}
+
+bool Internals::hold_next_style_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
+{
+    // A flight runs the style pass first: its style is held before it runs, and the flight once it has run.
+    return hold_next_submitted_stage(point == "before-run"sv ? "flight:style"sv : "flight"sv, point, document);
+}
+
+Utf16String Internals::wait_for_held_frame()
+{
+    // Bounded, so a frame that is never held fails the test instead of hanging it.
+    auto held_at = Layout::RustFFI::FfiStageHoldPoint::BeforeRun;
+    if (!Layout::RustFFI::rust_stage_thread_wait_for_held_stage(5000, &held_at))
+        return {};
+    switch (held_at) {
+    case Layout::RustFFI::FfiStageHoldPoint::BeforeRun:
+        return "before-run"_utf16;
+    case Layout::RustFFI::FfiStageHoldPoint::MidRecording:
+        return "mid-recording"_utf16;
+    case Layout::RustFFI::FfiStageHoldPoint::BeforeCompletion:
+        return "before-completion"_utf16;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+bool Internals::held_frame_awaits_submission() const
+{
+    return Layout::RustFFI::rust_stage_thread_armed_hold_awaits_submission();
+}
+
+void Internals::wait_for_stage_threads_beside_held_frame()
+{
+    Layout::RustFFI::rust_stage_thread_wait_for_threads_beside_held_run();
+}
+
+u64 Internals::frames_presented_by_flights(DOM::Document& document) const
+{
+    auto navigable = document.navigable();
+    return navigable ? navigable->frames_presented_by_flights() : 0;
+}
+
+void Internals::take_in_next_recording_before_its_presentation(bool take)
+{
+    HTML::main_thread_event_loop().frame_scheduler().take_in_next_recording_before_its_presentation(take);
+}
+
+u64 Internals::recordings_taken_in_before_their_presentation() const
+{
+    return HTML::main_thread_event_loop().frame_scheduler().recordings_taken_in_before_their_presentation();
+}
+
+void Internals::release_held_frame()
+{
+    Layout::RustFFI::rust_stage_thread_release_held_stage();
+}
+
+u64 Internals::forced_join_count(Utf16String const& stage) const
+{
+    auto label = stage.to_utf8();
+    return Layout::RustFFI::rust_stage_thread_forced_joins(label.bytes().data(), label.bytes().size());
+}
+
+bool Internals::frame_in_flight_holds_document() const
+{
+    auto const& document = window().associated_document();
+    return HTML::frame_in_flight_holds(document) || HTML::main_thread_event_loop().frame_scheduler().pass_in_flight_holds(document);
+}
+
+bool Internals::frame_in_flight_references_are_alive() const
+{
+    return HTML::frame_in_flight_references_are_alive();
+}
+
+void Internals::set_manual_rendering_opportunities(bool enabled, bool with_clock_ticks)
+{
+    page().client().set_manual_rendering_opportunities(enabled, with_clock_ticks);
+}
+
+bool Internals::rendering_task_held() const
+{
+    return HTML::main_thread_event_loop().rendering_task_held();
 }
 
 void Internals::inject_rendering_opportunity(double frame_time_ms)
@@ -1560,9 +1978,75 @@ void Internals::inject_rendering_opportunity(double frame_time_ms)
     page().client().inject_rendering_opportunity(frame_time);
 }
 
+bool Internals::wait_for_frame_to_finish()
+{
+    return Layout::RustFFI::rust_stage_thread_wait_for_frame_in_flight_to_finish(5000);
+}
+
+Utf16String Internals::frame_scheduler_state() const
+{
+    switch (HTML::main_thread_event_loop().frame_scheduler().state()) {
+    case HTML::FrameScheduler::State::Idle:
+        return "idle"_utf16;
+    case HTML::FrameScheduler::State::MainHalf:
+        return "main-half"_utf16;
+    case HTML::FrameScheduler::State::InFlight:
+        return "in-flight"_utf16;
+    case HTML::FrameScheduler::State::Consuming:
+        return "consuming"_utf16;
+    case HTML::FrameScheduler::State::CommittedTailPending:
+        return "committed-tail-pending"_utf16;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+WebIDL::UnsignedLongLong Internals::presented_scene_epoch()
+{
+    // NB: Read beside the frame in flight, which would be taken in by presenter().
+    auto navigable = window().associated_document().navigable();
+    return navigable ? navigable->presenter_beside_frame_in_flight().presented_scene_epoch() : 0;
+}
+
+bool Internals::last_frame_keyboard_scroll_state_is_current()
+{
+    auto navigable = window().associated_document().navigable();
+    if (!navigable || !navigable->is_top_level_traversable())
+        return true;
+    auto generation = navigable->keyboard_scroll_generation_of_last_frame();
+    return generation.has_value() && navigable->page().keyboard_scroll_state_is_current(*generation);
+}
+
+WebIDL::UnsignedLongLong Internals::presented_compositor_animation_count()
+{
+    // NB: Read beside the frame in flight, which would be taken in by presenter().
+    auto navigable = window().associated_document().navigable();
+    return navigable ? navigable->presenter_beside_frame_in_flight().compositor_visual_animation_count() : 0;
+}
+
+WebIDL::UnsignedLongLong Internals::hit_test_scene_epoch()
+{
+    auto navigable = window().associated_document().navigable();
+    return navigable ? navigable->presenter_beside_frame_in_flight().adopted_scene_epoch() : 0;
+}
+
+bool Internals::rendering_update_awaits_pass() const
+{
+    // A flight that records after its layout pass is the recording the rendering update goes on to make.
+    auto const& frame_scheduler = HTML::main_thread_event_loop().frame_scheduler();
+    return frame_scheduler.awaits_pass() && !frame_scheduler.pass_in_flight_records();
+}
+
+u64 Internals::style_pass_forced_joins() const
+{
+    return Layout::RustFFI::rust_stage_thread_style_pass_forced_joins();
+}
+
 void Internals::update_compositor_animations()
 {
-    window().associated_document().update_compositor_animations();
+    // NB: A test asks for what its last changes put on the compositor, so a style pass in flight is taken in first.
+    auto& document = window().associated_document();
+    document.join_frame_in_flight();
+    document.update_compositor_animations();
 }
 
 bool Internals::run_empty_animation_style_update_for_testing()
@@ -1606,10 +2090,11 @@ GC::Ref<JS::Object> Internals::compare_layout_tree_with_full_rebuild()
 
     auto snapshot_layout_tree = [&]() {
         document.update_layout(DOM::UpdateLayoutReason::Debugging);
-        VERIFY(document.layout_node());
+        auto viewport = Painting::BoxSlot::viewport_of(document);
+        VERIFY(viewport);
 
         StringBuilder builder;
-        Web::dump_tree(builder, *document.layout_node());
+        Painting::dump_layout_tree(builder, viewport, false);
         return builder.to_string_without_validation();
     };
 
@@ -1650,18 +2135,12 @@ GC::Ref<JS::Object> Internals::style_engine_counters()
     auto& realm = HTML::relevant_realm(window());
     auto object = JS::Object::create(realm, nullptr);
     auto& style_engine = window().associated_document().style_computer().style_engine();
-    StringView name;
-    u64 value = 0;
-    for (size_t index = 0; style_engine.counter(index, name, value); ++index) {
+    style_engine.for_each_counter([&](StringView name, u64 value) {
         object->define_direct_property(
             Utf16FlyString::from_utf8(name),
             JS::Value(static_cast<double>(value)),
             JS::default_attributes);
-    }
-    object->define_direct_property(
-        "computedStyleRecordViewPins"_utf16_fly_string,
-        JS::Value(static_cast<double>(window().associated_document().style_computer().computed_style_record_view_pin_count())),
-        JS::default_attributes);
+    });
     return object;
 }
 
@@ -1673,8 +2152,8 @@ u64 Internals::style_record_identity(DOM::Element& element)
 u64 Internals::layout_style_record_identity(DOM::Element& element)
 {
     element.document().update_layout(DOM::UpdateLayoutReason::Debugging);
-    auto const* layout_node = element.layout_node();
-    return layout_node ? layout_node->style_record_identity().value() : 0;
+    auto slot = bound_slot_of(element);
+    return is_valid_slot(slot) ? Layout::RustFFI::layout_arena_node_style_record(Layout::document_layout_arena(element.document()), slot) : 0;
 }
 
 u64 Internals::before_style_record_identity(DOM::Element& element)
@@ -1685,38 +2164,34 @@ u64 Internals::before_style_record_identity(DOM::Element& element)
 u64 Internals::before_layout_style_record_identity(DOM::Element& element)
 {
     element.document().update_layout(DOM::UpdateLayoutReason::Debugging);
-    auto const* layout_node = element.pseudo_element_layout_node(CSS::PseudoElement::Before);
-    return layout_node ? layout_node->style_record_identity().value() : 0;
+    auto slot = bound_slot_of(element, CSS::PseudoElement::Before);
+    return is_valid_slot(slot) ? Layout::RustFFI::layout_arena_node_style_record(Layout::document_layout_arena(element.document()), slot) : 0;
 }
 
 u64 Internals::paint_style_record_identity(DOM::Element& element)
 {
     element.document().update_layout(DOM::UpdateLayoutReason::Debugging);
-    auto const* layout_node = element.layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
+    auto slot = bound_slot_of(element);
+    if (!is_valid_slot(slot))
         return 0;
-    return Painting::style_record_identity(*layout_node).value();
+    auto* arena = Layout::document_layout_arena(element.document());
+    if (!Layout::RustFFI::layout_arena_has_committed_box(arena, slot))
+        return 0;
+    return Layout::RustFFI::layout_arena_node_style_record(arena, slot);
 }
 
 u64 Internals::layout_node_identity(DOM::Node& node)
 {
     node.document().update_layout(DOM::UpdateLayoutReason::Debugging);
-    auto const* layout_node = node.layout_node();
-    return layout_node ? static_cast<u64>(layout_node->arena_slot_index()) + 1 : 0;
+    auto slot = bound_slot_of(node);
+    return is_valid_slot(slot) ? static_cast<u64>(slot.index) + 1 : 0;
 }
 
 u64 Internals::layout_arena_live_slot_count()
 {
     auto& document = window().associated_document();
     document.update_layout(DOM::UpdateLayoutReason::Debugging);
-    return Layout::RustFFI::layout_arena_live_slot_count(document.layout_node_arena().handle());
-}
-
-u64 Internals::layout_arena_shell_count()
-{
-    auto& document = window().associated_document();
-    document.update_layout(DOM::UpdateLayoutReason::Debugging);
-    return Layout::RustFFI::layout_arena_shell_count(document.layout_node_arena().handle());
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(document)).live_slots;
 }
 
 GC::Ref<JS::Object> Internals::style_engine_transaction_reactions()
@@ -1732,16 +2207,28 @@ GC::Ref<JS::Object> Internals::style_engine_transaction_reactions()
 
     auto tags = MUST(JS::Array::create(realm, 0));
     u32 index = 0;
+    Vector<GC::Root<DOM::Element>> reacted_elements;
     Function<void(ReadonlySpan<CSS::StyleNodeID>)> consume = [&](ReadonlySpan<CSS::StyleNodeID> style_node_ids) {
         for (auto style_node_id : style_node_ids) {
             auto element = style_computer.element_for_style_node(style_node_id);
             if (!element)
                 continue;
+            reacted_elements.append(GC::make_root(*element));
             auto identity = element->id().has_value() ? *element->id() : element->local_name();
             MUST(tags->create_data_property_or_throw(index++, JS::PrimitiveString::create(vm(), identity)));
         }
     };
-    auto transaction_is_scoped = style_computer.style_engine().take_diagnostic_style_transaction(root->style_node_id(), move(consume));
+    auto transaction_is_scoped = document.render_inputs_for_write().style_engine().take_diagnostic_style_transaction(root->style_node_id(), move(consume));
+
+    // Reading the transaction consumed the engine's pending work and threw the styles it computed
+    // away, so every element the transaction reacted for is now one the document believes is
+    // settled and has no published style. Settle exactly those here, so that the layout tree build
+    // is never the thing that discovers a missing style.
+    for (auto const& element : reacted_elements) {
+        if (element->is_connected() && !element->has_style())
+            document.update_style_for_element({ *element });
+    }
+
     object->define_direct_property("wholeDocument"_utf16_fly_string, JS::Value(!transaction_is_scoped), JS::default_attributes);
     object->define_direct_property("elements"_utf16_fly_string, tags, JS::default_attributes);
     return object;
@@ -1753,7 +2240,7 @@ double Internals::style_engine_match_document()
     auto* root = document.document_element();
     if (!root || root->style_node_id() == 0)
         return -1;
-    auto matches = document.style_computer().style_engine().match_document(root->style_node_id());
+    auto matches = document.render_inputs_for_write().style_engine().match_document(root->style_node_id());
     if (matches == NumericLimits<size_t>::max())
         return -1;
     return static_cast<double>(matches);
@@ -1842,7 +2329,7 @@ Utf16String Internals::style_engine_matched_rules()
         if (!element || element->style_node_id() == 0)
             return TraversalDecision::Continue;
         Vector<CSS::StyleEngine::RuleMatch> matches;
-        if (!style_computer.style_engine().match_element(element->style_node_id(), matches, CSS::StyleEngine::MatchPurpose::Exact)) {
+        if (!style_computer.style_engine_queries().match_element(element->style_node_id(), matches, CSS::StyleEngine::MatchPurpose::Exact)) {
             builder.appendff("{}: the engine could not answer\n", describe(*element));
             return TraversalDecision::Continue;
         }
@@ -2123,8 +2610,9 @@ String Internals::viewport_overflow_x()
 {
     auto& document = window().associated_document();
     document.update_layout(DOM::UpdateLayoutReason::Debugging);
-    auto overflow = document.layout_node()->overflow_x();
-    switch (overflow) {
+    auto const* box_values = Painting::BoxSlot::viewport_of(document).style_group<CSS::ComputedValues::BoxValues>();
+    VERIFY(box_values);
+    switch (static_cast<CSS::Overflow>(box_values->overflow_x)) {
     case CSS::Overflow::Auto:
         return "auto"_string;
     case CSS::Overflow::Clip:
@@ -2196,7 +2684,6 @@ GC::Ref<JS::Object> Internals::style_invalidation_counters_object() const
     object->define_direct_property("styleEngineReactionElements"_utf16_fly_string, JS::Value(counters.style_engine_reaction_elements), JS::default_attributes);
     object->define_direct_property("styleEnginePublishedReactions"_utf16_fly_string, JS::Value(counters.style_engine_published_reactions), JS::default_attributes);
     object->define_direct_property("styleEngineRecordDeltasApplied"_utf16_fly_string, JS::Value(counters.style_engine_record_deltas_applied), JS::default_attributes);
-    object->define_direct_property("styleEngineMaterializedGaps"_utf16_fly_string, JS::Value(counters.style_engine_materialized_gaps), JS::default_attributes);
     object->define_direct_property("elementStyleRecomputations"_utf16_fly_string, JS::Value(counters.element_style_recomputations), JS::default_attributes);
     object->define_direct_property("elementStyleNoopRecomputations"_utf16_fly_string, JS::Value(counters.element_style_noop_recomputations), JS::default_attributes);
     object->define_direct_property("styleRecordPropertyDamageCacheHits"_utf16_fly_string, JS::Value(counters.style_record_property_damage_cache_hits), JS::default_attributes);
@@ -2261,7 +2748,7 @@ GC::Ref<JS::Object> Internals::style_invalidation_counters_object() const
     object->define_direct_property("registeredPropertiesCacheRebuilds"_utf16_fly_string, JS::Value(counters.registered_properties_cache_rebuilds), JS::default_attributes);
     object->define_direct_property("scopeRuleCacheBuilds"_utf16_fly_string, JS::Value(counters.scope_rule_cache_builds), JS::default_attributes);
     object->define_direct_property("styleQueryContainerScans"_utf16_fly_string, JS::Value(counters.style_query_container_scans), JS::default_attributes);
-    object->define_direct_property("sizeQueryContainerScanVisits"_utf16_fly_string, JS::Value(counters.size_query_container_scan_visits), JS::default_attributes);
+    object->define_direct_property("sizeQueryContainerScanVisits"_utf16_fly_string, JS::Value(static_cast<double>(CSS::StyleEngineFFI::style_engine_size_query_container_scan_visits(window().associated_document().render_inputs_for_write().style_engine().rust_handle(), false))), JS::default_attributes);
     object->define_direct_property("styleEngineTransactionSetups"_utf16_fly_string, JS::Value(counters.style_engine_transaction_setups), JS::default_attributes);
     object->define_direct_property("styleEngineTransactionSetupMicroseconds"_utf16_fly_string, JS::Value(counters.style_engine_transaction_setup_microseconds), JS::default_attributes);
     object->define_direct_property("styleEnginePlanningMicroseconds"_utf16_fly_string, JS::Value(counters.style_update_bridge_microseconds), JS::default_attributes);
@@ -2279,7 +2766,7 @@ GC::Ref<JS::Object> Internals::style_invalidation_counters_object() const
     object->define_direct_property("customPropertyCycleParticipants"_utf16_fly_string, JS::Value(counters.custom_property_cycle_participants), JS::default_attributes);
     object->define_direct_property("styleCascadeMicroseconds"_utf16_fly_string, JS::Value(counters.style_cascade_microseconds), JS::default_attributes);
     object->define_direct_property("styleValuesMicroseconds"_utf16_fly_string, JS::Value(counters.style_values_microseconds), JS::default_attributes);
-    object->define_direct_property("scrollableOverflowRecalculations"_utf16_fly_string, JS::Value(Layout::RustFFI::layout_arena_scrollable_overflow_recalculation_count(document.layout_node_arena().handle(), false)), JS::default_attributes);
+    object->define_direct_property("scrollableOverflowRecalculations"_utf16_fly_string, JS::Value(Layout::RustFFI::layout_arena_scrollable_overflow_recalculation_count(Layout::document_layout_arena(document), false)), JS::default_attributes);
     return object;
 }
 

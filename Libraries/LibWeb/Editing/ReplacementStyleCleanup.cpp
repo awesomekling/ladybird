@@ -7,8 +7,10 @@
 #include <LibGC/RootVector.h>
 #include <LibWeb/CSS/CSSStyleProperties.h>
 #include <LibWeb/CSS/ComputedStyleWorkingSet.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/SerializationMode.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleReadDemand.h>
 #include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
@@ -67,7 +69,12 @@ void remove_redundant_styles_from_inserted_content(InsertedContent& inserted_con
 
         auto& style_computer = element->document().style_computer();
         auto style_with_inline_declaration = style_computer.reconstruct_computed_properties(*computed_values);
-        auto style_without_inline_declaration = style_computer.compute_properties_without_inline_style(abstract_element);
+        DOM::Document::JoinScope join { element->document(), DOM::UpdateLayoutReason::NavigableSelectedText };
+        auto answer = CSS::answer_style_read_demand(join, style_computer.style_engine_queries(), { .node = element->style_node_id(), .exclude_inline_style = true, .targeted = true });
+        CSS::ComputedStyleRecordView view { move(answer.record) };
+        if (!view)
+            continue;
+        auto style_without_inline_declaration = style_computer.reconstruct_computed_properties(*CSS::ComputedValues::Builder { *view }.build());
 
         Vector<CSS::StyleProperty> retained_properties;
         retained_properties.ensure_capacity(inline_style->properties().size());

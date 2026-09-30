@@ -236,6 +236,8 @@ public:
     void keyboard_scroll_dom_tree_changed(DOM::Node const&);
     void keyboard_scroll_editability_changed(DOM::Document&);
     Compositing::KeyboardScrollState take_keyboard_scroll_state_for_compositor(u64 visual_context_tree_structural_epoch);
+    // Whether a keyboard scroll state taken at `generation` is still the one the compositor should have.
+    bool keyboard_scroll_state_is_current(u64 generation) const;
     bool needs_beforeunload_check() const { return m_needs_beforeunload_check; }
     void update_needs_beforeunload_check();
 
@@ -632,8 +634,12 @@ public:
     virtual void will_begin_rendering_update() { }
     virtual bool has_rendering_opportunity() const { return true; }
     virtual void did_finish_rendering_update() { }
-    virtual void set_manual_rendering_opportunities([[maybe_unused]] bool enabled) { }
+    virtual void set_manual_rendering_opportunities([[maybe_unused]] bool enabled, [[maybe_unused]] bool with_clock_ticks) { }
     virtual void inject_rendering_opportunity([[maybe_unused]] double frame_time) { }
+    // Has a render clock tick the clock lease of the compositor context's document at the
+    // context's display ticks, without the main thread, until it is disarmed. Returns false where nothing does.
+    virtual bool arm_render_clock([[maybe_unused]] Compositing::CompositorContextId context_id) { return false; }
+    virtual void disarm_render_clock([[maybe_unused]] Compositing::CompositorContextId context_id) { }
     virtual void page_did_change_title(Utf16String const&) { }
     virtual void page_did_update_editing_history_state(bool, bool) { }
     virtual void page_did_request_refresh() { }

@@ -22,11 +22,13 @@
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/PseudoElement.h>
 #include <LibWeb/DOM/HoverEventData.h>
+#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Gamepad/SDLGamepadForward.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Painting/Forward.h>
+#include <LibWeb/Painting/HitTestResult.h>
 #include <LibWebCommon/Page/EventResult.h>
 #include <LibWebCommon/Page/QueuedInputEvent.h>
 #include <LibWebCommon/PixelUnits.h>
@@ -64,6 +66,7 @@ public:
     bool select_word_for_dictionary_lookup(CSSPixelPoint visual_viewport_position);
 #endif
     void update_hover_after_scroll();
+    void apply_hover_target_after_scroll(Badge<DOM::CommitMessages>, GC::Ptr<DOM::Node>, Optional<DOM::HoverEventData> const&);
     GC::Ptr<DOM::Node> target_node_for_mouse_position(CSSPixelPoint);
 
     EventResult handle_keydown(UIEvents::KeyCode, unsigned modifiers, u32 code_point, bool repeat, bool should_insert_text, bool async_scroll_performed_default_action = false);
@@ -126,20 +129,28 @@ private:
     };
     bool fire_click_events(GC::Ref<DOM::Node>, MouseEventCoordinates const&, CSSPixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers, int click_count);
 
-    MouseEventCoordinates compute_mouse_event_coordinates(CSSPixelPoint visual_viewport_position, CSSPixelPoint viewport_position, Layout::Node const& layout_node) const;
+    MouseEventCoordinates compute_mouse_event_coordinates(CSSPixelPoint visual_viewport_position, CSSPixelPoint viewport_position, DOM::Document&, DOM::UpdateLayoutReason) const;
+    MouseEventCoordinates compute_mouse_event_coordinates(CSSPixelPoint visual_viewport_position, CSSPixelPoint viewport_position, Painting::HitBox const&) const;
     CSSPixelPoint compute_mouse_event_page_offset(CSSPixelPoint event_client_offset) const;
     CSSPixelPoint compute_mouse_event_movement(CSSPixelPoint screen_position) const;
 
     struct Target {
+        // The box the hit went through, in the hit-test snapshot it was found in, which an event dispatched through
+        // the hit reads.
+        Optional<Painting::HitBox> box;
+        // The row of that box, which the cursor and scrolling read the current layout of.
         Compositing::RustFFI::NodeSlotId hit_node;
-        NonnullRefPtr<Layout::NodeArena> arena;
+        GC::Weak<DOM::Document> document;
         RefPtr<Painting::ChromeWidget> chrome_widget;
-        GC::Ptr<DOM::Node> node;
+        DOM::NodeIdentity node;
         Optional<int> index_in_node;
         bool is_text_fragment { false };
 
-        Layout::Node* layout_node() const;
-        GC::Ptr<DOM::Node> dom_node() const { return node; }
+        // The box, if layout committed it when the snapshot was published.
+        Painting::HitBox const* committed_box() const;
+        // The box of that row, if layout committed it and the row is still live.
+        Painting::BoxSlot box_of_hit_node() const;
+        GC::Ptr<DOM::Node> dom_node() const;
     };
     Optional<Target> target_for_mouse_position(CSSPixelPoint position);
     GC::Ptr<DOM::Node> focus_candidate_for_position(CSSPixelPoint) const;
@@ -169,10 +180,10 @@ private:
     void stop_updating_selection();
 
     void update_hover_after_scroll(CSSPixelPoint visual_viewport_position, CSSPixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers);
-    EventResult dispatch_wheel_event(Layout::Node&, CSSPixelPoint visual_viewport_position, CSSPixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers, double wheel_delta_x, double wheel_delta_y, bool is_cancelable);
+    EventResult dispatch_wheel_event(Painting::BoxSlot const&, CSSPixelPoint visual_viewport_position, CSSPixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers, double wheel_delta_x, double wheel_delta_y, bool is_cancelable);
     // Both drop the latch when what it refers to is gone from the document, so that the event is targeted afresh.
-    Layout::Node* validated_wheel_scroll_latch_target_layout_node(DOM::Document&);
-    Layout::Node* validated_latched_wheel_scrolling_box();
+    Painting::BoxSlot validated_wheel_scroll_latch_target_box(DOM::Document&);
+    Painting::BoxSlot validated_latched_wheel_scrolling_box();
     EventResult dispatch_synthetic_pinch_wheel_event(CSSPixelPoint visual_viewport_position, CSSPixelPoint screen_position, unsigned modifiers, double wheel_delta_y);
 
     enum class PointerEventType : u8 {
@@ -193,7 +204,7 @@ private:
     bool dispatch_chrome_widget_pointer_event(RefPtr<Painting::ChromeWidget>, Utf16FlyString const& type, unsigned button, CSSPixelPoint visual_viewport_position);
     void update_hovered_chrome_widget(RefPtr<Painting::ChromeWidget>);
 
-    void update_cursor(Layout::Node const*, GC::Ptr<DOM::Node> host_element, RefPtr<Painting::ChromeWidget>, bool hit_text_fragment = false);
+    void update_cursor(Painting::BoxSlot const&, DOM::NodeIdentity host, RefPtr<Painting::ChromeWidget>, bool hit_text_fragment = false);
     void record_last_known_mouse_position(CSSPixelPoint visual_viewport_position, CSSPixelPoint screen_position, unsigned buttons, unsigned modifiers);
     EventResult cancel_drag_and_drop_event(CSSPixelPoint, CSSPixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers);
 

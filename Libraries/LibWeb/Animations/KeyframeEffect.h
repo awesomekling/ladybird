@@ -151,6 +151,8 @@ public:
     bool can_skip_per_frame_style_update() const;
     void clear_per_frame_style_update_cache() { m_can_skip_per_frame_style_update_cache.clear(); }
     bool can_skip_per_frame_animation_tick() const;
+    // Whether a listener hears the animationiteration events of the effect's CSS animation.
+    bool css_animation_iteration_events_are_heard() const;
     bool is_compositor_driven() const { return m_is_compositor_driven; }
     void set_is_compositor_driven(bool value)
     {
@@ -188,12 +190,16 @@ public:
         m_can_skip_per_frame_style_update_cache.clear();
     }
     bool is_offscreen_throttled() const { return m_is_offscreen_throttled; }
+    // A clock lease samples this effect in its ticks, which the main thread adopts, so the
+    // main thread's own update of the effect's timeline neither samples it nor lets it stop the frame pump.
+    bool is_clock_driven() const { return m_is_clock_driven; }
+    void set_is_clock_driven(bool value) { m_is_clock_driven = value; }
     void set_is_observation_relevant_compositor_animation(bool value) { m_is_observation_relevant_compositor_animation = value; }
     bool is_observation_relevant_compositor_animation() const { return m_is_observation_relevant_compositor_animation; }
     void request_observation_sample();
     u64 animation_preparation_identity() const { return m_animation_preparation_identity; }
     u64 animation_preparation_generation() const { return m_animation_preparation_generation; }
-    void invalidate_animation_preparation() { ++m_animation_preparation_generation; }
+    void invalidate_animation_preparation();
     bool request_element_scoped_observation_sample(u64 task_generation)
     {
         if (m_last_element_scoped_observation_sample_task_generation == task_generation)
@@ -211,6 +217,7 @@ public:
     void update_computed_properties_for_style(AnimationUpdateContext&, DOM::AbstractElement);
 
 private:
+    bool css_animation_events_are_heard(bool only_iteration_events) const;
     friend class Animation;
 
     KeyframeEffect();
@@ -242,13 +249,15 @@ private:
     bool m_is_compositor_driven { false };
     bool m_is_compositor_replaced { false };
     bool m_is_offscreen_throttled { false };
+    bool m_is_clock_driven { false };
     bool m_is_observation_relevant_compositor_animation { false };
     bool m_needs_observation_sample { false };
     struct CanSkipPerFrameStyleUpdateCache {
         u64 target_style_generation { 0 };
         u64 target_subtree_style_generation { 0 };
         bool target_is_connected { false };
-        Layout::Node const* layout_node { nullptr };
+        // The slot of the target's box, which a layout tree build that gives it another box changes.
+        u32 box_slot_index { 0 };
         bool result { false };
     };
     mutable Optional<CanSkipPerFrameStyleUpdateCache> m_can_skip_per_frame_style_update_cache;

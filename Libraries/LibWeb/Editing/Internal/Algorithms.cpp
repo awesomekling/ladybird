@@ -9,7 +9,6 @@
 #include <LibGC/RootVector.h>
 #include <LibGfx/Color.h>
 #include <LibWeb/Bindings/Document.h>
-#include <LibWeb/CSS/CascadedProperties.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyNameAndID.h>
 #include <LibWeb/CSS/StyleComputer.h>
@@ -43,7 +42,6 @@
 #include <LibWeb/HTML/HTMLTableRowElement.h>
 #include <LibWeb/HTML/HTMLTableSectionElement.h>
 #include <LibWeb/HTML/HTMLUListElement.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Selection/CaretNavigation.h>
 #include <LibWebCommon/Infra/CharacterTypes.h>

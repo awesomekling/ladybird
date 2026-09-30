@@ -131,6 +131,7 @@ interface Internals {
     undefined updateLayoutForTesting();
     DOMString takeLayoutTrace();
     unsigned long long tableCellMeasurementCacheMissCount();
+    unsigned long long retainedInlineItemCount();
     unsigned long long intrinsicMeasurementCount();
     unsigned long long intrinsicInlineMeasurementCount();
     unsigned long long accumulatedVisualContextTreeBuildCount();
@@ -202,10 +203,117 @@ interface Internals {
     // elementStyleRecomputations, and styleEnvironmentVersion.
     [ImplementedAs=style_invalidation_counters_object] object getStyleInvalidationCounters();
     undefined resetStyleInvalidationCounters();
+    // Returns what the synchronous reads of render state ("joins") in this document have cost.
+    // Keys: totals, and byReason with one entry per UpdateLayoutReason that was named at least
+    // once. Each holds calls, joins, cleanReads, nested, totalNanoseconds,
+    // cleanReadNanoseconds and maxNanoseconds.
+    [ImplementedAs=join_counters_object] object getJoinCounters();
+    // The clock lease ticks the main thread adopted that installed a sample.
+    unsigned long long clockTicksPresented();
+    // The display ticks the render clock handed the stage thread, without the main thread.
+    unsigned long long clockTicksReceived();
+    // Whether document holds a clock lease a render clock ticks.
+    boolean renderClockTicks(Document document);
+    // What the render clock did with them: ticksPosted, ticksFolded, ticksRun, ticksInstalled, ticksNeedingMain and
+    // why it dropped the others.
+    object getRenderClockCounters();
+    // The border box of element's principal box in what the render side committed and presented last, read from the
+    // render owner without a layout update and without taking anything in.
+    DOMRect? presentedBorderBox(Element element);
+    // How many animation lists of an element published their timing rows to the style engine (listsPublished), and how
+    // many were built the same as they were last published and published nothing (listsUnchanged).
+    object getAnimationTimingRowCounters();
+    // Leaves clock leases to the main thread's rendering updates, with no render clock armed, while suspended.
+    undefined setRenderClockSuspended(boolean suspended);
+    // Hands the leases a render clock ticks a display tick at frameTimeMs (like injectRenderingOpportunity()), as the
+    // render clock would. Resolves with whether a lease took it, once it has run and the page adopted it. With
+    // setManualRenderingOpportunities(true, true), no display tick but these reaches the leases. Beside a frame a hold
+    // keeps in flight, the tick waits for the held run and takes nothing back.
+    Promise<boolean> injectClockTick(double frameTimeMs);
+    undefined resetJoinCounters();
+    // Prints the reasons that blocked this document the longest to the debug log.
+    undefined dumpJoinCounters();
+    // What keeps this document's layout in a rendering update in place rather than beside the main
+    // thread ("ResizeObservation", "ViewTransition", "ScrollStateContainer",
+    // "ContentVisibilityAutoFirstDetermination", "ScrollTimeline"), or "" if nothing does.
+    DOMString layoutOverlapBlocker();
     object getRenderingSchedulerCounters();
     undefined resetRenderingSchedulerCounters();
-    undefined setManualRenderingOpportunities(boolean enabled);
+    undefined setMainThreadPhaseProfileEnabled(boolean enabled);
+    DOMString getMainThreadPhaseProfile();
+    // Holds the next recording submitted to the render side until releaseHeldFrame(), so that tasks
+    // run beside that frame in flight. Returns whether it will hold one: not for an unknown `point`
+    // or a document without a layout arena. It holds the recording at `point`:
+    // "before-run", "mid-recording" (holding the arena's paint state and scratch) or
+    // "before-completion" (finished, before the main thread hears of it); with a document, only
+    // that document's recording. A main-thread wait for the recording releases it too; a stage the
+    // main thread would queue behind it (the layout update of a document painted after it) runs on
+    // the main thread instead.
+    boolean holdNextRecordingFrame(optional DOMString point = "before-run", optional Document? document = null);
+    // Like holdNextRecordingFrame(), for the next full layout pass a rendering update submits. It
+    // holds the pass at "before-run" or "before-completion" (laid out, before the main thread hears
+    // of it).
+    boolean holdNextLayoutFrame(optional DOMString point = "before-run", optional Document? document = null);
+    // Like holdNextRecordingFrame(), for the next clock lease tick a rendering update submits ("before-run" or
+    // "before-completion").
+    boolean holdNextClockTick(optional DOMString point = "before-run", optional Document? document = null);
+    // Like holdNextLayoutFrame(), for the first style pass a rendering update submits. It holds the
+    // pass at "before-run" or "before-completion" (styled, before the main thread hears of it).
+    boolean holdNextStyleFrame(optional DOMString point = "before-run", optional Document? document = null);
+    // Blocks (bounded) until the stage a hold is armed for is held and returns where, or "" if none
+    // is. Returns "" at once if no such stage has been submitted, since none can be while it blocks.
+    DOMString waitForHeldFrame();
+    // Whether a hold is armed for a stage the rendering update has not submitted yet while an earlier stage of its
+    // frame is in flight (the layout pass it submits once it has taken its style pass back between tasks).
+    boolean heldFrameAwaitsSubmission();
+    // Waits for every thread that runs the frame in flight's stages, but the one holding a run for a hold, to run what
+    // it was handed before: a stage that is not queued behind the held run has run by then.
+    undefined waitForStageThreadsBesideHeldFrame();
+    // How many frames of the navigable of `document` a flight presented.
+    unsigned long long framesPresentedByFlights(Document document);
+    // Has the next frame the rendering update records in flight take its recording in before the frame's presentation
+    // is submitted, as a forced join during the main half would: the frame in flight then does not present it, and
+    // consume-commit does. recordingsTakenInBeforeTheirPresentation() counts the recordings taken in so. A test that
+    // sets it resets it with false.
+    undefined takeInNextRecordingBeforeItsPresentation(optional boolean take = true);
+    unsigned long long recordingsTakenInBeforeTheirPresentation();
+    undefined releaseHeldFrame();
+    // How many forced joins (main-thread accesses that waited for the frame in flight and took it in, or, from inside a
+    // garbage collection, only waited for it) reached a frame with a stage `stage` names ("recording", "layout" or
+    // "style") on this thread so far.
+    unsigned long long forcedJoinCount(DOMString stage);
+    // Whether a frame is in flight and holds this document.
+    boolean frameInFlightHoldsDocument();
+    // Whether each document a frame in flight holds, and its navigable, page and window, are alive
+    // (true if none is in flight).
+    boolean frameInFlightReferencesAreAlive();
+    // With withClockTicks, the leases a render clock would tick take the display ticks injectClockTick() hands them.
+    undefined setManualRenderingOpportunities(boolean enabled, optional boolean withClockTicks = false);
+    // Whether the rendering task holds its rendering opportunity until the frame in flight has finished.
+    boolean renderingTaskHeld();
     undefined injectRenderingOpportunity(double frameTimeMs);
+    // Blocks (bounded) until the frame in flight has finished on the render side, without taking it
+    // in. Returns false if no frame is in flight.
+    boolean waitForFrameToFinish();
+    // The frame scheduler's state: "idle", "main-half", "in-flight", "consuming" or
+    // "committed-tail-pending".
+    DOMString frameSchedulerState();
+    // How many scenes this window's navigable has handed its compositor context, read without taking in the frame in
+    // flight; and the epoch of the last one the main thread took in, which its hit-test list was made with.
+    unsigned long long presentedSceneEpoch();
+    unsigned long long hitTestSceneEpoch();
+    // Whether the keyboard scroll state this window's navigable last handed its compositor is still current (true where
+    // it hands none).
+    boolean lastFrameKeyboardScrollStateIsCurrent();
+    // How many animations the compositor runs on the last visual context tree this window's navigable handed it, read
+    // without taking in the frame in flight.
+    unsigned long long presentedCompositorAnimationCount();
+    // Whether the rendering update has submitted its style or layout pass and goes on with the rest, which submits its
+    // recordings, once the main thread has taken the pass back between tasks.
+    boolean renderingUpdateAwaitsPass();
+    // How many times main-thread code took a style pass in flight back before its time (a forced join), since the
+    // process started. A write that queues its style input beside the pass leaves it unchanged.
+    unsigned long long stylePassForcedJoins();
     undefined updateCompositorAnimations();
     boolean runEmptyAnimationStyleUpdateForTesting();
     undefined armCompositorAnimationTimersForTesting();
@@ -238,7 +346,6 @@ interface Internals {
     // layout node. Useful for asserting that incremental tree builds preserve unaffected nodes.
     unsigned long long layoutNodeIdentity(Node node);
     unsigned long long layoutArenaLiveSlotCount();
-    unsigned long long layoutArenaShellCount();
     double styleEngineMatchDocument();
     // Reports a snapshot of StyleEngine's matched rules for the whole document.
     DOMString styleEngineMatchedRules();

@@ -34,6 +34,101 @@ class Animation : public DOM::EventTarget {
     GC_DECLARE_ALLOCATOR(Animation);
 
 public:
+    // Everything the style stage needs to decide, without touching the GC heap, whether this
+    // animation is relevant and what key its effect samples at: the timing of the animation and of
+    // its effect, packed into words of presence and kind flags and raw times. The layout is
+    // mirrored by `Rust/src/css/style/animations.rs`; keep the two in step.
+    struct StyleTimingRow {
+        static constexpr u32 has_start_time = 1u << 0;
+        static constexpr u32 start_time_is_percentage = 1u << 1;
+        static constexpr u32 has_hold_time = 1u << 2;
+        static constexpr u32 hold_time_is_percentage = 1u << 3;
+        static constexpr u32 start_delay_is_percentage = 1u << 4;
+        static constexpr u32 end_delay_is_percentage = 1u << 5;
+        static constexpr u32 iteration_duration_is_percentage = 1u << 6;
+        static constexpr u32 has_pending_playback_rate = 1u << 7;
+        static constexpr u32 has_pending_play_task = 1u << 8;
+        static constexpr u32 has_pending_pause_task = 1u << 9;
+        static constexpr u32 is_finished_flag = 1u << 10;
+        static constexpr u32 replace_state_is_removed = 1u << 11;
+        static constexpr u32 has_timeline = 1u << 12;
+        static constexpr u32 timeline_is_monotonically_increasing = 1u << 13;
+        static constexpr u32 timeline_is_progress_based = 1u << 14;
+        static constexpr u32 fill_mode_shift = 15;
+        static constexpr u32 undecidable = 1u << 18;
+        // `Bindings::PlaybackDirection`, in IDL order.
+        static constexpr u32 playback_direction_shift = 19;
+        static constexpr u32 playback_direction_mask = 0x3;
+        // The effect's own easing: 0 the identity `linear`, 1 `cubic-bezier()`, 2 `steps()`.
+        static constexpr u32 easing_kind_shift = 21;
+        static constexpr u32 easing_kind_mask = 0x3;
+        // `CSS::StepPosition`, which is also what the easing evaluator takes.
+        static constexpr u32 easing_step_position_shift = 23;
+        static constexpr u32 easing_step_position_mask = 0x7;
+        // A provisionally started transition's row. Its effect is sampled by the pass that started
+        // it, but the transition is not associated with its target yet, so it answers no question
+        // about which effects the element holds.
+        static constexpr u32 not_associated = 1u << 27;
+        // The animation names an owning element, which is the first thing the class-specific
+        // composite order of a CSS animation or transition compares.
+        static constexpr u32 has_owning_element = 1u << 28;
+        // The owning element currently lists this CSS animation at the place the class-specific key
+        // names. An animation the element has stopped listing keeps the place it was last given, so
+        // without this the key alone cannot say which animation really holds it.
+        static constexpr u32 listed_by_owning_element = 1u << 29;
+        // Script played or paused this CSS animation, so a change to `animation-play-state` no longer
+        // plays or pauses it.
+        static constexpr u32 css_play_state_overridden_by_script = 1u << 30;
+
+        // How many words of the buffer a published row occupies. Mirrored by `TIMING_ROW_WORDS` in
+        // `Rust/src/css/style/animations.rs`; keep the two in step.
+        static constexpr size_t word_count = 11;
+
+        enum Time : size_t {
+            StartTime,
+            HoldTime,
+            StartDelay,
+            EndDelay,
+            IterationDuration,
+            PlaybackRate,
+            PendingPlaybackRate,
+            IterationCount,
+            IterationStart,
+            EasingX1,
+            EasingY1,
+            EasingX2,
+            EasingY2,
+            TimeCount,
+        };
+
+        u32 flags { 0 };
+        u32 timeline_identity { 0 };
+        i32 easing_interval_count { 0 };
+        // The effect this row is the timing of, so a stage that walks effects in composite order
+        // can find the row belonging to the one in its hand.
+        u64 effect_identity { 0 };
+        // Where the animation sits in the composite order, as data rather than as a comparison
+        // against another GC object: its class, the owning element the class-specific order
+        // compares first, the class-specific key (a CSS animation's `animation-name` index, a
+        // transition's generation), the transition property whose name breaks a tie inside one
+        // generation, and the global animation list position that breaks every remaining tie.
+        u8 composite_class { 0 };
+        u8 composite_owning_slot { 0 };
+        u16 composite_transition_property { 0 };
+        u32 composite_owning_node { 0 };
+        u32 composite_class_key { 0 };
+        u32 global_list_order { 0 };
+        // A `linear()` easing with control points of its own spells its stops out in the buffer
+        // published beside the rows, which this range names. A count of zero is the identity
+        // `linear(0, 1)`, which the mirror knows without being told any stops.
+        u32 first_linear_point { 0 };
+        u32 linear_point_count { 0 };
+        double times[TimeCount] {};
+    };
+    // `linear_points` is the buffer the row's `linear()` stops are appended to, input and output
+    // interleaved as raw `f64` bits, which the caller publishes beside the rows.
+    StyleTimingRow style_timing_row(Vector<u64>& linear_points) const;
+
     static constexpr size_t effect_offset() { return offsetof(Animation, m_effect); }
     enum class ShouldInvalidate {
         Yes,
@@ -136,15 +231,23 @@ public:
     virtual bool is_css_transition() const { return false; }
 
     Optional<DOM::AbstractElement> owning_element() const { return m_owning_element; }
-    void set_owning_element(Optional<DOM::AbstractElement>&& value) { m_owning_element = move(value); }
-    void schedule_disassociation_from_target() { m_disassociation_from_target_pending = true; }
+    void set_owning_element(Optional<DOM::AbstractElement>&&);
+    void schedule_disassociation_from_target();
     bool disassociation_from_target_pending() const { return m_disassociation_from_target_pending; }
+    // Everything style_timing_row() reads, and whether the target publishes a row for this animation at
+    // all, changes through here (see Animatable::invalidate_animation_timing_rows()).
+    void invalidate_style_timing_row();
     void disassociate_from_target_if_inert();
     void did_associate_with_target();
     void update_style_if_needed() const;
 
     virtual AnimationClass animation_class() const { return AnimationClass::None; }
     virtual int class_specific_composite_order(GC::Ref<Animation>) const { return 0; }
+
+    // The same class-specific order, as the numbers it is decided by, so that a published row can
+    // carry it and a consumer that holds no GC object can order two rows for itself.
+    virtual u32 class_specific_composite_order_key() const { return 0; }
+    virtual u16 class_specific_composite_order_property() const { return 0; }
 
     unsigned int global_animation_list_order() const { return m_global_animation_list_order; }
 

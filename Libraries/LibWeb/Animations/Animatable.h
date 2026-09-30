@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <AK/Badge.h>
 #include <AK/FlyString.h>
 #include <AK/HashMap.h>
 #include <AK/Utf16FlyString.h>
@@ -26,13 +27,6 @@ namespace Web::Animations {
 // https://drafts.csswg.org/web-animations-1/#animatable
 class WEB_API Animatable {
 public:
-    struct TransitionAttributes {
-        double delay;
-        double duration;
-        CSS::EasingFunction timing_function;
-        CSS::TransitionBehavior transition_behavior;
-    };
-
     virtual ~Animatable() = default;
 
     enum class GetAnimationsSorted {
@@ -60,37 +54,69 @@ public:
     void invalidate_associated_animation_composite_order();
     bool has_relevant_animations() const;
     bool has_associated_animations() const;
-    bool has_relevant_animations_other_than_transitions() const;
 
     void associate_with_animation(GC::Ref<Animation>);
     void disassociate_with_animation(GC::Ref<Animation>);
     void on_document_changed(DOM::Document& old_document, DOM::Document& new_document);
     void cancel_css_animations_and_transitions();
 
+    // The timing of every animation this element holds a keyframe effect for, which is what the
+    // style stage decides relevance from. Everything a row is built from moves through
+    // invalidate_animation_timing_rows(), which queues the element on its document, and the
+    // document publishes the elements it took off that queue (Document::publish_dirty_animation_timing_rows()).
+    void invalidate_animation_timing_rows();
+    void publish_animation_timing_rows(Badge<DOM::Document>);
+    // The style engine holds nothing this element published under an identity it no longer has.
+    void note_animation_timing_rows_identity_changed();
+
+    struct AnimationTimingRowCounters {
+        u64 lists_published { 0 };
+        u64 lists_unchanged { 0 };
+        u64 rows_published { 0 };
+    };
+    static AnimationTimingRowCounters animation_timing_row_counters();
+
     bool has_css_defined_animations() const;
     bool has_css_animations_or_transitions() const;
     Vector<GC::Ref<CSS::CSSAnimation>> const* css_defined_animations(Optional<CSS::PseudoElement>);
     void set_css_defined_animations(Optional<CSS::PseudoElement>, Vector<GC::Ref<CSS::CSSAnimation>>&&);
 
-    void add_transitioned_properties(Optional<CSS::PseudoElement>, Vector<CSS::TransitionProperties> const& transitions);
     Vector<CSS::PropertyID> property_ids_with_matching_transition_property_entry(Optional<CSS::PseudoElement>) const;
-    Optional<TransitionAttributes const&> property_transition_attributes(Optional<CSS::PseudoElement>, CSS::PropertyID) const;
     void set_transition(Optional<CSS::PseudoElement>, CSS::PropertyID, GC::Ref<CSS::CSSTransition>);
     void remove_transition(Optional<CSS::PseudoElement>, CSS::PropertyID);
     Vector<CSS::PropertyID> property_ids_with_existing_transitions(Optional<CSS::PseudoElement>) const;
     GC::Ptr<CSS::CSSTransition> property_transition(Optional<CSS::PseudoElement>, CSS::PropertyID) const;
-    void clear_registered_transitions(Optional<CSS::PseudoElement>);
 
 protected:
     void visit_edges(JS::Cell::Visitor&);
 
 private:
+    void publish_css_defined_animations(size_t index);
+
     struct Transition;
 
     struct Impl {
         AK_ALLOC_WITH_KMALLOC;
 
         Vector<GC::Ref<Animation>> associated_animations;
+        // What one animation list last published, as it was built before its rows were put in
+        // composite order. The effects' descriptions are named by identity and generation, which
+        // moves on everything a description is built from.
+        struct PublishedTimingRows {
+            u8 slot { 0 };
+            Vector<u32> words;
+            Vector<u64> times;
+            Vector<u64> linear_points;
+            Vector<u64> effect_generations;
+        };
+        // The animation lists the element last published timing rows for, so a list that empties
+        // can be cleared without walking every pseudo-element's slot, and one built the same as
+        // it was last published is not published again.
+        Vector<PublishedTimingRows> published_timing_rows;
+        // The element's style node changed since the lists above were published.
+        bool published_timing_rows_are_stale { false };
+        // The element is queued on its document to publish its timing rows.
+        bool timing_rows_are_dirty { false };
         bool is_sorted_by_composite_order { true };
         bool has_css_defined_animations { false };
 

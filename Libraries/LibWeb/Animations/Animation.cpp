@@ -18,6 +18,7 @@
 #include <LibWeb/Bindings/WrapperWorld.h>
 #include <LibWeb/CSS/CSSAnimation.h>
 #include <LibWeb/CSS/CSSNumericValue.h>
+#include <LibWeb/CSS/CSSTransition.h>
 #include <LibWeb/CSS/Length.h>
 #include <LibWeb/CSS/StyleValues/ComputationContext.h>
 #include <LibWeb/DOM/Document.h>
@@ -61,6 +62,13 @@ void Animation::set_effect(GC::Ptr<AnimationEffect> new_effect, ShouldInvalidate
     if (new_effect == old_effect)
         return;
 
+    // NB: The style drain of a pass in flight reads the effects the elements hold on the main thread, so it drains
+    //     before either element's effect changes.
+    for (auto effect : { old_effect, new_effect }) {
+        if (effect && effect->target())
+            effect->target()->document().join_frame_before_style_drain_reads();
+    }
+
     // 3. If animation has a pending pause task, reschedule that task to run as soon as animation is ready.
     // 4. If animation has a pending play task, reschedule that task to run as soon as animation is ready to play ne
     //    effect.
@@ -88,6 +96,11 @@ void Animation::set_effect(GC::Ptr<AnimationEffect> new_effect, ShouldInvalidate
     if (m_effect)
         m_effect->set_associated_animation({});
     m_effect = new_effect;
+    // The style pass decides a CSS transition's step over the effect the transition started with.
+    if (is_css_transition()) {
+        if (auto owner = owning_element(); owner.has_value())
+            CSS::CSSTransition::publish_transitions(owner->element(), owner->pseudo_element());
+    }
 
     // Once animated properties of the old effect no longer apply, we need to ensure appropriate invalidations are scheduled
     if (old_effect) {
@@ -98,6 +111,7 @@ void Animation::set_effect(GC::Ptr<AnimationEffect> new_effect, ShouldInvalidate
     // 7. Run the procedure to update an animation’s finished state for animation with the did seek flag set to false,
     //    and the synchronously notify flag set to false.
     update_finished_state(DidSeek::No, SynchronouslyNotify::No, should_invalidate);
+    invalidate_style_timing_row();
 }
 
 GC::Ptr<AnimationTimeline> Animation::timeline_for_bindings() const
@@ -116,6 +130,7 @@ void Animation::set_timeline(GC::Ptr<AnimationTimeline> new_timeline)
     // 2. If new timeline is the same object as old timeline, abort this procedure.
     if (new_timeline == old_timeline)
         return;
+    invalidate_style_timing_row();
 
     // 3. Let previous play state be animation’s play state.
     auto previous_play_state = play_state();
@@ -289,6 +304,7 @@ WebIDL::ExceptionOr<void> Animation::set_start_time_for_bindings(NullableCSSNumb
     // AD-HOC: The validate_a_css_numberish_time throws on validation failure which is handled by the TRY() macro so
     //         there is no need to assign the `valid start time` variable here.
     auto new_start_time = TRY(validate_a_css_numberish_time(raw_new_start_time));
+    invalidate_style_timing_row();
 
     // 3. Set auto align start time to false.
     m_auto_align_start_time = false;
@@ -372,13 +388,16 @@ void Animation::calculate_auto_aligned_start_time()
     auto end_offset = TimeValue { TimeValue::Type::Percentage, 100 };
 
     // 7. Set start time to start offset if effective playback rate ≥ 0, and end offset otherwise.
-    if (effective_playback_rate() >= 0.0)
-        m_start_time = start_offset;
-    else
-        m_start_time = end_offset;
+    auto start_time = effective_playback_rate() >= 0.0 ? start_offset : end_offset;
+
+    // NB: Every update of a progress-based timeline runs this, and once the start time is aligned it moves nothing.
+    if (m_start_time == start_time && !m_hold_time.has_value())
+        return;
+    m_start_time = start_time;
 
     // 8. Clear hold time.
     m_hold_time = {};
+    invalidate_style_timing_row();
 }
 
 // https://www.w3.org/TR/web-animations-1/#animation-current-time
@@ -430,6 +449,7 @@ WebIDL::ExceptionOr<void> Animation::set_current_time_for_bindings(NullableCSSNu
     // AD-HOC: We validate here instead of within silently_set_current_time so we have access to the `TimeValue`
     //         value within this function.
     auto seek_time = TRY(validate_a_css_numberish_time(raw_seek_time));
+    invalidate_style_timing_row();
 
     // 1. Run the steps to silently set the current time of animation to seek time.
     TRY(silently_set_current_time(seek_time));
@@ -465,6 +485,7 @@ WebIDL::ExceptionOr<void> Animation::set_current_time_for_bindings(NullableCSSNu
 WebIDL::ExceptionOr<void> Animation::set_playback_rate(double new_playback_rate)
 {
     // Setting this attribute follows the procedure to set the playback rate of this object to the new value.
+    invalidate_style_timing_row();
 
     // 1. Clear any pending playback rate on animation.
     m_pending_playback_rate = {};
@@ -627,6 +648,7 @@ bool Animation::is_replaceable() const
 
 void Animation::set_replace_state(AnimationReplaceState value)
 {
+    invalidate_style_timing_row();
     if (value == AnimationReplaceState::Removed) {
         // Remove the associated effect from its target, if applicable
         if (m_effect && m_effect->target())
@@ -690,6 +712,7 @@ void Animation::cancel(ShouldInvalidate should_invalidate)
     //       style computation is already updating the animation effect stack.
 
     auto& realm = HTML::relevant_realm(relevant_global_object());
+    invalidate_style_timing_row();
 
     // 1. If animation’s play state is not idle, perform the following steps:
     if (play_state() != AnimationPlayState::Idle) {
@@ -766,6 +789,7 @@ WebIDL::ExceptionOr<void> Animation::finish()
         return WebIDL::InvalidStateError::create("Animation with a playback rate of 0 cannot be finished"_utf16);
     if (effective_playback_rate > 0.0 && isinf(associated_effect_end().value))
         return WebIDL::InvalidStateError::create("Animation with no end cannot be finished"_utf16);
+    invalidate_style_timing_row();
 
     // 2. Apply any pending playback rate to animation.
     apply_any_pending_playback_rate();
@@ -833,6 +857,8 @@ WebIDL::ExceptionOr<void> Animation::play(ShouldInvalidate should_invalidate)
 // https://drafts.csswg.org/web-animations-2/#play-an-animation
 WebIDL::ExceptionOr<void> Animation::play_an_animation(AutoRewind auto_rewind, ShouldInvalidate should_invalidate)
 {
+    invalidate_style_timing_row();
+
     // 1. Let aborted pause be a boolean flag that is true if animation has a pending pause task, and false otherwise.
     auto aborted_pause = m_pending_pause_task == TaskState::Scheduled;
 
@@ -942,6 +968,7 @@ WebIDL::ExceptionOr<void> Animation::play_an_animation(AutoRewind auto_rewind, S
 void Animation::disassociate_from_target_if_inert()
 {
     m_disassociation_from_target_pending = false;
+    invalidate_style_timing_row();
     // Script may have revived the animation since the disassociation was scheduled.
     if (!m_effect || !m_effect->target() || pending() || is_relevant())
         return;
@@ -961,6 +988,25 @@ void Animation::did_associate_with_target()
     schedule_disassociation_from_target();
 }
 
+void Animation::schedule_disassociation_from_target()
+{
+    if (exchange(m_disassociation_from_target_pending, true))
+        return;
+    invalidate_style_timing_row();
+}
+
+void Animation::invalidate_style_timing_row()
+{
+    if (auto target = m_effect ? m_effect->target() : nullptr)
+        target->invalidate_animation_timing_rows();
+}
+
+void Animation::set_owning_element(Optional<DOM::AbstractElement>&& owning_element)
+{
+    m_owning_element = move(owning_element);
+    invalidate_style_timing_row();
+}
+
 // https://www.w3.org/TR/web-animations-1/#dom-animation-pause
 WebIDL::ExceptionOr<void> Animation::pause()
 {
@@ -971,6 +1017,7 @@ WebIDL::ExceptionOr<void> Animation::pause()
     // 2. If the play state of animation is paused, abort these steps.
     if (play_state() == AnimationPlayState::Paused)
         return {};
+    invalidate_style_timing_row();
 
     // 3. Let seek time be a time value that is initially unresolved.
     Optional<TimeValue> seek_time;
@@ -1049,6 +1096,7 @@ WebIDL::ExceptionOr<void> Animation::update_playback_rate(double new_playback_ra
     //       following logic, we want to immediately apply the pending playback rate of animation if it is currently
     //       finished regardless of whether or not it will still be finished after we apply the pending playback rate.
     auto previous_play_state = play_state();
+    invalidate_style_timing_row();
 
     // 2. Let animation’s pending playback rate be new playback rate.
     m_pending_playback_rate = new_playback_rate;
@@ -1113,6 +1161,7 @@ WebIDL::ExceptionOr<void> Animation::reverse()
     //    "InvalidStateError" DOMException and abort these steps.
     if (!m_timeline || m_timeline->is_inactive())
         return WebIDL::InvalidStateError::create("Cannot reverse an animation with an inactive timeline"_utf16);
+    invalidate_style_timing_row();
 
     // 2. Let original pending playback rate be animation’s pending playback rate.
     auto original_pending_playback_rate = m_pending_playback_rate;
@@ -1223,7 +1272,9 @@ void Animation::update()
                 && m_timeline
                 && m_timeline->is_monotonically_increasing()
                 && playback_rate() > 0;
-            if (effect.can_skip_per_frame_style_update()) {
+            if (effect.is_clock_driven()) {
+                // The clock lease's tick samples the effect at this time, and the main thread adopts it.
+            } else if (effect.can_skip_per_frame_style_update()) {
                 if (auto target = effect.target())
                     target->document().note_throttled_animation_style_update();
             } else if (!pending() && !output_is_constant_before_active_start) {
@@ -1265,7 +1316,113 @@ void Animation::update()
 
 void Animation::effect_timing_changed(Badge<AnimationEffect>)
 {
+    invalidate_style_timing_row();
     update_finished_state(DidSeek::No, SynchronouslyNotify::Yes);
+}
+
+// The style stage decides which of an element's animations are relevant from its own inputs, so
+// what `is_relevant()` reads is published rather than asked for. Only the timing is published: the
+// phase computation is a pure function of it and of the timeline's sampled current time.
+Animation::StyleTimingRow Animation::style_timing_row(Vector<u64>& linear_points) const
+{
+    StyleTimingRow row;
+
+    auto record_time = [&](StyleTimingRow::Time index, TimeValue const& time, u32 percentage_flag) {
+        row.times[index] = time.value;
+        if (time.type == TimeValue::Type::Percentage)
+            row.flags |= percentage_flag;
+    };
+
+    // The composite order is a property of the animation, not of its effect's timing, so it is
+    // recorded before the early return an undecidable row takes: a row that answers nothing about
+    // relevance still has to take its place in the order.
+    row.composite_class = static_cast<u8>(to_underlying(animation_class()));
+    row.composite_class_key = class_specific_composite_order_key();
+    row.composite_transition_property = class_specific_composite_order_property();
+    row.global_list_order = m_global_animation_list_order;
+    if (m_owning_element.has_value()) {
+        row.flags |= StyleTimingRow::has_owning_element;
+        row.composite_owning_node = m_owning_element->element().style_node_id().value();
+        row.composite_owning_slot = m_owning_element->pseudo_element().has_value()
+            ? static_cast<u8>(to_underlying(*m_owning_element->pseudo_element()) + 1)
+            : static_cast<u8>(0);
+    }
+
+    if (m_start_time.has_value()) {
+        row.flags |= StyleTimingRow::has_start_time;
+        record_time(StyleTimingRow::StartTime, *m_start_time, StyleTimingRow::start_time_is_percentage);
+    }
+    if (m_hold_time.has_value()) {
+        row.flags |= StyleTimingRow::has_hold_time;
+        record_time(StyleTimingRow::HoldTime, *m_hold_time, StyleTimingRow::hold_time_is_percentage);
+    }
+    row.times[StyleTimingRow::PlaybackRate] = m_playback_rate;
+    if (m_pending_playback_rate.has_value()) {
+        row.flags |= StyleTimingRow::has_pending_playback_rate;
+        row.times[StyleTimingRow::PendingPlaybackRate] = *m_pending_playback_rate;
+    }
+    if (m_pending_play_task == TaskState::Scheduled)
+        row.flags |= StyleTimingRow::has_pending_play_task;
+    if (m_pending_pause_task == TaskState::Scheduled)
+        row.flags |= StyleTimingRow::has_pending_pause_task;
+    if (m_is_finished)
+        row.flags |= StyleTimingRow::is_finished_flag;
+    if (m_replace_state == AnimationReplaceState::Removed)
+        row.flags |= StyleTimingRow::replace_state_is_removed;
+    if (m_timeline) {
+        row.flags |= StyleTimingRow::has_timeline;
+        if (m_timeline->is_monotonically_increasing())
+            row.flags |= StyleTimingRow::timeline_is_monotonically_increasing;
+        if (m_timeline->is_progress_based())
+            row.flags |= StyleTimingRow::timeline_is_progress_based;
+        row.timeline_identity = m_timeline->style_engine_identity();
+    }
+
+    // An effect whose local time is overridden for observation is not describing the time the style
+    // stage samples at, and an animation with no effect is never relevant.
+    if (!m_effect || m_effect->has_local_time_override_for_observation()) {
+        row.flags |= StyleTimingRow::undecidable;
+        return row;
+    }
+
+    record_time(StyleTimingRow::StartDelay, m_effect->start_delay(), StyleTimingRow::start_delay_is_percentage);
+    record_time(StyleTimingRow::EndDelay, m_effect->end_delay(), StyleTimingRow::end_delay_is_percentage);
+    record_time(StyleTimingRow::IterationDuration, m_effect->iteration_duration(), StyleTimingRow::iteration_duration_is_percentage);
+    row.times[StyleTimingRow::IterationCount] = m_effect->iteration_count();
+    row.times[StyleTimingRow::IterationStart] = m_effect->iteration_start();
+    row.flags |= static_cast<u32>(to_underlying(m_effect->fill_mode())) << StyleTimingRow::fill_mode_shift;
+    row.flags |= static_cast<u32>(to_underlying(m_effect->playback_direction())) << StyleTimingRow::playback_direction_shift;
+
+    m_effect->timing_function().visit(
+        [&](CSS::LinearEasingFunction const& linear) {
+            // `linear` itself is `linear(0, 1)`, which is the identity the mirror can evaluate
+            // without being told any stops.
+            auto is_identity = linear.control_points.size() == 2
+                && linear.control_points[0] == CSS::LinearEasingFunction::ControlPoint { 0, 0 }
+                && linear.control_points[1] == CSS::LinearEasingFunction::ControlPoint { 1, 1 };
+            if (is_identity)
+                return;
+            row.first_linear_point = static_cast<u32>(linear_points.size() / 2);
+            row.linear_point_count = static_cast<u32>(linear.control_points.size());
+            for (auto const& point : linear.control_points) {
+                linear_points.append(bit_cast<u64>(static_cast<double>(point.input)));
+                linear_points.append(bit_cast<u64>(static_cast<double>(point.output)));
+            }
+        },
+        [&](CSS::CubicBezierEasingFunction const& bezier) {
+            row.flags |= 1u << StyleTimingRow::easing_kind_shift;
+            row.times[StyleTimingRow::EasingX1] = bezier.x1;
+            row.times[StyleTimingRow::EasingY1] = bezier.y1;
+            row.times[StyleTimingRow::EasingX2] = bezier.x2;
+            row.times[StyleTimingRow::EasingY2] = bezier.y2;
+        },
+        [&](CSS::StepsEasingFunction const& steps) {
+            row.flags |= 2u << StyleTimingRow::easing_kind_shift;
+            row.flags |= static_cast<u32>(to_underlying(steps.position)) << StyleTimingRow::easing_step_position_shift;
+            row.easing_interval_count = steps.interval_count;
+        });
+
+    return row;
 }
 
 // https://www.w3.org/TR/web-animations-1/#associated-effect-end
@@ -1355,6 +1512,11 @@ WebIDL::ExceptionOr<void> Animation::silently_set_current_time(Optional<TimeValu
 void Animation::update_finished_state(DidSeek did_seek, SynchronouslyNotify synchronously_notify, ShouldInvalidate should_invalidate, Optional<TimeValue> observed_current_time)
 {
     auto& realm = HTML::relevant_realm(relevant_global_object());
+    // NB: Every animation frame runs this for every running animation, and it rarely moves anything the target's
+    //     timing rows read, so it only invalidates them when it does.
+    auto const start_time = m_start_time;
+    auto const hold_time = m_hold_time;
+    auto const was_finished = m_is_finished;
 
     // 1. Let the unconstrained current time be the result of calculating the current time substituting an unresolved
     //    time value for the hold time if did seek is false. If did seek is true, the unconstrained current time is
@@ -1439,6 +1601,7 @@ void Animation::update_finished_state(DidSeek did_seek, SynchronouslyNotify sync
             // 2. Resolve animation’s current finished promise object with animation.
             Bindings::resolve_animation_promise(current_finished_promise(), *this);
             m_is_finished = true;
+            invalidate_style_timing_row();
 
             // 3. Create an AnimationPlaybackEvent, finishEvent.
             // 4. Set finishEvent’s type attribute to finish.
@@ -1521,6 +1684,9 @@ void Animation::update_finished_state(DidSeek did_seek, SynchronouslyNotify sync
     if (current_finished_state && !pending() && !is_relevant())
         schedule_disassociation_from_target();
 
+    if (m_start_time != start_time || m_hold_time != hold_time || m_is_finished != was_finished)
+        invalidate_style_timing_row();
+
     if (should_invalidate == ShouldInvalidate::Yes)
         invalidate_effect();
 }
@@ -1576,6 +1742,8 @@ bool Animation::is_ready() const
 // Step 12 of https://www.w3.org/TR/web-animations-1/#playing-an-animation-section
 void Animation::run_pending_play_task()
 {
+    invalidate_style_timing_row();
+
     // 1. Assert that at least one of animation’s start time or hold time is resolved.
     VERIFY(m_start_time.has_value() || m_hold_time.has_value());
 
@@ -1666,6 +1834,8 @@ bool Animation::is_ready_to_run_pending_pause_task() const
 // Step 10 of https://www.w3.org/TR/web-animations-1/#pause-an-animation
 void Animation::run_pending_pause_task()
 {
+    invalidate_style_timing_row();
+
     // 1. Let ready time be the time value of the timeline associated with animation at the moment when the user agent
     //    completed processing necessary to suspend playback of animation’s associated effect.
     // FIXME: We can get a more accurate time here if we record the actual instant the above is true rather than waiting
@@ -1745,12 +1915,14 @@ void Animation::set_provisional_effect(GC::Ref<AnimationEffect> effect)
     VERIFY(!effect->associated_animation());
     effect->set_associated_animation(this);
     m_effect = effect;
+    invalidate_style_timing_row();
 }
 
 void Animation::discard_provisional_effect()
 {
     VERIFY(m_effect);
     VERIFY(m_effect->associated_animation() == GC::Ptr<Animation> { *this });
+    invalidate_style_timing_row();
     m_effect->set_associated_animation({});
     m_effect = nullptr;
 }

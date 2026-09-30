@@ -18,6 +18,13 @@
 #include <LibWeb/CSS/PropertyNameAndID.h>
 #include <LibWeb/CSS/StyleRecordID.h>
 
+namespace Web::CSS::StyleEngineFFI {
+
+struct FfiAnimationInvalidation;
+struct FfiRowSampledInPass;
+
+}
+
 namespace Web::Animations {
 
 using FillMode = Bindings::FillMode;
@@ -39,23 +46,53 @@ Bindings::OptionalEffectTiming to_optional_effect_timing(Bindings::EffectTiming 
 // This object lives for the duration of an animation update, and is used to store per-element data about animated CSS properties.
 struct AnimationUpdateContext {
     struct ElementData {
-        ElementData();
-        ElementData(CSS::StyleRecordID, RefPtr<CSS::ComputedStyleWorkingSet>);
-        ElementData(ElementData&&);
-        ElementData& operator=(ElementData&&);
-        ~ElementData();
-
+        // The record the element held when the update asked for it; none for an element with no
+        // style to sample.
         CSS::StyleRecordID style_record_before_update;
-        RefPtr<CSS::ComputedStyleWorkingSet> target_style;
-        GC::ConservativeVector<GC::Ref<KeyframeEffect>> effects;
+        // The caller compares the element's style before and after this update itself, and marks
+        // what layout and paint need from that one comparison.
+        bool caller_applies_invalidation { false };
+        // The record the caller compares the element's sampled style with, and where it takes what
+        // the engine answered that move damages with the sample, once the sample installs.
+        CSS::StyleRecordID compared_with {};
+        Optional<u32>* damage { nullptr };
     };
 
     AnimationUpdateContext();
     ~AnimationUpdateContext();
 
+    // While one is open, the first context publishes the document's animation environment, and
+    // every later one republishes only the timing rows of the elements it samples: what the host
+    // installs in the meantime moves the animations of those elements, and nothing else in it.
+    class BatchPublication {
+    public:
+        explicit BatchPublication(DOM::Document&);
+        ~BatchPublication();
+
+    private:
+        DOM::Document* m_previous_document { nullptr };
+        bool m_previous_published { false };
+    };
+
+    // Publish what an element's animations are sampled from, as a context about to sample the element
+    // does: the document's animation environment once per open batch, the element's timing rows after.
+    static void publish_animation_inputs_before_sample(DOM::Element&);
+
     // NOTE: This is lazily populated by KeyframeEffects as their respective animations are applied to an element.
     HashMap<DOM::AbstractElement, ElementData> elements;
+
+    // The drain an update inside one installs its samples in; an update outside any installs them
+    // in a drain of its own.
+    CSS::StyleDrainScope const* drain_scope { nullptr };
 };
+
+void apply_published_animation_overlay(CSS::StyleDrainScope const&, DOM::AbstractElement, CSS::StyleEngineFFI::FfiAnimationInvalidation const&, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation);
+// Adopt a sample a clock tick took of an element's animations over the record `style_record_before_tick`, which the
+// arena took ahead of the host where `installed_in_arena` says so. `sampled_record` is the record the sample published:
+// held by the caller, it is one the engine still holds.
+// `presented_on_render_side`: the render side showed the sample already, so adopting it repaints nothing.
+void adopt_clock_tick_sample(CSS::StyleDrainScope const&, DOM::AbstractElement, CSS::StyleRecordID style_record_before_tick, CSS::StyleEngineFFI::FfiRowSampledInPass const&, CSS::PublishedStyleRecord const& sampled_record, bool installed_in_arena, bool presented_on_render_side);
+void install_sampled_custom_property_environment(CSS::StyleDrainScope const&, DOM::AbstractElement, CSS::StyleEngineFFI::FfiRowSampledInPass const&);
 
 // https://www.w3.org/TR/web-animations-1/#the-animationeffect-interface
 class AnimationEffect : public Bindings::GCAllocatedWrappable {
@@ -76,22 +113,42 @@ public:
     void set_specified_end_delay(double end_delay) { m_specified_end_delay = end_delay; }
 
     Bindings::FillMode fill_mode() const { return m_fill_mode; }
-    void set_fill_mode(Bindings::FillMode fill_mode) { m_fill_mode = fill_mode; }
+    void set_fill_mode(Bindings::FillMode fill_mode)
+    {
+        m_fill_mode = fill_mode;
+        timing_changed();
+    }
 
     double iteration_start() const { return m_iteration_start; }
-    void set_iteration_start(double iteration_start) { m_iteration_start = iteration_start; }
+    void set_iteration_start(double iteration_start)
+    {
+        m_iteration_start = iteration_start;
+        timing_changed();
+    }
 
     double iteration_count() const { return m_iteration_count; }
-    void set_iteration_count(double iteration_count) { m_iteration_count = iteration_count; }
+    void set_iteration_count(double iteration_count)
+    {
+        m_iteration_count = iteration_count;
+        timing_changed();
+    }
 
     TimeValue const& iteration_duration() const { return m_iteration_duration; }
     void set_specified_iteration_duration(Variant<double, Utf16String> iteration_duration) { m_specified_iteration_duration = move(iteration_duration); }
 
     Bindings::PlaybackDirection playback_direction() const { return m_playback_direction; }
-    void set_playback_direction(Bindings::PlaybackDirection playback_direction) { m_playback_direction = playback_direction; }
+    void set_playback_direction(Bindings::PlaybackDirection playback_direction)
+    {
+        m_playback_direction = playback_direction;
+        timing_changed();
+    }
 
     CSS::EasingFunction const& timing_function() const { return m_timing_function; }
-    void set_timing_function(CSS::EasingFunction value) { m_timing_function = move(value); }
+    void set_timing_function(CSS::EasingFunction value)
+    {
+        m_timing_function = move(value);
+        timing_changed();
+    }
 
     GC::Ptr<Animation> associated_animation() const { return m_associated_animation; }
     void set_associated_animation(GC::Ptr<Animation> value);
@@ -105,6 +162,7 @@ public:
     Optional<TimeValue> active_time_using_fill(Bindings::FillMode) const;
 
     bool is_current() const;
+    bool has_local_time_override_for_observation() const { return m_has_local_time_override_for_observation; }
     bool is_in_effect() const;
 
     TimeValue before_active_boundary_time() const;
@@ -152,6 +210,8 @@ protected:
 
     void update_style_if_needed() const;
     void invalidate_effect();
+    // The timing rows the target publishes read the effect's normalized timing, so every write of it goes through here.
+    void timing_changed();
 
     virtual void visit_edges(GC::Cell::Visitor&) override;
     virtual GC::Ptr<Bindings::Wrappable> relevant_global_impl() const override;
