@@ -1603,6 +1603,11 @@ GC::Ptr<Geometry::DOMRect> Internals::presented_border_box(DOM::Element const& e
     return Geometry::DOMRect::create(rect.x().to_double(), rect.y().to_double(), rect.width().to_double(), rect.height().to_double());
 }
 
+void Internals::panic_render_owner_for_testing()
+{
+    Layout::RustFFI::render_owner_panic_for_testing(window().associated_document().render_document_id());
+}
+
 void Internals::set_render_clock_suspended(bool suspended)
 {
     HTML::main_thread_event_loop().frame_scheduler().set_render_clock_suspended(suspended);

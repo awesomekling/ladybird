@@ -1647,16 +1647,17 @@ unsafe fn run_stage_on<R: Send>(thread: &'static StageThread, stage: impl FnOnce
     }
 }
 
-/// Where the render owner answers a main thread that waits for it, and which thread it acts for meanwhile.
+/// Where the render owner answers a main thread that waits for it, and which thread it acts for meanwhile. Only an
+/// answer goes through it: a reply dropped unanswered is an owner that died ([`send_and_wait`]).
 pub(crate) struct OwnerReplyTo<R> {
     thread: &'static StageThread,
     caller: ThreadId,
-    reply: Sender<std::thread::Result<R>>,
+    reply: Sender<R>,
 }
 
 impl<R> OwnerReplyTo<R> {
-    /// On the owner: answers with what `unit` answers, acting for the waiting thread. A panic in `unit` goes to the
-    /// waiting thread as its answer, and the owner goes on.
+    /// On the owner: answers with what `unit` answers, acting for the waiting thread. A panic in `unit` drops the reply
+    /// unanswered, which ends the process on the waiting thread, and goes on to end the message.
     pub(crate) fn answer(self, unit: impl FnOnce() -> R) {
         let Self { thread, caller, reply } = self;
         tsan::acquire(thread);
@@ -1665,8 +1666,16 @@ impl<R> OwnerReplyTo<R> {
         WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
         tsan::release(thread);
         note_answered_a_waiting_thread();
-        // The waiting thread keeps the receiver until it has the answer.
-        let _ = reply.send(outcome);
+        match outcome {
+            Ok(answer) => {
+                // The waiting thread keeps the receiver until it has the answer.
+                let _ = reply.send(answer);
+            }
+            Err(payload) => {
+                drop(reply);
+                std::panic::resume_unwind(payload);
+            }
+        }
     }
 }
 
@@ -1683,9 +1692,9 @@ pub(crate) fn wait_for_owner<R>(
     _wait: impl crate::render_owner::OwnerWait,
     message: impl FnOnce(OwnerReplyTo<R>) -> crate::render_owner::ToOwner,
     here: impl FnOnce(&crate::render_owner::Owner) -> R,
-) -> std::thread::Result<R> {
+) -> R {
     if on_owner_thread() || (has_frame_in_flight() && stage_thread_holds_run_for_queued_stage()) {
-        return Ok(crate::render_owner::do_owner_work_here(here));
+        return crate::render_owner::do_owner_work_here(here);
     }
     send_and_wait(stage_thread(), message)
 }
@@ -1696,14 +1705,17 @@ pub(crate) fn wait_for_owner<R>(
 pub(crate) fn wait_for_owner_thread<R>(
     _wait: impl crate::render_owner::OwnerWait,
     message: impl FnOnce(OwnerReplyTo<R>) -> crate::render_owner::ToOwner,
-) -> Option<std::thread::Result<R>> {
+) -> Option<R> {
     (!on_owner_thread()).then(|| send_and_wait(stage_thread(), message))
 }
 
+/// Sends the owner the message `message` makes of where it answers, and waits for the answer. An owner that is gone,
+/// or dropped the reply unanswered as it panicked, ends the process right here: nothing will answer the thread, and
+/// the owner may have left the document's render state half changed.
 fn send_and_wait<R>(
     thread: &'static StageThread,
     message: impl FnOnce(OwnerReplyTo<R>) -> crate::render_owner::ToOwner,
-) -> std::thread::Result<R> {
+) -> R {
     let (reply, answered) = channel();
     let message = message(OwnerReplyTo {
         thread,
@@ -1713,27 +1725,30 @@ fn send_and_wait<R>(
     crate::render_owner::note_sending(&message);
     tsan::release(thread);
     if thread.jobs.send(StageMessage::Owner(message)).is_err() {
-        // The Rendering thread only goes away if the process is going away.
-        std::process::abort();
+        owner_died();
     }
-    let outcome = recv_after_spinning(&answered, thread.answer_spin).unwrap_or_else(|_| std::process::abort());
+    let answer = recv_after_spinning(&answered, thread.answer_spin).unwrap_or_else(|_| owner_died());
     tsan::acquire(thread);
-    outcome
+    answer
 }
 
-/// Where a unit test's owner answers a unit, with how the test waits for the answer.
+/// Crashes the process, on a thread that waits for a render owner that died.
+#[cold]
+fn owner_died() -> ! {
+    std::process::abort()
+}
+
+/// Where a unit test's owner answers a unit, with how the test waits for the answer: none, where the owner dropped the
+/// reply unanswered.
 #[cfg(test)]
-pub(crate) fn owner_reply_for_test<R>() -> (OwnerReplyTo<R>, impl FnOnce() -> std::thread::Result<R>) {
+pub(crate) fn owner_reply_for_test<R>() -> (OwnerReplyTo<R>, impl FnOnce() -> Option<R>) {
     let (reply, answered) = channel();
     let reply = OwnerReplyTo {
         thread: tests::test_thread(),
         caller: std::thread::current().id(),
         reply,
     };
-    // A reply dropped unanswered is the answer's error.
-    (reply, move || {
-        answered.recv().unwrap_or_else(|error| Err(Box::new(error)))
-    })
+    (reply, move || answered.recv().ok())
 }
 
 /// Runs `stage` on a stage thread of the unit tests' own, whatever the environment says.
@@ -1765,17 +1780,15 @@ mod tests {
     }
 
     #[test]
-    fn a_panic_in_a_unit_for_a_waiting_thread_answers_it_and_the_owner_goes_on() {
-        let (reply, answered) = channel();
-        let unit = OwnerReplyTo::<u32> {
-            thread: test_thread(),
-            caller: std::thread::current().id(),
-            reply,
-        };
-        run_stage_for_test(move || unit.answer(|| panic!("unit failed")));
-        let outcome = answered.recv().unwrap_or_else(|error| Err(Box::new(error)));
-        let payload = outcome.expect_err("the panic is the answer");
+    fn a_panic_in_a_unit_for_a_waiting_thread_drops_its_reply_and_the_owner_goes_on() {
+        let (unit, answered) = owner_reply_for_test::<u32>();
+        let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            run_stage_for_test(move || unit.answer(|| panic!("unit failed")));
+        }));
+        let payload = outcome.expect_err("the panic ends the unit");
         assert_eq!(payload.downcast_ref::<&str>(), Some(&"unit failed"));
+        // The waiting thread finds no answer, which ends a process that waits in `send_and_wait`.
+        assert_eq!(answered(), None);
         assert_eq!(run_stage_for_test(|| 7), 7);
     }
 

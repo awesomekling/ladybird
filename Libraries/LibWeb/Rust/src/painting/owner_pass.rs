@@ -150,7 +150,7 @@ pub(crate) unsafe fn run_paint_pass_of<A, R>(
         return run_and_publish(state.arena_mut(), body, arguments);
     }
     let arguments = std::cell::Cell::new(Some(arguments));
-    let outcome = crate::stage_thread::wait_for_owner(
+    crate::stage_thread::wait_for_owner(
         wait,
         |reply| crate::render_owner::ToOwner::Paint {
             document,
@@ -170,9 +170,7 @@ pub(crate) unsafe fn run_paint_pass_of<A, R>(
             let state = unsafe { &mut *ArenaHandle::held_by_waiting_thread(owner, handle) };
             run_and_publish(state.arena_mut(), body, arguments.take().expect("a pass runs once"))
         },
-    );
-    // A pass that panicked on the owner panics here, as a stage the document thread waits for does.
-    outcome.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+    )
 }
 
 /// A pass by a function over the arena, which the document thread holds on its stack while it waits: the function, its
@@ -227,7 +225,7 @@ pub(crate) unsafe fn run_held_pass<A: 'static, R: Default + 'static>(
             CallerWaits::new(reference),
         );
     }
-    // A pass that panicked panicked here too, so the owner ran this one.
+    // The owner answered, so it ran the pass.
     debug_assert!(held.answer.is_some(), "the owner ran the pass");
     held.answer.unwrap_or_default()
 }

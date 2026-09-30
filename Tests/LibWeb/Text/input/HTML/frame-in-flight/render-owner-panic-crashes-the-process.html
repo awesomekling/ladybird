@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<body>
+<div id="box">box</div>
+<script>
+    test(() => {
+        box.getBoundingClientRect();
+        // The owner panics answering this call. The process crashes rather than wait for an answer that never comes.
+        internals.panicRenderOwnerForTesting();
+        println(`FAIL: WebContent survived its render owner's panic; box is ${box.getBoundingClientRect().width}px wide`);
+    });
+</script>

@@ -1323,7 +1323,7 @@ impl LayoutFrame {
     fn run_job_on_owner(&mut self, document: crate::render_owner::DocumentId, job: FrameJob) -> FrameJobAnswer {
         let frame = std::ptr::from_mut(self);
         let job = std::cell::Cell::new(Some(job));
-        let outcome = crate::stage_thread::wait_for_owner(
+        let OwnerFrameJobAnswer(answer) = crate::stage_thread::wait_for_owner(
             crate::render_owner::LockstepProof::layout_update(),
             |reply| crate::render_owner::ToOwner::Layout {
                 document,
@@ -1346,11 +1346,7 @@ impl LayoutFrame {
                 })
             },
         );
-        match outcome {
-            Ok(OwnerFrameJobAnswer(answer)) => answer.into_inner(),
-            // A job that panicked on the owner panics here, as a stage the document thread waits for does.
-            Err(payload) => std::panic::resume_unwind(payload),
-        }
+        answer.into_inner()
     }
 
     /// Runs `job` with the render state the frame was handed.

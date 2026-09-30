@@ -770,8 +770,7 @@ pub(crate) enum EngineAnswered {
     Answered,
     /// The owner holds no engine of the document to answer with: the main thread answers the query.
     LeftToHost,
-    /// The owner panicked answering the query, which it may have left half done in the engine. Nothing answers it
-    /// again.
+    /// Nothing answered the query: the document has no owner. Nothing answers it again.
     Unanswered,
 }
 
@@ -788,18 +787,13 @@ impl Answer {
         }
     }
 
-    /// The answer to a question the owner panicked answering. What the owner reached may be half changed, so the
-    /// main thread is not left to answer it again from there.
+    /// The answer to a question nobody answered: the document has no owner. A question of the engine is not left to
+    /// the main thread to answer from there.
     fn unanswered(query: Query) -> Self {
         match query {
             Query::Engine(_) => Self::Engine(EngineAnswered::Unanswered),
             _ => Self::left_to_host(query),
         }
-    }
-
-    /// The answer the document thread takes of what the owner did with `query`.
-    fn of_outcome(query: Query, outcome: std::thread::Result<Self>) -> Self {
-        outcome.unwrap_or_else(|_| Self::unanswered(query))
     }
 
     /// Readies `arena` to answer `query` from: a geometry read reads the rows as committed, which publishes what the
@@ -968,6 +962,11 @@ pub(crate) enum ToOwner {
     Destroy { document: DocumentId },
     /// Starts, changes, stops or ticks the clock of a document, or lets the ticks in as the main thread idles.
     Clock(crate::clock_frames::ClockMessage),
+    /// Panics on the owner as it answers the document thread, which waits: a test's owner that dies.
+    PanicForTesting {
+        document: DocumentId,
+        reply: crate::stage_thread::OwnerReplyTo<()>,
+    },
 }
 
 impl ToOwner {
@@ -982,7 +981,8 @@ impl ToOwner {
             | Self::Style { document, .. }
             | Self::Ask { document, .. }
             | Self::Recall { document }
-            | Self::Destroy { document } => *document,
+            | Self::Destroy { document }
+            | Self::PanicForTesting { document, .. } => *document,
             Self::Clock(message) => message.document(),
         }
     }
@@ -997,7 +997,8 @@ impl ToOwner {
             | Self::Changes { .. }
             | Self::Recall { .. }
             | Self::Destroy { .. }
-            | Self::Clock(_) => false,
+            | Self::Clock(_)
+            | Self::PanicForTesting { .. } => false,
         }
     }
 
@@ -1024,6 +1025,7 @@ impl ToOwner {
                 | Self::Layout { .. }
                 | Self::Paint { .. }
                 | Self::Ask { .. }
+                | Self::PanicForTesting { .. }
         )
     }
 }
@@ -1081,8 +1083,8 @@ thread_local! {
     static FRAME_KEYS: RefCell<HashMap<DocumentId, usize>> = RefCell::default();
 }
 
-/// Handles `message`, on the owner thread. A panic in handling it ends that message, not the owner: a document thread
-/// that waits for an answer gets it as its answer.
+/// Handles `message`, on the owner thread. A panic in handling it ends that message, not the owner thread: a document
+/// thread that waits for an answer finds its reply dropped unanswered, and ends the process.
 pub(crate) fn handle(message: ToOwner) {
     let owner = Owner::here();
     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle_message(&owner, message))).is_err() {
@@ -1173,6 +1175,7 @@ fn handle_message(owner: &Owner, message: ToOwner) {
             }
         }
         ToOwner::Clock(message) => crate::clock_frames::handle_on_owner(owner, message),
+        ToOwner::PanicForTesting { reply, .. } => reply.answer(|| panic!("the render owner panicked for a test")),
     }
 }
 
@@ -1457,8 +1460,7 @@ pub(crate) fn recall_rendering_update(document: DocumentId) {
 
 /// Asks the owner `query` about `document`, whose arena the calling document thread names as `arena`, and waits for
 /// the answer, as of every change the thread sent before. Where the owner cannot answer it (a test holds the run it
-/// would queue behind), the thread reads its arena right here, as every door of the port does. A question the owner
-/// panicked answering is [`Answer::unanswered`].
+/// would queue behind), the thread reads its arena right here, as every door of the port does.
 ///
 /// # Safety
 ///
@@ -1472,7 +1474,7 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query,
             &mut *ArenaHandle::held_by_waiting_thread(&owner, arena)
         });
     }
-    let answer = crate::stage_thread::wait_for_owner(
+    crate::stage_thread::wait_for_owner(
         wait,
         |reply| ToOwner::Ask { document, query, reply },
         |owner| {
@@ -1486,9 +1488,7 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query,
                 &mut *ArenaHandle::held_by_waiting_thread(owner, arena)
             })
         },
-    );
-    debug_assert!(answer.is_ok(), "the render owner panicked answering {query:?}");
-    Answer::of_outcome(query, answer)
+    )
 }
 
 /// Asks the owner `query` about the document whose arena the calling document thread names as `arena`, once the frame
@@ -1517,23 +1517,18 @@ pub(crate) fn ask_engine(document: DocumentId, query: Query, wait: impl OwnerWai
     }) {
         return answer;
     }
-    let answer = crate::stage_thread::wait_for_owner_thread(wait, |reply| ToOwner::Ask { document, query, reply });
-    match answer {
-        Some(outcome) => {
-            debug_assert!(outcome.is_ok(), "the render owner panicked answering {query:?}");
-            Answer::of_outcome(query, outcome)
-        }
-        None => {
+    crate::stage_thread::wait_for_owner_thread(wait, |reply| ToOwner::Ask { document, query, reply }).unwrap_or_else(
+        || {
             debug_assert!(false, "the engine query of document {document:?} has no owner");
             Answer::unanswered(query)
-        }
-    }
+        },
+    )
 }
 
 /// Asks the owner `query` about `document` and waits for the answer, as [`ask`] does, for a document thread that
 /// names no arena: where the owner cannot answer it, the question is left to the host.
 pub(crate) fn ask_owner(document: DocumentId, query: Query, wait: impl OwnerWait) -> Answer {
-    let answer = crate::stage_thread::wait_for_owner(
+    crate::stage_thread::wait_for_owner(
         wait,
         |reply| ToOwner::Ask { document, query, reply },
         |owner| {
@@ -1541,9 +1536,7 @@ pub(crate) fn ask_owner(document: DocumentId, query: Query, wait: impl OwnerWait
                 .with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(owner, query)))
                 .unwrap_or_else(|| Answer::left_to_host(query))
         },
-    );
-    debug_assert!(answer.is_ok(), "the render owner panicked answering {query:?}");
-    Answer::of_outcome(query, answer)
+    )
 }
 
 /// The border box of the principal box of the element with `style_node` in `document` as its render state committed
@@ -1560,6 +1553,15 @@ pub extern "C" fn render_owner_committed_border_box(document: DocumentId, style_
         Answer::Geometry(answer) => answer,
         _ => FfiGeometryReadAnswer::default(),
     }
+}
+
+/// Makes the owner panic answering the calling thread, which waits for it, for a test of what a panicked owner does to
+/// the process: it ends it rather than leave the thread waiting.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_owner_panic_for_testing(document: DocumentId) {
+    // SAFETY: Internals' script API calls it, once per call.
+    let wait = unsafe { ScriptForcedRead::at_script_entry() };
+    let _ = crate::stage_thread::wait_for_owner_thread(wait, |reply| ToOwner::PanicForTesting { document, reply });
 }
 
 /// On a document thread: takes back the frame in flight of `document`, if any, so that a read finds the document as
@@ -1651,16 +1653,13 @@ pub(crate) fn run_style_transaction(
         then_layout,
         reply,
     });
-    match ran {
-        Some(ran) => ran.unwrap_or_else(|payload| std::panic::resume_unwind(payload)),
-        None => {
-            debug_assert!(false, "the style transaction of document {document:?} has no owner");
-            StyleJobAnswer {
-                view: crate::css::style::bridge::OwnerStyleTransactionView::unanswered(),
-                layout: None,
-            }
+    ran.unwrap_or_else(|| {
+        debug_assert!(false, "the style transaction of document {document:?} has no owner");
+        StyleJobAnswer {
+            view: crate::css::style::bridge::OwnerStyleTransactionView::unanswered(),
+            layout: None,
         }
-    }
+    })
 }
 
 /// On the owner: runs the style transaction `transaction` of `document`, and the layout frame's job `then_layout` right
@@ -2038,7 +2037,7 @@ mod tests {
     // The owner of a test build panics answering the style read of a document with no engine.
     #[cfg(debug_assertions)]
     #[test]
-    fn a_style_read_the_owner_panicked_answering_goes_unanswered_on_the_host() {
+    fn a_style_read_the_owner_panicked_answering_drops_its_reply() {
         let owner = std::thread::spawn(|| {
             let document = DocumentId::mint();
             let arena = Box::new(ArenaHandle::new_for(document, std::thread::current().id()));
@@ -2059,19 +2058,14 @@ mod tests {
             );
             let query = Query::Engine(cell.for_owner());
             let (reply, answered) = crate::stage_thread::owner_reply_for_test();
-            handle(ToOwner::Ask { document, query, reply });
-            let outcome = answered();
-            assert!(outcome.is_err(), "the owner panicked answering");
-            // The host takes the read as unanswered, and does not answer it again with the engine the owner left.
-            assert!(matches!(
-                Answer::of_outcome(query, outcome),
-                Answer::Engine(EngineAnswered::Unanswered)
-            ));
-            // A read the owner leaves to the host is the host's to answer.
-            assert!(matches!(
-                Answer::left_to_host(query),
-                Answer::Engine(EngineAnswered::LeftToHost)
-            ));
+            let owner = Owner::here();
+            let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                handle_message(&owner, ToOwner::Ask { document, query, reply });
+            }));
+            assert!(panicked.is_err(), "the owner panicked answering");
+            // The host finds no answer, which ends the process where it waits, rather than answer the read again with
+            // the engine the owner left.
+            assert!(answered().is_none());
             handle(ToOwner::Destroy { document });
             STATES.with_borrow(|states| states.is_empty())
         });
@@ -2099,7 +2093,7 @@ mod tests {
                     reply,
                 )),
             });
-            assert!(answered().is_ok(), "the pass answers");
+            assert!(answered().is_some(), "the pass answers");
             handle(ToOwner::Destroy { document });
             STATES.with_borrow(|states| states.is_empty())
         });

@@ -219,6 +219,7 @@ public:
     u64 clock_ticks_received() const;
     bool render_clock_ticks(DOM::Document const&) const;
     GC::Ptr<Geometry::DOMRect> presented_border_box(DOM::Element const&) const;
+    void panic_render_owner_for_testing();
     GC::Ref<JS::Object> get_render_clock_counters() const;
     GC::Ref<JS::Object> get_animation_timing_row_counters() const;
     GC::Ref<WebIDL::Promise> inject_clock_tick(double frame_time_ms);
