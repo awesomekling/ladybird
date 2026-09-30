@@ -39,6 +39,7 @@ use libweb_rust::css::style::cascade::CascadeOperator;
 use libweb_rust::css::style::cascade::SpecifiedValueID;
 use libweb_rust::css::style::fast_hash::FastMap;
 use libweb_rust::css::style::index::StyleAtomID;
+use libweb_rust::css::style::instrumentation::COUNTER_NAMES;
 use libweb_rust::css::style::memory::MEMORY_CATEGORIES;
 #[cfg(test)]
 use libweb_rust::css::style::memory::MemoryCategory;
@@ -52,6 +53,8 @@ use libweb_rust::css::style::record_replay::LogReader;
 use libweb_rust::css::style::record_replay::PayloadReader;
 use libweb_rust::css::style::record_replay::PayloadWriter;
 use libweb_rust::css::style::selector::SelectorProgram;
+use libweb_rust::css::style::tree::StyleNodeID;
+use libweb_rust::css::style::{OwnedStyleEngine, StyleEngineHandle};
 
 struct ReplayCustomPropertyRegistry(*mut c_void);
 
@@ -101,7 +104,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         // Engine IDs and style-record tokens are sequential counters in the recorder, so lookups
         // that run once per event index dense arrays instead of hashing. Replay is short-lived;
         // the arrays are sized by the largest token seen and never shrink.
-        let mut live_engines = Vec::<Option<*mut c_void>>::new();
+        let mut live_engines = Vec::<Option<OwnedStyleEngine>>::new();
         let mut match_answer_identity_mappings = Vec::<MatchAnswerIdentityMapping>::new();
         let mut engine_count = 0_u64;
         let mut event_count = 0_u64;
@@ -110,7 +113,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let mut element_fact_calls = 0_u64;
         let mut element_declaration_calls = 0_u64;
         let mut element_animation_name_calls = 0_u64;
-        let mut attribute_value_text_queries = 0_u64;
         let mut attribute_value_text_publications = 0_u64;
         let mut selector_program_sharing = SelectorProgramSharing::default();
         let mut flush_count = 0_u64;
@@ -154,7 +156,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 | EventKind::SetElementHeadingLevel => element_fact_calls += 1,
                 EventKind::SetElementDeclaredProperties => element_declaration_calls += 1,
                 EventKind::SetElementAnimationNames => element_animation_name_calls += 1,
-                EventKind::HasAttributeValueText => attribute_value_text_queries += 1,
                 EventKind::SetAttributeValueText => attribute_value_text_publications += 1,
                 _ => {}
             }
@@ -166,23 +167,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if device_class != 0 {
                         return Err(format!("engine {engine_id} has unknown device class {device_class}").into());
                     }
-                    let recorded_verification_gates = match event.payload.remaining_bytes() {
-                        0 => 0,
-                        _ => event.payload.read_u8()?,
-                    };
-                    require_matching_verification_gates(
-                        recorded_verification_gates,
-                        bridge::style_engine_verification_gate_bits(),
-                    )
-                    .map_err(|error| format!("engine {engine_id} {error}"))?;
                     let index = usize::try_from(engine_id)?;
                     if engine_id == 0 || live_engines.get(index).is_some_and(Option::is_some) {
                         return Err(format!("engine {engine_id} was created more than once").into());
                     }
                     let engine = bridge::style_engine_create_for_replay(bridge::FfiDeviceClass::ForegroundDesktop);
-                    unsafe { bridge::style_engine_use_recording_memory_policy(engine) };
+                    unsafe { bridge::use_recording_memory_policy_for_replay(engine.handle()) };
                     if live_engines.len() <= index {
-                        live_engines.resize(index + 1, None);
+                        live_engines.resize_with(index + 1, || None);
                         selector_program_sharing.resize_engines(index + 1);
                         match_answer_identity_mappings.resize_with(index + 1, MatchAnswerIdentityMapping::default);
                         computed_longhand_tables.resize_with(index + 1, Vec::new);
@@ -214,23 +206,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .ok_or_else(|| format!("engine {engine_id} was destroyed without being live"))?;
                     release_computed_longhand_tables(&mut computed_longhand_tables[engine_index]);
                     accumulate_memory_pressure(&mut memory_pressure, unsafe {
-                        bridge::replay_memory_pressure_snapshot(engine)
+                        bridge::replay_memory_pressure_snapshot(engine.handle())
                     });
-                    unsafe { bridge::style_engine_destroy(engine) };
                 }
-                EventKind::AllocateStyleNodes => {
+                EventKind::GrantStyleNodes => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let expected = event.payload.read_u32_vec()?;
-                    let mut actual = vec![0; expected.len()];
-                    unsafe { bridge::style_engine_allocate_style_nodes(engine, actual.as_mut_ptr(), actual.len()) };
-                    if actual != expected {
-                        return Err(
-                            format!("style-node allocation diverged: expected {expected:?}, got {actual:?}").into(),
-                        );
+                    let expected_elements = event.payload.read_u32_vec()?;
+                    let expected_texts = event.payload.read_u32_vec()?;
+                    let mut elements = vec![0; expected_elements.len()];
+                    let mut texts = vec![0; expected_texts.len()];
+                    unsafe { bridge::replay_grant_style_nodes(engine, &mut elements, &mut texts) };
+                    if elements != expected_elements || texts != expected_texts {
+                        return Err(format!(
+                            "style-node grant diverged: expected {expected_elements:?} and {expected_texts:?}, got {elements:?} and {texts:?}"
+                        )
+                        .into());
                     }
                 }
-                EventKind::ApplyTransaction => {
+                EventKind::MintStyleNodes => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
+                    let nodes = event.payload.read_u32_vec()?;
+                    unsafe { bridge::replay_mint_style_nodes(engine, &nodes, false) };
+                }
+                EventKind::MintTextStyleNodes => {
+                    let engine = read_engine(&mut event.payload, &live_engines)?;
+                    let nodes = event.payload.read_u32_vec()?;
+                    unsafe { bridge::replay_mint_style_nodes(engine, &nodes, true) };
+                }
+                EventKind::ApplyTransaction => {
+                    let (_, owned) = read_owned_engine(&mut event.payload, &live_engines)?;
+                    let engine = owned.handle();
                     // The row arrays are consumed in place from the mapped log; nothing is copied.
                     let tree = event.payload.read_raw_slice::<FfiTreeDelta>()?;
                     element_arrivals += tree
@@ -246,7 +251,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let row_count =
                         (tree.len() + features.len() + states.len() + declarations.len() + element_style_inputs.len())
                             as u64;
-                    *pending_changed_rows.entry(engine as usize).or_default() += row_count;
+                    *pending_changed_rows.entry(engine.address()).or_default() += row_count;
                     let transaction = FfiStyleInputTransaction {
                         tree_deltas: tree.as_ptr(),
                         tree_delta_count: tree.len(),
@@ -262,21 +267,30 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         element_declaration_delta_count: declarations.len(),
                         element_style_inputs: element_style_inputs.as_ptr(),
                         element_style_input_count: element_style_inputs.len(),
+                        // The host's fact writes are recorded as the boundary calls they stand for.
+                        host_fact_writes: std::ptr::null(),
+                        host_fact_write_count: 0,
+                        // So is the grant the transaction answered with.
+                        element_identity_grant: std::ptr::null_mut(),
+                        element_identity_grant_count: 0,
+                        text_identity_grant: std::ptr::null_mut(),
+                        text_identity_grant_count: 0,
                     };
-                    unsafe { bridge::style_engine_apply_transaction(engine, &transaction) };
+                    unsafe { bridge::style_engine_apply_transaction(owned.input_handle(), &transaction) };
                 }
                 EventKind::Flush => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
+                    let (_, owned) = read_owned_engine(&mut event.payload, &live_engines)?;
+                    let engine = owned.handle();
                     let counter_reader =
-                        amplification_counter_reader.get_or_insert_with(|| AmplificationCounterReader::new(engine));
+                        amplification_counter_reader.get_or_insert_with(|| AmplificationCounterReader::new());
                     let before = counter_reader.read(engine);
                     let detailed_before = options.detailed_counters.then(|| {
                         detailed_counter_reader
-                            .get_or_insert_with(|| DetailedCounterReader::new(engine))
+                            .get_or_insert_with(|| DetailedCounterReader::new())
                             .read(engine)
                     });
                     let start = Instant::now();
-                    unsafe { bridge::style_engine_flush(engine) };
+                    unsafe { bridge::style_engine_flush(owned.input_handle()) };
                     let elapsed = start.elapsed();
                     let after = counter_reader.read(engine);
                     let detailed_after = detailed_before
@@ -292,7 +306,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         &mut selected_boundary_time,
                         &mut phase_times,
                     );
-                    let changed_rows = pending_changed_rows.remove(&(engine as usize)).unwrap_or(0);
+                    let changed_rows = pending_changed_rows.remove(&engine.address()).unwrap_or(0);
                     if selected {
                         amplification.record(changed_rows, &before, &after);
                         if let (Some(before), Some(after)) = (&detailed_before, &detailed_after) {
@@ -323,12 +337,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let token = usize::try_from(event.payload.read_u64()?)?;
                     let expected = event.payload.read_u32()?;
-                    let actual = unsafe { bridge::style_engine_intern_atom(engine, token) };
+                    let actual = unsafe { bridge::replay_intern_atom(engine, token) };
                     assert_identity("atom", expected, actual)?;
-                }
-                EventKind::SelectorQueryAtomMappings => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    replay_atom_mappings(engine, &mut event.payload)?;
                 }
                 EventKind::ReplaceStyleRuleSelectors => {
                     let (engine_index, engine) = read_engine_indexed(&mut event.payload, &live_engines)?;
@@ -342,7 +352,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let node = event.payload.read_u32()?;
                     let kind = read_declaration_kind(&mut event.payload)?;
-                    let declarations_are_complete = event.payload.read_bool()?;
+                    // Recordings before version 17 said whether the declarations were complete, which they always were.
+                    if format_version < 17 {
+                        event.payload.read_bool()?;
+                    }
                     let declared = read_declared_properties(&mut event.payload)?;
                     let custom_declarations = read_custom_declarations(&mut event.payload)?;
                     unsafe {
@@ -352,7 +365,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             kind,
                             &declared,
                             &custom_declarations,
-                            declarations_are_complete,
                         );
                     };
                 }
@@ -375,24 +387,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 EventKind::SetRuleDeclaredProperties => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let rule = event.payload.read_u32()?;
-                    let declarations_are_complete = event.payload.read_bool()?;
+                    if format_version < 17 {
+                        event.payload.read_bool()?;
+                    }
                     let declared = read_declared_properties(&mut event.payload)?;
                     let custom_declarations = read_custom_declarations(&mut event.payload)?;
                     unsafe {
-                        bridge::replay_set_rule_declared_properties(
-                            engine,
-                            rule,
-                            &declared,
-                            &custom_declarations,
-                            declarations_are_complete,
-                        );
+                        bridge::replay_set_rule_declared_properties(engine, rule, &declared, &custom_declarations);
                     };
                 }
                 EventKind::TakeStyleTransaction => {
                     return Err("recording predates typed style delta batches".into());
                 }
                 EventKind::StyleDeltaBatch => {
-                    let (engine_index, engine) = read_engine_indexed(&mut event.payload, &live_engines)?;
+                    let (engine_index, owned) = read_owned_engine(&mut event.payload, &live_engines)?;
+                    let engine = owned.handle();
                     let root = event.payload.read_u32()?;
                     let computation_inputs = read_document_style_computation_inputs(
                         &mut event.payload,
@@ -413,16 +422,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         error: None,
                     };
                     let counter_reader =
-                        amplification_counter_reader.get_or_insert_with(|| AmplificationCounterReader::new(engine));
+                        amplification_counter_reader.get_or_insert_with(|| AmplificationCounterReader::new());
                     let before = counter_reader.read(engine);
                     let detailed_before = options.detailed_counters.then(|| {
                         detailed_counter_reader
-                            .get_or_insert_with(|| DetailedCounterReader::new(engine))
+                            .get_or_insert_with(|| DetailedCounterReader::new())
                             .read(engine)
                     });
                     if expected.style_atoms_swept {
                         unsafe {
-                            bridge::style_engine_set_replay_reclaimed_style_atoms(
+                            bridge::replay_set_reclaimed_style_atoms(
                                 engine,
                                 expected.reclaimed_atoms.as_ptr(),
                                 expected.reclaimed_atoms.len(),
@@ -430,8 +439,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     let start = Instant::now();
-                    let actual_view =
-                        unsafe { bridge::style_engine_take_style_transaction(engine, root, computation_inputs) };
+                    let actual_view = unsafe {
+                        bridge::style_engine_take_style_transaction(
+                            owned.input_handle(),
+                            root,
+                            computation_inputs,
+                            std::ptr::null_mut(),
+                            std::ptr::null(),
+                            bridge::FfiInstallFeedback {
+                                applied_style_reactions: std::ptr::null(),
+                                applied_style_reaction_count: 0,
+                                pseudo_element_settles: std::ptr::null(),
+                                pseudo_element_settle_count: 0,
+                            },
+                            bridge::FfiOwnerRenderHalf {
+                                applies: false,
+                                viewport_propagation_sources: std::ptr::null(),
+                                viewport_propagation_source_count: 0,
+                            },
+                        )
+                    };
                     let actual_reclaimed_atoms = if actual_view.reclaimed_style_atom_count == 0 {
                         Vec::new()
                     } else {
@@ -483,7 +510,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         &mut selected_boundary_time,
                         &mut phase_times,
                     );
-                    let changed_rows = pending_changed_rows.remove(&(engine as usize)).unwrap_or(0);
+                    let changed_rows = pending_changed_rows.remove(&engine.address()).unwrap_or(0);
                     if selected {
                         amplification.record(changed_rows, &before, &after);
                         if let (Some(before), Some(after)) = (&detailed_before, &detailed_after) {
@@ -525,34 +552,34 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         names.push(event.payload.read_u32()?);
                         hosts.push(event.payload.read_u32()?);
                     }
-                    unsafe {
-                        bridge::style_engine_set_element_parts(engine, node, names.as_ptr(), hosts.as_ptr(), count)
-                    };
+                    unsafe { bridge::replay_set_element_parts(engine, node, &names, &hosts) };
+                }
+                EventKind::SetTextData => {
+                    // A text node's characters are read by the layout tree build and by nothing in
+                    // the style engine, so replay reads the record past and publishes nothing. The
+                    // string would have to be built through AK, which this binary does not link.
+                    let _ = read_engine(&mut event.payload, &live_engines)?;
+                    let _ = event.payload.read_u32()?;
+                    let _ = event.payload.read_u16_vec()?;
                 }
                 EventKind::SetElementLanguage => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let node = event.payload.read_u32()?;
                     let language = event.payload.read_u32()?;
                     let text = event.payload.read_u16_vec()?;
-                    let text_pointer = match text.is_empty() {
-                        true => std::ptr::null(),
-                        false => text.as_ptr(),
-                    };
-                    unsafe {
-                        bridge::style_engine_set_element_language(engine, node, language, text_pointer, text.len())
-                    };
+                    unsafe { bridge::replay_set_element_language(engine, node, language, &text) };
                 }
                 EventKind::MatchDocument => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
+                    let (_, engine) = read_owned_engine(&mut event.payload, &live_engines)?;
                     let root = event.payload.read_u32()?;
                     let expected = usize::try_from(event.payload.read_u64()?)?;
-                    let actual = unsafe { bridge::style_engine_match_document(engine, root) };
+                    let actual = unsafe { bridge::style_engine_match_document(engine.input_handle(), root) };
                     if actual != expected {
                         return Err(format!("document match count diverged: expected {expected}, got {actual}").into());
                     }
                 }
                 EventKind::MatchElement => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
+                    let (_, engine) = read_owned_engine(&mut event.payload, &live_engines)?;
                     let node = event.payload.read_u32()?;
                     let capacity = usize::try_from(event.payload.read_u64()?)?;
                     let compact_for_cascade = event.payload.read_bool()?;
@@ -575,7 +602,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     ];
                     let actual_result = unsafe {
                         bridge::style_engine_match_element(
-                            engine,
+                            engine.input_handle(),
                             node,
                             actual.as_mut_ptr(),
                             capacity,
@@ -600,7 +627,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let (engine_index, engine) = read_engine_indexed(&mut event.payload, &live_engines)?;
                     let node = event.payload.read_u32()?;
                     let expected = event.payload.read_u32()?;
-                    let actual = unsafe { bridge::style_engine_match_element_signature(engine, node) };
+                    let actual = StyleNodeID::from_raw(node)
+                        .and_then(|node| unsafe { engine.for_replay() }.match_element_signature(node))
+                        .unwrap_or(0);
                     match_answer_identity_mappings[engine_index]
                         .record(expected, actual)
                         .map_err(|error| format!("element match signature {error}"))?;
@@ -609,7 +638,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let (engine_index, engine) = read_engine_indexed(&mut event.payload, &live_engines)?;
                     let node = event.payload.read_u32()?;
                     let expected = event.payload.read_u32()?;
-                    let actual = unsafe { bridge::style_engine_published_match_answer_signature(engine, node) };
+                    let actual = StyleNodeID::from_raw(node)
+                        .and_then(|node| unsafe { engine.for_replay() }.published_match_answer_signature(node))
+                        .unwrap_or(0);
                     match_answer_identity_mappings[engine_index]
                         .record(expected, actual)
                         .map_err(|error| format!("published match answer signature {error}"))?;
@@ -624,72 +655,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 EventKind::ConsumePublishedMatchAnswer => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let node = event.payload.read_u32()?;
-                    let capacity = usize::try_from(event.payload.read_u64()?)?;
-                    let expected_result = usize::try_from(event.payload.read_u64()?)?;
-                    let has_output = event.payload.read_bool()?;
-                    let expected = match has_output {
-                        true => read_rule_matches(&mut event.payload)?,
-                        false => Vec::new(),
-                    };
-                    let mut actual = vec![
-                        FfiRuleMatch {
-                            node: 0,
-                            rule: 0,
-                            semantic_declaration: 0,
-                            pseudo_element: 0,
-                            scope_host: 0,
-                            scope_proximity: 0,
-                        };
-                        capacity
-                    ];
-                    let actual_result = unsafe {
-                        bridge::style_engine_consume_published_match_answer(engine, node, actual.as_mut_ptr(), capacity)
-                    };
-                    if actual_result != expected_result {
-                        return Err(format!(
-                        "published match consumption diverged for node {node}: expected count {expected_result}, got {actual_result}"
-                    )
-                    .into());
-                    }
-                    if has_output && !rule_matches_equal(&actual[..actual_result], &expected) {
-                        return Err(format!(
-                            "published matches diverged for node {node}: expected {expected:?}, got {:?}",
-                            &actual[..actual_result]
-                        )
-                        .into());
-                    }
-                }
-                EventKind::CompletePublishedMatchAnswersForClosure => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let nodes = event.payload.read_u32_vec()?;
-                    let expected = event.payload.read_bool()?;
-                    let actual = unsafe {
-                        bridge::style_engine_complete_published_match_answers_for_closure(
-                            engine,
-                            nodes.as_ptr(),
-                            nodes.len(),
-                        )
-                    };
-                    if actual != expected {
-                        return Err(format!(
-                            "published match closure completion diverged: expected {expected}, got {actual}"
-                        )
-                        .into());
-                    }
+                    return Err("the recording predates the host reading only the matches it asks for".into());
                 }
                 EventKind::ForEachFlatTreeDescendant => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let root = event.payload.read_u32()?;
                     let expected = event.payload.read_u32_vec()?;
-                    let view = unsafe { bridge::style_engine_flat_tree_descendants(engine, root) };
+                    let view = unsafe { bridge::replay_flat_tree_descendants(engine, root) };
                     let actual = if view.count == 0 {
                         Vec::new()
                     } else {
                         unsafe { std::slice::from_raw_parts(view.nodes, view.count) }.to_vec()
                     };
-                    unsafe { bridge::style_engine_discard_flat_tree_descendants(engine) };
+                    unsafe { bridge::replay_discard_flat_tree_descendants(engine) };
                     if actual != expected {
                         return Err(format!(
                             "flat-tree descendants diverged for node {root}: expected {expected:?}, got {actual:?}"
@@ -697,82 +675,56 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .into());
                     }
                 }
-                EventKind::BeginColdMatchingBatch => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let root = event.payload.read_u32()?;
-                    let expected = event.payload.read_bool()?;
-                    let start = Instant::now();
-                    let actual = unsafe { bridge::style_engine_begin_cold_matching_batch(engine, root) };
-                    let elapsed = start.elapsed();
-                    boundary_time += elapsed;
-                    record_boundary_timing(
-                        &options.selection,
-                        active_phase.as_ref(),
-                        elapsed,
-                        &mut selected_boundary_time,
-                        &mut phase_times,
-                    );
-                    if actual != expected {
-                        return Err(
-                            format!("cold matching batch result diverged: expected {expected}, got {actual}").into(),
-                        );
-                    }
+                EventKind::SettlePseudoRecordsAfterHostRecord => {
+                    return Err("the recording predates the pass settling pseudo-elements the host left owed".into());
                 }
-                EventKind::BeginAdaptiveColdMatchingBatch => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let root = event.payload.read_u32()?;
-                    let start = Instant::now();
-                    unsafe { bridge::style_engine_begin_adaptive_cold_matching_batch(engine, root) };
-                    let elapsed = start.elapsed();
-                    boundary_time += elapsed;
-                    record_boundary_timing(
-                        &options.selection,
-                        active_phase.as_ref(),
-                        elapsed,
-                        &mut selected_boundary_time,
-                        &mut phase_times,
-                    );
-                }
-                EventKind::EndColdMatchingBatch => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let start = Instant::now();
-                    unsafe { bridge::style_engine_end_cold_matching_batch(engine) };
-                    let elapsed = start.elapsed();
-                    boundary_time += elapsed;
-                    record_boundary_timing(
-                        &options.selection,
-                        active_phase.as_ref(),
-                        elapsed,
-                        &mut selected_boundary_time,
-                        &mut phase_times,
-                    );
-                }
-                EventKind::RetryEngineRecordAfterAncestor => {
+                EventKind::AnswerRecordDemand => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let node = event.payload.read_u32()?;
-                    let expected = event.payload.read_u64()?;
-                    let expected_uses_substitution = if format_version >= 16 {
-                        Some(event.payload.read_bool()?)
-                    } else {
-                        None
-                    };
-                    let actual = unsafe { bridge::style_engine_retry_engine_record_after_ancestor(engine, node) };
-                    if actual.style_record != expected
-                        || expected_uses_substitution.is_some_and(|expected| actual.uses_substitution != expected)
-                    {
-                        return Err(format!(
-                            "retried cold style record diverged for node {node}: expected {expected} (substitution {expected_uses_substitution:?}), got {actual:?}"
+                    let pseudo_kind = event.payload.read_u8()?;
+                    let exclude_inline_style = event.payload.read_bool()?;
+                    let targeted = event.payload.read_bool()?;
+                    let read_only = event.payload.read_bool()?;
+                    let parent_highlight = event.payload.read_u64()?;
+                    let expected_record = event.payload.read_u64()?;
+                    let expected_absent = event.payload.read_bool()?;
+                    let expected_uses_substitution = event.payload.read_bool()?;
+                    let expected_pseudo_present = event.payload.read_u8()?;
+                    let mut expected_pseudo_records = [0_u64; bridge::RETRY_PSEUDO_RECORD_SLOTS];
+                    for record in &mut expected_pseudo_records {
+                        *record = event.payload.read_u64()?;
+                    }
+                    // A demand no longer declines; older recordings name no cause either.
+                    let _ = event.payload.read_bytes()?;
+                    let actual = unsafe {
+                        bridge::replay_answer_read_demand(
+                            engine,
+                            node,
+                            pseudo_kind,
+                            exclude_inline_style,
+                            targeted,
+                            read_only,
+                            parent_highlight,
                         )
-                        .into());
+                    };
+                    if actual.record.style_record != expected_record
+                        || actual.is_absent != expected_absent
+                        || actual.record.uses_substitution != expected_uses_substitution
+                        || actual.record.pseudo_records_present != expected_pseudo_present
+                        || actual.record.pseudo_records != expected_pseudo_records
+                    {
+                        return Err(format!("record demand diverged for node {node}: {:?}", actual.record).into());
                     }
                 }
                 EventKind::RemoveComputedPseudo => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
+                    let (_, engine) = read_owned_engine(&mut event.payload, &live_engines)?;
                     let node = event.payload.read_u32()?;
                     let pseudo_kind = event.payload.read_u8()?;
                     let expected_old = event.payload.read_u64()?;
                     let expected_new = event.payload.read_u64()?;
-                    let actual = unsafe { bridge::style_engine_remove_computed_pseudo(engine, node, pseudo_kind) };
+                    let actual = unsafe {
+                        bridge::style_engine_remove_computed_pseudo(engine.input_handle(), node, pseudo_kind)
+                    };
                     if (actual.old_style_record, actual.new_style_record) != (expected_old, expected_new) {
                         return Err(format!(
                             "removed pseudo style records diverged: expected ({expected_old}, {expected_new}), got ({}, {})",
@@ -789,18 +741,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         true => Some((event.payload.read_bytes()?.to_vec(), event.payload.read_u64()?)),
                         false => None,
                     };
-                    let mut actual_value = 0;
-                    let mut actual_name_length = 0;
-                    let actual_name = unsafe {
-                        bridge::style_engine_counter(engine, index, &mut actual_value, &mut actual_name_length)
-                    };
-                    let actual = match actual_name.is_null() {
-                        true => None,
-                        false => Some((
-                            unsafe { std::slice::from_raw_parts(actual_name, actual_name_length) }.to_vec(),
-                            actual_value,
-                        )),
-                    };
+                    let actual = unsafe { engine.for_replay() }
+                        .counters()
+                        .iter()
+                        .nth(index)
+                        .map(|(name, value)| (name.as_bytes().to_vec(), value));
                     if actual != expected {
                         return Err(format!("counter {index} diverged: expected {expected:?}, got {actual:?}").into());
                     }
@@ -833,8 +778,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             property: event.payload.read_u16()?,
                             value: event.payload.read_u64()?,
                             operator: read_cascade_operator(&mut event.payload)?,
-                            animation_relevance: event.payload.read_u32()?,
-                            important: event.payload.read_bool()?,
+                            important: {
+                                // The recording still carries the retired animation relevance.
+                                event.payload.read_u32()?;
+                                event.payload.read_bool()?
+                            },
                         });
                     }
                     let expected = read_exact_cascade_publication(&mut event.payload)?;
@@ -874,7 +822,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 EventKind::PublishComputedGroups => {
-                    let (engine_index, engine) = read_engine_indexed(&mut event.payload, &live_engines)?;
+                    let (engine_index, engine) = read_owned_engine(&mut event.payload, &live_engines)?;
                     let node = event.payload.read_u32()?;
                     let pseudo_kind = event.payload.read_u8()?;
                     let group_count = event.payload.read_length()?;
@@ -1016,7 +964,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     };
                     let actual = unsafe {
                         bridge::style_engine_publish_computed_groups(
-                            engine,
+                            engine.input_handle(),
                             node,
                             pseudo_kind,
                             computed_group_payloads.as_ptr(),
@@ -1080,7 +1028,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .get(index)
                         .and_then(Option::as_ref)
                         .ok_or_else(|| format!("style record {style_record} payload response was not defined"))?;
-                    let actual = unsafe { bridge::style_engine_style_record_payloads(engine, style_record) };
+                    let actual = unsafe { bridge::replay_style_record_payloads(engine, style_record) };
                     if actual.is_null() == expected.is_some() {
                         return Err(format!("style record {style_record} payload presence diverged").into());
                     }
@@ -1125,7 +1073,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .get(index)
                         .and_then(Option::as_ref)
                         .ok_or_else(|| format!("style record {style_record} view response was not defined"))?;
-                    let actual = unsafe { bridge::style_engine_style_record_view(engine, style_record) };
+                    let actual = unsafe { bridge::replay_style_record_view(engine, style_record) };
                     if actual.present != expected.is_some() {
                         return Err(format!("style record {style_record} view presence diverged").into());
                     }
@@ -1139,19 +1087,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                EventKind::AttributeValueTextRequirementsVersion => {
-                    let _engine = read_engine(&mut event.payload, &live_engines)?;
-                    let _recorded_version = event.payload.read_u64()?;
-                }
-                EventKind::AttributeNameRequiresValueText => {
-                    let _engine = read_engine(&mut event.payload, &live_engines)?;
-                    let _name = event.payload.read_u32()?;
-                    let _recorded_result = event.payload.read_bool()?;
-                }
                 EventKind::HasDeferredGeometryTransaction => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let expected = event.payload.read_bool()?;
-                    let actual = unsafe { bridge::style_engine_has_deferred_geometry_transaction(engine) };
+                    let actual = unsafe { engine.for_replay() }.has_deferred_geometry_transaction();
                     if actual != expected {
                         return Err(format!(
                             "deferred geometry transaction presence diverged: expected {expected}, got {actual}"
@@ -1162,7 +1101,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 EventKind::PendingTransactionMayAffectLayoutGeometry => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let expected = event.payload.read_bool()?;
-                    let actual = unsafe { bridge::style_engine_pending_transaction_may_affect_layout_geometry(engine) };
+                    let actual = unsafe { engine.for_replay() }.pending_transaction_may_affect_layout_geometry();
                     if actual != expected {
                         return Err(
                             format!("pending geometry effect diverged: expected {expected}, got {actual}").into(),
@@ -1170,9 +1109,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 EventKind::DeferPendingTransactionForGeometryRead => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
+                    let (_, engine) = read_owned_engine(&mut event.payload, &live_engines)?;
                     let expected = event.payload.read_bool()?;
-                    let actual = unsafe { bridge::style_engine_defer_pending_transaction_for_geometry_read(engine) };
+                    let actual = unsafe {
+                        bridge::style_engine_defer_pending_transaction_for_geometry_read(engine.input_handle())
+                    };
                     if actual != expected {
                         return Err(format!(
                             "geometry transaction deferral diverged: expected {expected}, got {actual}"
@@ -1181,9 +1122,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 EventKind::BeginDeferredGeometryTransactionFlush => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
+                    let (_, engine) = read_owned_engine(&mut event.payload, &live_engines)?;
                     let expected = event.payload.read_bool()?;
-                    let actual = unsafe { bridge::style_engine_begin_deferred_geometry_transaction_flush(engine) };
+                    let actual = unsafe {
+                        bridge::style_engine_begin_deferred_geometry_transaction_flush(engine.input_handle())
+                    };
                     if actual != expected {
                         return Err(format!(
                             "deferred geometry flush start diverged: expected {expected}, got {actual}"
@@ -1192,8 +1135,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 EventKind::EndDeferredGeometryTransactionFlush => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    unsafe { bridge::style_engine_end_deferred_geometry_transaction_flush(engine) };
+                    let (_, engine) = read_owned_engine(&mut event.payload, &live_engines)?;
+                    unsafe { bridge::style_engine_end_deferred_geometry_transaction_flush(engine.input_handle()) };
                 }
                 kind => return Err(format!("unhandled StyleEngine replay event {kind:?}").into()),
             }
@@ -1205,9 +1148,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         for engine in live_engines.into_iter().flatten() {
             accumulate_memory_pressure(&mut memory_pressure, unsafe {
-                bridge::replay_memory_pressure_snapshot(engine)
+                bridge::replay_memory_pressure_snapshot(engine.handle())
             });
-            unsafe { bridge::style_engine_destroy(engine) };
         }
         println!(
             "replayed {} events and {} flushes for {} document engines in {:.3} ms ({} live at capture exit) from {}",
@@ -1260,7 +1202,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
             println!("  elementDeclarationCalls: {element_declaration_calls}");
             println!("  elementAnimationNameCalls: {element_animation_name_calls}");
-            println!("  attributeValueTextQueries: {attribute_value_text_queries}");
             println!("  attributeValueTextPublications: {attribute_value_text_publications}");
             println!(
                 "  selectorProgramCompilations: {}",
@@ -1291,7 +1232,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "element_fact_calls_per_arrival": element_fact_calls as f64 / element_arrivals.max(1) as f64,
                 "element_declaration_calls": element_declaration_calls,
                 "element_animation_name_calls": element_animation_name_calls,
-                "attribute_value_text_queries": attribute_value_text_queries,
                 "attribute_value_text_publications": attribute_value_text_publications,
                 "selector_program_compilations": selector_program_sharing.compilations,
                 "selector_programs_distinct_documents": selector_program_sharing.document_distinct_count(),
@@ -1600,22 +1540,13 @@ struct DetailedCounterLedger {
 }
 
 impl DetailedCounterReader {
-    fn new(engine: *mut c_void) -> Self {
-        let mut names = Vec::new();
-        for index in 0.. {
-            let mut value = 0_u64;
-            let mut name_length = 0_usize;
-            let name = unsafe { bridge::style_engine_counter(engine, index, &mut value, &mut name_length) };
-            if name.is_null() {
-                break;
-            }
-            let name = unsafe { std::slice::from_raw_parts(name, name_length) };
-            names.push(String::from_utf8(name.to_vec()).unwrap());
+    fn new() -> Self {
+        Self {
+            names: COUNTER_NAMES.iter().map(|name| (*name).to_owned()).collect(),
         }
-        Self { names }
     }
 
-    fn read(&self, engine: *mut c_void) -> Vec<u64> {
+    fn read(&self, engine: StyleEngineHandle) -> Vec<u64> {
         (0..self.names.len())
             .map(|index| read_counter_value(engine, index))
             .collect()
@@ -1657,7 +1588,7 @@ impl DetailedCounterLedger {
 }
 
 impl AmplificationCounterReader {
-    fn new(engine: *mut c_void) -> Self {
+    fn new() -> Self {
         let mut reader = Self {
             ingress_touched: usize::MAX,
             selector_changed: Vec::new(),
@@ -1667,15 +1598,8 @@ impl AmplificationCounterReader {
             cascade_changed: usize::MAX,
             cascade_touched: usize::MAX,
         };
-        for index in 0.. {
-            let mut value = 0_u64;
-            let mut name_length = 0_usize;
-            let name = unsafe { bridge::style_engine_counter(engine, index, &mut value, &mut name_length) };
-            if name.is_null() {
-                break;
-            }
-            let name = unsafe { std::slice::from_raw_parts(name, name_length) };
-            match name {
+        for (index, name) in COUNTER_NAMES.iter().enumerate() {
+            match name.as_bytes() {
                 b"normalizedUniqueKeys" => reader.ingress_touched = index,
                 b"selectorTruthAdditions" | b"selectorTruthRemovals" => reader.selector_changed.push(index),
                 b"candidateChecks"
@@ -1708,7 +1632,7 @@ impl AmplificationCounterReader {
         reader
     }
 
-    fn read(&self, engine: *mut c_void) -> AmplificationCounters {
+    fn read(&self, engine: StyleEngineHandle) -> AmplificationCounters {
         let sum = |indices: &[usize]| indices.iter().map(|&index| read_counter_value(engine, index)).sum();
         AmplificationCounters {
             ingress_touched: read_counter_value(engine, self.ingress_touched),
@@ -1785,11 +1709,12 @@ fn amplification_stage_report(changed_rows: u64, touched_rows: u64, flushes: u64
     })
 }
 
-fn read_counter_value(engine: *mut c_void, index: usize) -> u64 {
-    let mut value = 0_u64;
-    let mut name_length = 0_usize;
-    let name = unsafe { bridge::style_engine_counter(engine, index, &mut value, &mut name_length) };
-    assert!(!name.is_null(), "cached counter index is out of range");
+fn read_counter_value(engine: StyleEngineHandle, index: usize) -> u64 {
+    let (_, value) = unsafe { engine.for_replay() }
+        .counters()
+        .iter()
+        .nth(index)
+        .expect("cached counter index is out of range");
     value
 }
 
@@ -1980,16 +1905,23 @@ fn read_document_style_computation_inputs(
 }
 
 #[inline]
+fn read_owned_engine<'a>(
+    payload: &mut PayloadReader,
+    live_engines: &'a [Option<OwnedStyleEngine>],
+) -> Result<(usize, &'a OwnedStyleEngine), Box<dyn std::error::Error>> {
+    let engine_id = payload.read_u64()?;
+    usize::try_from(engine_id)
+        .ok()
+        .and_then(|index| Some((index, live_engines.get(index)?.as_ref()?)))
+        .map_or_else(|| engine_not_live(engine_id), Ok)
+}
+
+#[inline]
 fn read_engine_indexed(
     payload: &mut PayloadReader,
-    live_engines: &[Option<*mut c_void>],
-) -> Result<(usize, *mut c_void), Box<dyn std::error::Error>> {
-    let engine_id = payload.read_u64()?;
-    let index = usize::try_from(engine_id)?;
-    let Some(pointer) = live_engines.get(index).copied().flatten() else {
-        return engine_not_live(engine_id);
-    };
-    Ok((index, pointer))
+    live_engines: &[Option<OwnedStyleEngine>],
+) -> Result<(usize, StyleEngineHandle), Box<dyn std::error::Error>> {
+    read_owned_engine(payload, live_engines).map(|(index, engine)| (index, engine.handle()))
 }
 
 fn release_computed_longhand_tables(
@@ -2012,16 +1944,9 @@ fn style_record_replay_index(style_record: u64) -> Result<usize, std::num::TryFr
 #[inline]
 fn read_engine(
     payload: &mut PayloadReader,
-    live_engines: &[Option<*mut c_void>],
-) -> Result<*mut c_void, Box<dyn std::error::Error>> {
-    let engine_id = payload.read_u64()?;
-    let Some(pointer) = usize::try_from(engine_id)
-        .ok()
-        .and_then(|index| live_engines.get(index).copied().flatten())
-    else {
-        return engine_not_live(engine_id);
-    };
-    Ok(pointer)
+    live_engines: &[Option<OwnedStyleEngine>],
+) -> Result<StyleEngineHandle, Box<dyn std::error::Error>> {
+    read_owned_engine(payload, live_engines).map(|(_, engine)| engine.handle())
 }
 
 #[cold]
@@ -2220,10 +2145,20 @@ fn read_style_transaction_outputs(
                     0 => FfiStyleDeltaGap::None,
                     1 => FfiStyleDeltaGap::Materialize,
                     2 => FfiStyleDeltaGap::Computed,
-                    3 => FfiStyleDeltaGap::RetryAfterAncestor,
+                    4 => FfiStyleDeltaGap::SkippedHidden,
+                    5 => FfiStyleDeltaGap::RetriedAfterAncestors,
+                    6 => FfiStyleDeltaGap::RetriedMaterialization,
+                    7 => FfiStyleDeltaGap::EnvironmentMoved,
+                    8 => FfiStyleDeltaGap::PseudoElementsSettled,
                     tag => return Err(format!("unknown style delta gap tag {tag}").into()),
                 },
                 uses_substitution: format_version >= 16 && payload.read_bool()?,
+                // The trace records no damage: a replay compares only what the engine publishes
+                // for the host to act on, and it computes the damage it answers with again.
+                record_damage: 0,
+                row_facts: 0,
+                explicit_inheritance_debt: 0,
+                row_effect_debt: 0,
             });
         }
         emissions.push(StyleTransactionEmission {
@@ -2279,21 +2214,29 @@ fn write_style_transaction_outputs(
     payload.write_u32_slice(&outputs.reclaimed_atoms);
 }
 
-fn replay_atom_mappings(engine: *mut c_void, payload: &mut PayloadReader) -> Result<(), Box<dyn std::error::Error>> {
+fn replay_atom_mappings(
+    engine: StyleEngineHandle,
+    payload: &mut PayloadReader,
+) -> Result<(), Box<dyn std::error::Error>> {
     let count = payload.read_length()?;
     for _ in 0..count {
         match payload.read_u8()? {
             0 => {
                 let token = usize::try_from(payload.read_u64()?)?;
                 let expected = payload.read_u32()?;
-                let actual = unsafe { bridge::style_engine_intern_atom(engine, token) };
+                let actual = unsafe { bridge::replay_intern_atom(engine, token) };
                 assert_identity("selector atom", expected, actual)?;
             }
             1 => {
                 let namespace = payload.read_u32()?;
                 let name = payload.read_u32()?;
                 let expected = payload.read_u32()?;
-                let actual = unsafe { bridge::style_engine_intern_qualified_atom(engine, namespace, name) };
+                let actual = unsafe {
+                    engine
+                        .for_replay()
+                        .intern_qualified_atom(StyleAtomID(namespace), StyleAtomID(name))
+                        .0
+                };
                 assert_identity("selector qualified atom", expected, actual)?;
             }
             tag => return Err(format!("unknown selector atom mapping tag {tag}").into()),
@@ -2361,16 +2304,6 @@ fn exact_cascade_publications_match(
         actual.computed_group_mask = expected.computed_group_mask;
     }
     actual == expected
-}
-
-fn require_matching_verification_gates(recorded: u8, actual: u8) -> Result<(), String> {
-    if recorded == actual {
-        Ok(())
-    } else {
-        Err(format!(
-            "verification gates diverged: recording used {recorded:#04x}, replay uses {actual:#04x}"
-        ))
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2726,6 +2659,14 @@ extern "C" fn ladybird_rust_panic_will_abort() {}
 
 #[unsafe(no_mangle)]
 extern "C" fn ladybird_utf16_fly_string_unref(_raw: usize) {}
+// A text node's published characters are the only owned AK::Utf16String the engine holds, and
+// replay never publishes one, so nothing here ever owns a reference to release.
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_utf16_string_unref(_raw: usize) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_utf16_string_create_uninitialized(_length: usize, _has_ascii_storage: bool) -> usize {
+    panic!("style replay must not build strings through the document thread's allocator");
+}
 #[unsafe(no_mangle)]
 extern "C" fn ladybird_utf16_fly_string_from_utf16(_data: *const u16, _length: usize) -> usize {
     panic!("style replay must use recorded atoms instead of the document-thread string interner");
@@ -2734,6 +2675,110 @@ extern "C" fn ladybird_utf16_fly_string_from_utf16(_data: *const u16, _length: u
 extern "C" fn ladybird_gfx_font_cascade_list_ref(_list: *const c_void) {}
 #[unsafe(no_mangle)]
 extern "C" fn ladybird_gfx_font_cascade_list_unref(_list: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_font_cascade_list_frozen(_list: *const c_void) -> *const c_void {
+    std::ptr::null()
+}
+// Replay has no fonts to compare, so a list is equal only to itself, and a record move's damage
+// counts any other list as a change.
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_font_cascade_list_equals(list: *const c_void, other: *const c_void) -> bool {
+    list == other
+}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_font_unref(_font: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_typeface_ref(_typeface: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_typeface_unref(_typeface: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_libweb_font_cascade_memo_ref(_memo: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_libweb_font_cascade_memo_unref(_memo: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_note_wanted_pending_face(_face_id: u64) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_requeue_wanted_pending_face(_face_id: u64) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_set_wanted_face_owner(_owner: u64) -> u64 {
+    0
+}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_take_wanted_pending_faces(
+    _owner: u64,
+    _context: *mut c_void,
+    _visit: extern "C" fn(*mut c_void, u64, bool),
+) {
+}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_next_path_identity() -> u64 {
+    1
+}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_register_image_frame(_id: u64, _frame: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_forget_image_frame(_id: u64, _frame: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_image_frame_for_id(_id: u64, _out: *mut c_void) -> *mut c_void {
+    std::ptr::null_mut()
+}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_note_crate_copy(_marker: *const c_void) {}
+
+// Replay publishes no element custom-property environments, so the engine holds no reference to a
+// C++ `CustomPropertyData` and there is none to take or give up here.
+#[unsafe(no_mangle)]
+extern "C" fn web_css_custom_property_data_reference(_data: *const c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn web_css_custom_property_data_unreference(_data: *const c_void) {}
+
+// Replay runs no layout: the render state each engine is born with holds no box, path, image or text run whose
+// release or measurement would reach LibGfx or LibUnicode.
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_path_destroy(_path: *mut c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_decoded_image_frame_release(_frame: *mut c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_layout_owned_image_provider_notify_detach(_provider: *mut c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_layout_owned_image_provider_destroy(_provider: *mut c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_layout_image_observers_destroy(_observers: *mut c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn unicode_layout_segmenter_destroy(_handle: *mut c_void) {}
+#[unsafe(no_mangle)]
+extern "C" fn unicode_layout_word_boundaries(
+    _text: *const u16,
+    _length: usize,
+    _offset: usize,
+    _start: *mut usize,
+    _end: *mut usize,
+) {
+    panic!("style replay runs no layout");
+}
+#[unsafe(no_mangle)]
+extern "C" fn unicode_text_may_require_bidi_processing(_text: *const u16, _length: usize) -> bool {
+    panic!("style replay runs no layout");
+}
+// The layout text transform's output sink: a context and two callbacks.
+#[repr(C)]
+struct UnicodeTextMappingOutput([*mut c_void; 3]);
+#[unsafe(no_mangle)]
+extern "C" fn unicode_apply_case_mapping(
+    _text: *const u16,
+    _length: usize,
+    _mapping: u8,
+    _locale: *const u16,
+    _locale_length: usize,
+    _preserve_existing: bool,
+    _output: UnicodeTextMappingOutput,
+) {
+    panic!("style replay runs no layout");
+}
+#[unsafe(no_mangle)]
+extern "C" fn unicode_apply_fullwidth_mapping(_text: *const u16, _length: usize, _output: UnicodeTextMappingOutput) {
+    panic!("style replay runs no layout");
+}
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn unicode_rust_idna_to_ascii(
@@ -2841,15 +2886,6 @@ mod tests {
         assert!(exact_cascade_publications_match(expected, actual, false));
         actual.unchanged = true;
         assert!(!exact_cascade_publications_match(expected, actual, false));
-    }
-
-    #[test]
-    fn mismatched_verification_gates_are_rejected() {
-        assert!(require_matching_verification_gates(0b0101, 0b0101).is_ok());
-        assert_eq!(
-            require_matching_verification_gates(0b0101, 0b0001).unwrap_err(),
-            "verification gates diverged: recording used 0x05, replay uses 0x01"
-        );
     }
 
     #[test]
@@ -2973,6 +3009,10 @@ mod tests {
                     pseudo_kind: u8::MAX,
                     gap: FfiStyleDeltaGap::Computed,
                     uses_substitution: true,
+                    record_damage: 0,
+                    row_facts: 0,
+                    explicit_inheritance_debt: 0,
+                    row_effect_debt: 0,
                 }],
             }],
             style_atoms_swept: false,
