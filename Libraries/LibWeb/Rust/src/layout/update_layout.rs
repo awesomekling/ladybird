@@ -1653,9 +1653,8 @@ impl LayoutFrame {
         else {
             return PartialRelayout::NotEligible;
         };
-        for &root in &partial_relayout_roots {
-            debug_assert!(self.arena().slot_is_live(root));
-            debug_assert!(node_facts::kind_is_box(self.arena().data(root).kind.get()));
+        for boundary in &partial_relayout_roots {
+            debug_assert!(node_facts::kind_is_box(self.arena().data(boundary.root()).kind.get()));
         }
 
         let state = self.state();
@@ -1664,19 +1663,19 @@ impl LayoutFrame {
         // planned boundaries and the viewport box stay live across them, and no row was freed
         // since the sources were read.
         unsafe { apply_enrolled_content_sources(state, content) };
-        for &root in &partial_relayout_roots {
+        for &boundary in &partial_relayout_roots {
             // The next boundary's pass starts from the arena the previous commit settled; the
             // commit's host half waits for the next join.
             let output = unsafe {
                 compute_subtree_layout_fragments(
                     state,
-                    root,
+                    boundary,
                     facts.viewport_inline_size_raw,
                     facts.viewport_block_size_raw,
                     facts.document_in_quirks_mode,
                 )
             };
-            let pending_commit = unsafe { commit_subtree_layout_to_arena(state, root, &output) };
+            let pending_commit = unsafe { commit_subtree_layout_to_arena(state, boundary.root(), &output) };
             self.settle_commit_ahead_of_host(pending_commit);
         }
 

@@ -2755,7 +2755,11 @@ unsafe fn commit_entry_pass_to_arena(
 }
 
 /// The host-free partial layout stage. Its input carries no host table or main-thread capability.
-fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -> LayoutStageOutput {
+fn compute_subtree_layout_stage(
+    stage: LayoutStageInput<'_>,
+    boundary: super::partial_relayout::PlannedBoundary,
+    scratch: &LayoutScratch,
+) -> LayoutStageOutput {
     let LayoutStageInput {
         arena,
         root,
@@ -2783,17 +2787,9 @@ fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScr
     // In-flow SVG boundaries keep their committed geometry and lay out only their contents.
     let root_is_absolutely_positioned = NodeFacts::new(&callbacks, root).is_absolutely_positioned();
     let (entry_root, entry_root_containing_block) = if root_is_absolutely_positioned {
-        let containing_block = callbacks
-            .saved_abspos_layout_inputs(root)
-            .expect("an absolutely positioned relayout root has committed layout inputs")
-            .containing_block;
-        assert!(!containing_block.is_invalid());
-        (containing_block, NodeSlotId::INVALID)
+        (boundary.containing_block(), NodeSlotId::INVALID)
     } else {
-        let containing_block = callbacks
-            .committed_fragment_link(root)
-            .map_or(NodeSlotId::INVALID, |link| link.containing_block);
-        (root, containing_block)
+        (root, boundary.containing_block())
     };
     let pass_fragments = RunRecords::with_unrooted(
         scratch,
@@ -2833,27 +2829,26 @@ fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScr
 /// # Safety
 ///
 /// `state` must be the live render state of the pass's document, which nothing else reaches while
-/// the pass runs, and `root` must be a live partial relayout boundary.
+/// the pass runs, and the tree it holds the one the planner found `boundary` in.
 pub(crate) unsafe fn compute_subtree_layout_fragments(
     state: *mut ArenaHandle,
-    root: NodeSlotId,
+    boundary: super::partial_relayout::PlannedBoundary,
     viewport_inline_size_raw: i32,
     viewport_block_size_raw: i32,
     document_in_quirks_mode: bool,
 ) -> LayoutStageOutput {
-    assert!(!root.is_invalid());
     // SAFETY: Guaranteed by the caller; the arena's published inputs stay unchanged for the
     // synchronous stage run.
     let (arena, scratch) = unsafe { arena_and_scratch_for_stage(state) };
     let input = LayoutStageInput {
         arena,
-        root,
+        root: boundary.root(),
         viewport_inline_size_raw,
         viewport_block_size_raw,
         document_in_quirks_mode,
         should_collect_devtools_layout_data: false,
     };
-    compute_subtree_layout_stage(input, scratch)
+    compute_subtree_layout_stage(input, boundary, scratch)
 }
 
 /// Commits a computed partial relayout boundary to the arena without the host, leaving the host
@@ -2900,7 +2895,7 @@ fn layout_subtree_with_frozen_root_geometry(run: &FormattingContextRun<'_>) {
         Some(fragments),
         root_used,
         root,
-        root_used.placed_in.get(),
+        callbacks.in_flow_containing_block(root),
         None,
         fc_type,
         run.layout_mode,
