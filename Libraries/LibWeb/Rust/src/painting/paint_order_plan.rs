@@ -11,7 +11,7 @@
 //! are explicit references, so a consumer can record them, reuse them, or collect their order.
 
 use crate::layout::node_data::{NodeKind, NodeSlotId};
-use crate::painting::paintable_rows::PaintableRowsRef;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::PaintPhase;
 use crate::painting::{node_painting, style_queries};
 use smallvec::SmallVec;
@@ -148,7 +148,7 @@ impl PaintOrderInputs {
         self
     }
 
-    pub(crate) fn gather(arena: &PaintableRowsRef<'_>, row: NodeSlotId) -> Self {
+    pub(crate) fn gather(arena: &impl PaintRead, row: NodeSlotId) -> Self {
         let display = style_queries::display(arena, row);
         let kind = arena.node_kind_if_live(row);
         let z_index = style_queries::z_index(arena, row);
@@ -203,7 +203,7 @@ impl PaintScopePlan {
     /// and layout facts. Without them it gathers current inputs, so a canonical plan can
     /// detect a stale snapshot.
     pub(crate) fn build(
-        arena: &PaintableRowsRef<'_>,
+        arena: &impl PaintRead,
         scope: PaintScope,
         paint_overlay: bool,
         use_prepared_inputs: bool,
@@ -231,8 +231,8 @@ impl PaintScopePlan {
     }
 }
 
-struct PaintOrderBuilder<'a, 'arena> {
-    layout_arena: &'a PaintableRowsRef<'arena>,
+struct PaintOrderBuilder<'a, R: PaintRead> {
+    layout_arena: &'a R,
     paint_overlay: bool,
     use_prepared_inputs: bool,
     items: SmallVec<[PaintOrderItem; 16]>,
@@ -240,7 +240,7 @@ struct PaintOrderBuilder<'a, 'arena> {
     last_inputs: std::cell::Cell<Option<(NodeSlotId, PaintOrderInputs)>>,
 }
 
-impl PaintOrderBuilder<'_, '_> {
+impl<R: PaintRead> PaintOrderBuilder<'_, R> {
     fn inputs(&self, row: NodeSlotId) -> PaintOrderInputs {
         if let Some((previous, inputs)) = self.last_inputs.get()
             && previous == row
@@ -248,7 +248,7 @@ impl PaintOrderBuilder<'_, '_> {
             return inputs;
         }
         let prepared = if self.use_prepared_inputs {
-            self.layout_arena.row_paint_state(row).order_inputs()
+            self.layout_arena.prepared_paint_order_inputs(row)
         } else {
             None
         };
@@ -284,7 +284,7 @@ impl PaintOrderBuilder<'_, '_> {
             self.append_box_phase(PaintPhase::Foreground);
             return;
         }
-        let side = arena.paintable_side_data(root);
+        let side = arena.committed_side_data(root);
         let Some(content) = side.inline_content.as_ref().filter(|content| !content.items.is_empty()) else {
             self.append_box_phase(PaintPhase::Foreground);
             return;
@@ -345,7 +345,7 @@ impl PaintOrderBuilder<'_, '_> {
             && self.layout_arena.paintable_row_is_populated(block)
             && self
                 .layout_arena
-                .paintable_side_data(block)
+                .committed_side_data(block)
                 .fragments()
                 .iter()
                 .any(|fragment| fragment.layout_node == paintable && fragment.is_atomic_inline)
@@ -687,23 +687,23 @@ mod tests {
         }
         arena.paintable_rows_mut().paintable_data_mut(child).offset.x = CssPixels::from_integer(100);
         let after_move = PaintOrderInputs::gather(&arena.paintable_rows(), child);
-        assert!(!arena.row_paint_state(child).update_order_inputs(after_move));
-        let flags = &arena.data(child).flags;
-        flags.set(flags.get() | NodeFlag::IsFlexItem as u32);
+        assert!(!arena.update_paint_order_inputs(child, after_move));
+        let data = arena.write_shape(child);
+        data.set_flags(data.flags.get() | NodeFlag::IsFlexItem as u32);
         let as_flex_item = PaintOrderInputs::gather(&arena.paintable_rows(), child);
-        assert!(arena.row_paint_state(child).update_order_inputs(as_flex_item));
+        assert!(arena.update_paint_order_inputs(child, as_flex_item));
     }
 
     #[test]
     fn canonical_planning_can_detect_stale_prepared_inputs() {
         let mut arena = LayoutNodeArena::new();
         let row = arena.allocate_for_test().slot;
-        arena.data(row).kind.set(NodeKind::Box);
+        arena.write_shape(row).set_kind(NodeKind::Box);
         arena.populate_paintable_row(row);
         arena.refresh_paint_order_inputs(row);
         // Deliberately omit the refresh after a participation change. The canonical planner
         // must see the new state independently of that snapshot.
-        arena.data(row).flags.set(NodeFlag::IsFlexItem as u32);
+        arena.write_shape(row).set_flags(NodeFlag::IsFlexItem as u32);
         let scope = PaintScope {
             owner: row,
             kind: PaintScopeKind::Descendants(StackingContextPaintPhase::Foreground),

@@ -18,10 +18,9 @@ use super::scroll_state::ScrollState;
 use super::*;
 use crate::fast_hash::{FastMap as HashMap, FastSet as HashSet};
 use crate::layout::node_data::{NodeKind, NodeSlotId};
-use crate::painting::host::{FfiVisualContextHostCallbacks, FfiVisualContextTreeInputs};
+use crate::painting::host::FfiVisualContextTreeInputs;
 use crate::painting::paint_order;
-use crate::painting::paintable_rows::PaintableRowsRead;
-use std::rc::Rc;
+use crate::painting::paintable_rows::ArenaRowsRead;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct ChildCascade {
@@ -50,7 +49,7 @@ fn incremental_tree_requires_fresh_build(tree: &VisualContextTree, delta: &Visua
     delta.tombstoned_any_node && !tree.node_references_are_consistent()
 }
 
-fn box_is_inside_svg_resource_subtree(layout_arena: &impl PaintableRowsRead, slot: NodeSlotId) -> bool {
+fn box_is_inside_svg_resource_subtree(layout_arena: &impl ArenaRowsRead, slot: NodeSlotId) -> bool {
     let mut node = Some(slot);
     while let Some(current) = node {
         if matches!(
@@ -72,7 +71,7 @@ struct WorkPlan {
 }
 
 fn expand_dirty_entries(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     dirty: &VisualContextDirtySet,
 ) -> Result<WorkPlan, VisualContextGlobalRebuildReason> {
     let mut work: HashMap<NodeSlotId, BoxDirtyBits> = HashMap::default();
@@ -114,7 +113,7 @@ fn expand_dirty_entries(
 }
 
 impl WorkPlan {
-    fn insert_ancestors_of_work(&mut self, layout_arena: &impl PaintableRowsRead, slot: NodeSlotId) {
+    fn insert_ancestors_of_work(&mut self, layout_arena: &impl ArenaRowsRead, slot: NodeSlotId) {
         let mut ancestor = paint_order::paint_parent(layout_arena, slot);
         while let Some(current) = ancestor {
             if !self.ancestors_of_work.insert(current) {
@@ -124,7 +123,7 @@ impl WorkPlan {
         }
     }
 
-    fn box_or_paint_ancestor_is_dirty(&self, layout_arena: &impl PaintableRowsRead, slot: NodeSlotId) -> bool {
+    fn box_or_paint_ancestor_is_dirty(&self, layout_arena: &impl ArenaRowsRead, slot: NodeSlotId) -> bool {
         let mut node = layout_arena.paintable_row_is_populated(slot).then_some(slot);
         while let Some(current) = node {
             if self.work.contains_key(&current) || self.revalidate_children_of.contains(&current) {
@@ -139,7 +138,7 @@ impl WorkPlan {
     // scroll chain and its anchor's. A box above the anchor or above the positioned box changes
     // those chains without its rebuild reaching the positioned box, so the box is rebuilt
     // whenever either chain holds a dirty box.
-    fn add_anchored_boxes_below_dirty_scroll_chains(&mut self, layout_arena: &impl PaintableRowsRead) {
+    fn add_anchored_boxes_below_dirty_scroll_chains(&mut self, layout_arena: &impl ArenaRowsRead) {
         if !layout_arena.may_have_default_scroll_shift_anchor() {
             return;
         }
@@ -202,7 +201,7 @@ pub(crate) enum RegisteredScrollLikeNode {
 }
 
 pub(crate) fn register_scroll_like_node(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     tree: &mut VisualContextTree,
     scroll_state: &mut ScrollState,
     node_index: SpatialNodeIndex,
@@ -241,7 +240,7 @@ pub(crate) fn register_scroll_like_node(
 }
 
 pub(crate) fn rebuild_scroll_state_from_tree(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     tree: &mut VisualContextTree,
     tree_inputs: &FfiVisualContextTreeInputs,
 ) -> ScrollState {
@@ -268,12 +267,12 @@ pub(crate) fn rebuild_scroll_state_from_tree(
 }
 
 pub(crate) fn box_owns_geometry_dependent_nodes(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     tree: &VisualContextTree,
     slot: NodeSlotId,
     handles: &BoxVisualContextNodeHandles,
 ) -> bool {
-    if layout_arena.paintable_side_data(slot).svg_filter_bounds.get().is_some() {
+    if layout_arena.live_committed_side_data(slot).svg_filter_bounds.is_some() {
         return true;
     }
     let spatial_is_geometry_dependent = handles.spatial.iter().any(|index| {
@@ -321,7 +320,7 @@ struct WalkAnchorScrollShiftResolver<'a, Arena> {
     assignment_index_by_slot: &'a HashMap<NodeSlotId, usize>,
 }
 
-impl<Arena: PaintableRowsRead> AnchorScrollShiftResolver for WalkAnchorScrollShiftResolver<'_, Arena> {
+impl<Arena: ArenaRowsRead> AnchorScrollShiftResolver for WalkAnchorScrollShiftResolver<'_, Arena> {
     fn default_scroll_shift_anchor(&self, slot: NodeSlotId) -> NodeSlotId {
         self.layout_arena.default_scroll_shift_anchor(slot)
     }
@@ -342,7 +341,7 @@ impl<Arena: PaintableRowsRead> AnchorScrollShiftResolver for WalkAnchorScrollShi
 }
 
 fn anchor_is_awaiting_build(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     anchor_node: NodeSlotId,
     awaiting: &HashSet<NodeSlotId>,
 ) -> bool {
@@ -359,7 +358,7 @@ fn anchor_is_awaiting_build(
 }
 
 fn take_next_deferred_anchor_positioned(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     deferred: &mut Vec<DeferredAnchorPositionedBox>,
     awaiting: &mut HashSet<NodeSlotId>,
 ) -> Option<PendingBox> {
@@ -377,9 +376,8 @@ fn take_next_deferred_anchor_positioned(
     Some(entry.pending)
 }
 
-pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
+pub(crate) fn update_visual_context_tree<Arena: ArenaRowsRead>(
     layout_arena: &Arena,
-    callbacks: &FfiVisualContextHostCallbacks,
     viewport: NodeSlotId,
     tree_inputs: FfiVisualContextTreeInputs,
     scope: VisualContextUpdateScope,
@@ -401,11 +399,10 @@ pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
         scope != VisualContextUpdateScope::FreshTree || state.dirty_boxes.removed.is_empty(),
         "removed handles name nodes of the discarded tree"
     );
-    tombstone_removed_blocks(Rc::make_mut(tree), &state.dirty_boxes, &mut delta);
+    tombstone_removed_blocks(std::sync::Arc::make_mut(tree), &state.dirty_boxes, &mut delta);
 
     let environment = BoxBuildEnvironment {
         layout_arena,
-        callbacks,
         pixel_ratio: tree_inputs.device_pixels_per_css_pixel,
     };
     let viewport_output = layout_arena
@@ -415,7 +412,7 @@ pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
         return IncrementalUpdateResult::NeedsFullBuild(VisualContextGlobalRebuildReason::FirstBuild);
     };
     if scope.rebuilds_every_box() {
-        Rc::make_mut(tree)
+        std::sync::Arc::make_mut(tree)
             .set_visual_viewport_transform(super::node_values::visual_viewport_transform_data(&tree_inputs));
     }
     let every_box_capacity = if scope.rebuilds_every_box() {
@@ -512,7 +509,7 @@ pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
             let previous_stacking_context_facts = existing_record.as_ref().map(|record| record.stacking_context);
             let previous_has_mask_nodes = existing_record.as_ref().is_some_and(|record| record.has_mask_nodes);
             let may_be_root_element = parent == viewport;
-            let tree = Rc::make_mut(state.tree.as_mut().expect("the tree exists throughout the pass"));
+            let tree = std::sync::Arc::make_mut(state.tree.as_mut().expect("the tree exists throughout the pass"));
             let existing_handles = existing_record.as_ref().map(|record| &record.node_handles);
             let mut writer = BoxNodeWriter::new(tree, existing_handles, &mut delta);
             let mut assignment = build_box_visual_context_nodes(
@@ -612,7 +609,7 @@ pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
         }
     }
 
-    let tree = Rc::make_mut(state.tree.as_mut().expect("the tree exists throughout the pass"));
+    let tree = std::sync::Arc::make_mut(state.tree.as_mut().expect("the tree exists throughout the pass"));
     if incremental_tree_requires_fresh_build(tree, &delta) {
         return IncrementalUpdateResult::NeedsFullBuild(VisualContextGlobalRebuildReason::InvalidIncrementalReferences);
     }
@@ -643,7 +640,7 @@ pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
 
 #[cfg(debug_assertions)]
 pub(crate) fn debug_assert_every_live_node_is_owned(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     tree: &VisualContextTree,
     viewport: NodeSlotId,
 ) {
@@ -698,7 +695,7 @@ pub(crate) fn debug_assert_every_live_node_is_owned(
 
 #[cfg(not(debug_assertions))]
 pub(crate) fn debug_assert_every_live_node_is_owned(
-    _layout_arena: &impl PaintableRowsRead,
+    _layout_arena: &impl ArenaRowsRead,
     _tree: &VisualContextTree,
     _viewport: NodeSlotId,
 ) {

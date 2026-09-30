@@ -123,12 +123,17 @@ impl Verifier<'_> {
 
         let paintable_rows = self.arena.paintable_rows();
         if node_painting::has_lines(&paintable_rows, slot)
-            && !self.arena.paintable_side_data(slot).inline_box_pieces().is_empty()
+            && !self.arena.live_committed_side_data(slot).inline_box_pieces().is_empty()
         {
             for (owner, recomputed_filter) in
                 crate::painting::fragment_ownership::compute_fragment_ownership_for_block(&paintable_rows, slot)
             {
-                let stored_filter = self.arena.paintable_side_data(owner).fragment_ownership.clone();
+                let stored_filter = self
+                    .arena
+                    .live_committed_side_data(owner)
+                    .fragment_ownership
+                    .as_deref()
+                    .cloned();
                 if stored_filter.as_ref() != Some(&recomputed_filter) {
                     self.report.note(format_args!(
                         "fragment ownership of {owner:?} under line root {slot:?} diverges from a fresh computation"
@@ -186,14 +191,11 @@ impl Verifier<'_> {
                     .note(format_args!("entries table of {root:?} is still flagged for a resort"));
             }
         }
-        let stored_table_count = self
-            .arena
-            .paintable_rows
-            .stacking_context_entries
-            .borrow()
-            .iter()
-            .filter(|table| table.is_some())
+        let tables = self.arena.paintable_rows.stacking_context_entries.borrow();
+        let stored_table_count = (0..self.arena.paintable_row_count())
+            .filter(|index| tables.get(*index).is_some_and(Option::is_some))
             .count();
+        drop(tables);
         let expected_table_count = self
             .expected_entries_by_root
             .keys()

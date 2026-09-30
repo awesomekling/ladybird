@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::painting::geometry_read::GeometryRead;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::trace::Observer;
 
 use crate::css::css_pixels::CssPixelRect;
@@ -26,12 +28,12 @@ pub(crate) fn paint<O: Observer>(recorder: &mut PaintRecorder<'_, O>, paintable:
         recorder,
         paintable,
         phase,
-        &arena.paintable_side_data(paintable).piece_indices,
+        arena.committed_side_data(paintable).piece_indices(),
     );
 }
 
 pub(crate) fn paint_piece<O: Observer>(recorder: &mut PaintRecorder<'_, O>, root: NodeSlotId, index: u32) {
-    let paintable = recorder.layout_arena.paintable_side_data(root).inline_box_pieces()[index as usize].node;
+    let paintable = recorder.layout_arena.committed_side_data(root).inline_box_pieces()[index as usize].node;
     let facts = recorder.base_paint_facts(paintable);
     for phase in [PaintPhase::Background, PaintPhase::Border] {
         if facts.paint_phase_mask & phase.bit() == 0 {
@@ -65,7 +67,7 @@ fn paint_pieces<O: Observer>(
     };
     let root_position = paintable_geometry::absolute_position(recorder.layout_arena, root);
     let layout_arena = recorder.layout_arena;
-    let side = layout_arena.paintable_side_data(root);
+    let side = layout_arena.committed_side_data(root);
     let root_pieces = &side.inline_box_pieces();
     let facts = recorder.base_paint_facts(paintable);
 

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::painting::geometry_read::GeometryRead as _;
 use crate::painting::record::trace::Observer;
 
 use crate::css::css_enums::flex_direction;
@@ -28,13 +29,13 @@ pub(crate) fn record_inspector_overlays<O: Observer>(recorder: &mut PaintRecorde
             paint_box_model_highlight(recorder, paintable, highlight);
         });
     }
-    for input in inputs.flex_overlays {
+    for input in inputs.flex_overlays.iter() {
         with_highlight_context(recorder, input.paintable, |recorder, paintable| {
             paint_flex_overlay(recorder, paintable, input);
         });
     }
     if let Some(grid) = &inputs.grid_overlays {
-        for input in grid.inputs {
+        for input in grid.inputs.iter() {
             with_highlight_context(recorder, input.paintable, |recorder, paintable| {
                 paint_grid_overlay(recorder, paintable, input, &grid.fonts);
             });

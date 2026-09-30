@@ -34,10 +34,7 @@ impl Default for VideoPaintFacts {
 }
 
 impl VideoPaintFacts {
-    /// # Safety
-    ///
-    /// `facts.poster_frame` must be null or point to a live `Gfx::DecodedImageFrame`.
-    pub(crate) unsafe fn from_ffi(facts: &FfiVideoPaintFacts) -> Self {
+    pub(crate) fn from_ffi(facts: &FfiVideoPaintFacts) -> Self {
         match facts.representation {
             FfiVideoRepresentation::VideoFrame => Self::VideoFrame(facts.has_video_frame.then_some(VideoFrameFacts {
                 src_width: facts.video_src_width,
@@ -45,9 +42,7 @@ impl VideoPaintFacts {
                 sink_resource_id: facts.video_sink_resource_id,
                 sink_handle: facts.video_sink_handle,
             })),
-            FfiVideoRepresentation::PosterFrame => Self::PosterFrame(
-                (!facts.poster_frame.is_null()).then(|| unsafe { ImageFrameHandle::retain(facts.poster_frame) }),
-            ),
+            FfiVideoRepresentation::PosterFrame => Self::PosterFrame(ImageFrameHandle::resolve(facts.poster_frame_id)),
             FfiVideoRepresentation::TransparentBlack => Self::TransparentBlack,
         }
     }
@@ -60,13 +55,10 @@ pub(crate) struct ImagePaintFacts {
 }
 
 impl ImagePaintFacts {
-    /// # Safety
-    ///
-    /// `facts.content.frame` must be null or point to a live `Gfx::DecodedImageFrame`.
-    pub(crate) unsafe fn from_ffi(facts: &FfiReplacedImagePaintFacts) -> Self {
+    pub(crate) fn from_ffi(facts: &FfiReplacedImagePaintFacts) -> Self {
         Self {
             natural: SizeWithAspectRatio::from_ffi(&facts.natural),
-            content: unsafe { ImageContent::from_ffi(&facts.content) },
+            content: ImageContent::from_ffi(&facts.content),
         }
     }
 }
@@ -79,6 +71,10 @@ pub(crate) enum ReplacedPaintFacts {
     Image(ImagePaintFacts),
     Video(VideoPaintFacts),
 }
+
+/// Each row's replaced paint facts.
+pub(crate) type ReplacedPaintFactsTable =
+    crate::css::style::fast_hash::FastMap<crate::layout::node_data::NodeSlotId, ReplacedPaintFacts>;
 
 impl ReplacedPaintFacts {
     pub(crate) fn image(self) -> Option<ImagePaintFacts> {

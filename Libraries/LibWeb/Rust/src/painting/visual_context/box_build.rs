@@ -8,15 +8,13 @@ use super::reconcile::BoxNodeWriter;
 use super::scroll_state::NO_SCROLL_STATE_SLOT;
 use super::*;
 use crate::layout::node_data::{NodeFlag, NodeSlotId};
-use crate::painting::host::FfiVisualContextHostCallbacks;
 use crate::painting::paintable_data::*;
 use crate::painting::paintable_geometry;
-use crate::painting::paintable_rows::{PaintableRowsRead, PaintableRowsWrite};
+use crate::painting::paintable_rows::{ArenaRowsRead, PaintableRowsWrite};
 use libgfx_rust::FloatPoint;
 
 pub(crate) struct BoxBuildEnvironment<'a, Arena> {
     pub layout_arena: &'a Arena,
-    pub callbacks: &'a FfiVisualContextHostCallbacks,
     pub pixel_ratio: f64,
 }
 
@@ -72,7 +70,7 @@ impl PaintableVisualContextAssignment {
             None => (false, false),
         };
         {
-            let data = layout_arena.paintable_data_mut(self.slot);
+            let mut data = layout_arena.paintable_data_mut(self.slot);
             data.establishes_stacking_context = self.record.stacking_context.establishes_stacking_context;
             data.enclosing_scroll_node_index = self.enclosing_scroll_node_index;
             data.own_scroll_node_index = self.own_scroll_node_index;
@@ -135,7 +133,7 @@ fn scroll_registry_chain_to_viewport(
 //     anchor box. When the anchor is itself an anchor-positioned box, its layout position does not include
 //     its own paint-time shift, so each chained anchor's shift is emitted as well, masked to the axes that
 //     every link below it compensates in. The visited set and depth cap guard against malformed anchor chains.
-fn append_anchor_scroll_shift_nodes<Arena: PaintableRowsRead, Sink: VisualContextNodeSink>(
+fn append_anchor_scroll_shift_nodes<Arena: ArenaRowsRead, Sink: VisualContextNodeSink>(
     env: &BoxBuildEnvironment<'_, Arena>,
     sink: &mut Sink,
     resolver: &dyn AnchorScrollShiftResolver,
@@ -230,7 +228,7 @@ fn append_clip_to_positioned_chain<Sink: VisualContextNodeSink>(
     PositioningContext { clip, ..chain }
 }
 
-pub(crate) fn build_box_visual_context_nodes<Arena: PaintableRowsRead>(
+pub(crate) fn build_box_visual_context_nodes<Arena: ArenaRowsRead>(
     env: &BoxBuildEnvironment<'_, Arena>,
     sink: &mut BoxNodeWriter<'_>,
     slot: NodeSlotId,
@@ -553,7 +551,7 @@ pub(crate) fn build_box_visual_context_nodes<Arena: PaintableRowsRead>(
         );
         let scroll_node_index = state_for_descendants.spatial;
         assignment.own_scroll_node_index = scroll_node_index;
-        assignment.node_identity = env.callbacks.node_identity(layout_arena.shell_if_live(slot));
+        assignment.node_identity = layout_arena.unique_node_ids().id(slot);
         nearest_scroll_nodes_for_descendants = NearestScrollNodeIndices {
             stopping_at_fixed_position_ancestors: scroll_node_index,
             continuing_through_fixed_position_ancestors: scroll_node_index,
@@ -566,7 +564,7 @@ pub(crate) fn build_box_visual_context_nodes<Arena: PaintableRowsRead>(
             .node_style_if_live(slot)
             .is_some_and(|style| style.has_scroll_snap_alignment())
     {
-        assignment.node_identity = env.callbacks.node_identity(layout_arena.shell_if_live(slot));
+        assignment.node_identity = layout_arena.unique_node_ids().id(slot);
     }
 
     // Positioned descendants that escape into a viewport-establishing containing block lay

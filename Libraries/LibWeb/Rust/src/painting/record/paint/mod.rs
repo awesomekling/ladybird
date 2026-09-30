@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::painting::geometry_read::GeometryRead;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::trace::Observer;
 
 pub mod background;
@@ -95,7 +97,7 @@ pub(crate) fn paint<O: Observer>(recorder: &mut PaintRecorder<'_, O>, paintable:
             if recorder.is_recording_svg_resource_content()
                 || recorder
                     .layout_arena
-                    .paintable_side_data(paintable)
+                    .committed_side_data(paintable)
                     .inline_content
                     .as_ref()
                     .is_none_or(|content| content.items.is_empty())

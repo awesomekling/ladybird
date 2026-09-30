@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::painting::geometry_read::GeometryRead;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::trace::Observer;
 
 use crate::css::css_pixels::{CssPixelPoint, CssPixelRect, CssPixelSize};
@@ -123,12 +125,7 @@ impl<O: Observer> PaintRecorder<'_, O> {
         // OPTIMIZATION: The compositor falls back to the viewport when there are no explicit
         // targets. Avoid generating redundant per-box targets when no non-viewport scroller
         // could need one.
-        if !self
-            .paint_state
-            .visual_context
-            .scroll_state
-            .has_non_viewport_wheel_scroll_target_candidate
-        {
+        if !self.paint_state.has_non_viewport_wheel_scroll_target_candidate {
             return;
         }
         if !self.is_visible(paintable) || !self.visible_for_hit_testing(paintable) {
@@ -218,7 +215,7 @@ impl<O: Observer> PaintRecorder<'_, O> {
             Some(CompositorScrollNodeKind::Viewport)
         } else if self.layout_arena.node_generated_for(paintable) != 0 {
             Some(CompositorScrollNodeKind::PseudoElement)
-        } else if self.layout_arena.node_dom_node_is_element(paintable) {
+        } else if self.layout_arena.node_is_element_backed(paintable) {
             Some(CompositorScrollNodeKind::Element)
         } else {
             None

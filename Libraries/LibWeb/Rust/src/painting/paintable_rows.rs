@@ -4,15 +4,21 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::cow_column::{CowColumn, RowMut};
+use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeSlotId};
 use crate::layout::{fragment_tree, used_values};
+use crate::painting::geometry_read::{GeometryRead, read_live_geometry};
+use crate::painting::image_map_areas::{ImageMapAreaColumn, ImageMapAreas};
 use crate::painting::node_painting;
 use crate::painting::paintable_data::*;
+use crate::painting::published_frame::{PaintRead, PaintStatus, PublishedFrame, PublishedRows, read_live_arena};
 use crate::painting::record::damage::{DamageSet, PaintDamage, RowPaintState};
 use crate::painting::visual_context::dirty::{
     RemovedBoxBlocks, VisualContextBoxDirtyKind, VisualContextGlobalRebuildReason,
 };
+use crate::painting::visual_context::scroll_state::ScrollOffsetColumn;
 use crate::painting::visual_context::{
     BoxVisualContextNodeHandles, EMPTY_BOX_VISUAL_CONTEXT_NODE_HANDLES, PaintableVisualContextRecord,
 };
@@ -34,6 +40,168 @@ mod tests {
     }
 
     #[test]
+    fn committed_rows_keep_what_was_published_until_the_main_side_reads_them() {
+        use crate::css::css_pixels::CssPixels;
+
+        let mut arena = LayoutNodeArena::new();
+        let node = arena.allocate_for_test().slot;
+        arena.populate_paintable_row(node);
+        arena.paintable_rows_mut().paintable_data_mut(node).offset.x = CssPixels::from_integer(10);
+        arena.publish_paintable_rows();
+        arena.paintable_rows_mut().paintable_data_mut(node).offset.x = CssPixels::from_integer(20);
+
+        let published = arena.paintable_rows.published.as_ref().unwrap().rows.clone();
+        let published_offset = |rows: &crate::cow_column::ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>| {
+            rows.get(node.slot_index() as usize).unwrap().offset.x
+        };
+        assert_eq!(published_offset(&published), CssPixels::from_integer(10).into());
+        assert_eq!(
+            arena.with_committed_rows(|rows| rows.paintable_data(node).offset.x),
+            CssPixels::from_integer(20).into()
+        );
+        assert_eq!(published_offset(&published), CssPixels::from_integer(10).into());
+    }
+
+    #[test]
+    fn columns_read_beside_the_rows_are_published_with_them() {
+        use crate::css::css_pixels::{CssPixelPoint, CssPixels};
+        use crate::painting::image_map_areas::{AreaShape, PublishedImageMapArea};
+
+        let area = |style_node| {
+            Box::new([PublishedImageMapArea {
+                style_node,
+                shape: AreaShape::Default,
+                editable: false,
+                coords: Box::new([]),
+            }]) as Box<[_]>
+        };
+        let offset = |x| CssPixelPoint::new(CssPixels::from_integer(x), CssPixels::from_integer(0));
+        let mut arena = LayoutNodeArena::new();
+        let node = arena.allocate_for_test().slot;
+        arena.populate_paintable_row(node);
+        arena.scroll_offsets().publish(node, offset(10));
+        arena.unique_node_ids().publish(node, 1);
+        arena.image_map_areas().publish(node, area(1));
+        arena.publish_paintable_rows();
+        arena.scroll_offsets().publish(node, offset(20));
+        arena.unique_node_ids().publish(node, 2);
+        arena.image_map_areas().publish(node, area(2));
+
+        let published = arena.paintable_rows.published.as_ref().unwrap();
+        let (scroll_offsets, image_map_areas) = (published.scroll_offsets.clone(), published.image_map_areas.clone());
+        let unique_node_ids = published.unique_node_ids.clone();
+        let published_state = || {
+            (
+                scroll_offsets.offset(node),
+                unique_node_id_of(unique_node_ids.get(node.slot_index() as usize), node),
+                image_map_areas.area_editability(node, 1),
+            )
+        };
+        assert_eq!(published_state(), (offset(10), 1, 0));
+        assert_eq!(
+            arena.with_committed_rows(|committed| (
+                committed.scroll_offset(node),
+                committed.unique_node_id(node),
+                committed.with_image_map_areas(|areas| areas.area_editability(node, 1)),
+            )),
+            (offset(20), 2, -1)
+        );
+        assert_eq!(published_state(), (offset(10), 1, 0));
+    }
+
+    #[test]
+    fn side_data_is_published_with_the_rows() {
+        use crate::layout::inline_content::InlineContent;
+
+        let content = |line_count| {
+            std::sync::Arc::new(InlineContent {
+                lines: vec![Default::default(); line_count],
+                ..Default::default()
+            })
+        };
+        let mut arena = LayoutNodeArena::new();
+        let node = arena.allocate_for_test().slot;
+        arena.populate_paintable_row(node);
+        arena.committed_side_data_mut(node).inline_content = Some(content(1));
+        arena.committed_side_data_mut(node).piece_indices = Some([0].into());
+        arena.committed_side_data_mut(node).overflow_valid_across_recommits = true;
+        arena.publish_paintable_rows();
+        arena.paintable_rows_mut().begin_paintable_row_recommit(node);
+        arena.committed_side_data_mut(node).inline_content = Some(content(2));
+        arena.paintable_rows().clear_cached_overflow_data(node);
+
+        let side_data = arena.paintable_rows.published.as_ref().unwrap().side_data.clone();
+        let published_state = || {
+            let side_data = side_data.get(node.slot_index() as usize).unwrap();
+            (
+                side_data.lines().len(),
+                side_data.piece_indices().len(),
+                side_data.overflow_valid_across_recommits,
+            )
+        };
+        assert_eq!(published_state(), (1, 1, true));
+        let live = arena.paintable_rows();
+        let live = live.committed_side_data(node);
+        assert_eq!(
+            (
+                live.lines().len(),
+                live.piece_indices().len(),
+                live.overflow_valid_across_recommits
+            ),
+            (2, 0, false)
+        );
+        drop(live);
+        assert_eq!(
+            arena.with_committed_rows(|committed| committed.committed_side_data(node).lines().len()),
+            2
+        );
+        assert_eq!(published_state(), (1, 1, true));
+    }
+
+    #[test]
+    fn a_frame_holds_the_rows_with_their_hit_test_list_and_visual_context_tree() {
+        use crate::painting::hit_test::HitTestList;
+        use crate::painting::visual_context::{TransformData, TransformDataRole, VisualContextTree};
+        use std::sync::Arc;
+
+        let mut lists = crate::lent::Lender::default();
+        let mut list = |generation| {
+            Some(lists.lend(HitTestList {
+                generation,
+                ..Default::default()
+            }))
+        };
+        let tree = || {
+            Some(Arc::new(VisualContextTree::create(TransformData {
+                matrix: libgfx_rust::FloatMatrix4x4::identity(),
+                origin: Default::default(),
+                sorting_context_root_index: None,
+                flattens_inherited_transform: false,
+                role: TransformDataRole::CssTransform,
+                synthetic_plane: false,
+                establishes_sorting_context: false,
+            })))
+        };
+        let mut arena = LayoutNodeArena::new();
+        *arena.hit_test_list.get_mut() = list(1);
+        let published_tree = tree();
+        arena.paint_state().borrow_mut().visual_context.tree = published_tree.clone();
+        let frame = arena.freeze_paint_frame();
+        *arena.hit_test_list.get_mut() = list(2);
+        arena.paint_state().borrow_mut().visual_context.tree = tree();
+        arena.publish_rows();
+
+        assert_eq!(
+            frame.rows.paintable.hit_test_list.as_ref().map(|list| list.generation),
+            Some(1)
+        );
+        assert!(Arc::ptr_eq(
+            frame.rows.paintable.visual_context_tree.as_ref().unwrap(),
+            published_tree.as_ref().unwrap()
+        ));
+    }
+
+    #[test]
     fn overflow_queries_do_not_measure_ordinary_inline_fragments() {
         use crate::css::css_pixels::{CssPixelRect, CssPixels};
         use crate::layout::node_data::NodeKind;
@@ -41,7 +209,7 @@ mod tests {
 
         let mut arena = LayoutNodeArena::new();
         let node = arena.allocate_for_test().slot;
-        arena.data(node).kind.set(NodeKind::InlineNode);
+        arena.write_shape(node).set_kind(NodeKind::InlineNode);
         arena.populate_paintable_row(node);
         arena.scrollable_overflow.viewport.set(Some(node));
         let rect = CssPixelRect::new(
@@ -62,14 +230,49 @@ mod tests {
     }
 
     #[test]
-    fn overflow_queries_refresh_invalidated_data_while_geometry_is_borrowed() {
+    fn inline_that_starts_storing_a_scroll_offset_is_measured_before_publication() {
         use crate::css::css_pixels::{CssPixelRect, CssPixels};
         use crate::layout::node_data::NodeKind;
         use crate::painting::paintable_geometry;
 
         let mut arena = LayoutNodeArena::new();
         let node = arena.allocate_for_test().slot;
-        arena.data(node).kind.set(NodeKind::InlineNode);
+        arena.write_shape(node).set_kind(NodeKind::InlineNode);
+        arena.populate_paintable_row(node);
+        arena.scrollable_overflow.viewport.set(Some(node));
+        let rect = CssPixelRect::new(
+            CssPixels::from_integer(0),
+            CssPixels::from_integer(0),
+            CssPixels::from_integer(100),
+            CssPixels::from_integer(80),
+        );
+        arena
+            .paintable_rows_mut()
+            .paintable_data_mut(node)
+            .local_padding_box_union = rect.into();
+        arena.measure_scrollable_overflow_before_publication();
+        assert_eq!(
+            paintable_geometry::scrollable_overflow_rect(&arena.paintable_rows(), node),
+            None
+        );
+
+        arena.set_node_flag(node, NodeFlag::HasScrollOffset, true);
+        arena.measure_scrollable_overflow_before_publication();
+        assert_eq!(
+            paintable_geometry::scrollable_overflow_rect(&arena.paintable_rows(), node),
+            Some(rect)
+        );
+    }
+
+    #[test]
+    fn overflow_is_measured_before_publication_while_geometry_is_borrowed() {
+        use crate::css::css_pixels::{CssPixelRect, CssPixels};
+        use crate::layout::node_data::NodeKind;
+        use crate::painting::paintable_geometry;
+
+        let mut arena = LayoutNodeArena::new();
+        let node = arena.allocate_for_test().slot;
+        arena.write_shape(node).set_kind(NodeKind::InlineNode);
         arena.set_node_flag(node, NodeFlag::HasScrollOffset, true);
         arena.populate_paintable_row(node);
         arena.scrollable_overflow.viewport.set(Some(node));
@@ -83,19 +286,23 @@ mod tests {
             .paintable_rows_mut()
             .paintable_data_mut(node)
             .local_padding_box_union = rect.into();
-        let cache = arena.paintable_side_data(node);
-        cache.overflow_relative_to_padding_box.set(FfiOverflowData {
+        let mut cache = arena.committed_side_data_mut(node);
+        cache.overflow_relative_to_padding_box = FfiOverflowData {
             rect: CssPixelRect::new(rect.x, rect.y, CssPixels::from_integer(500), rect.height).into(),
             has_scrollable_overflow: true,
-        });
-        cache.overflow_valid_across_recommits.set(true);
-        cache.overflow_measured_this_commit.set(true);
+        };
+        cache.overflow_valid_across_recommits = true;
         drop(cache);
+        arena.paintable_side_data(node).overflow_measured_this_commit.set(true);
 
         let rows = arena.paintable_rows();
         let geometry = rows.paintable_data(node);
         let previous_geometry = *geometry;
         rows.clear_cached_overflow_data(node);
+        // Reading overflow never measures it.
+        assert_eq!(paintable_geometry::scrollable_overflow_rect(&rows, node), None);
+        assert!(!arena.scrollable_overflow.geometry_changed.get());
+        arena.measure_scrollable_overflow_before_publication();
         assert_eq!(paintable_geometry::scrollable_overflow_rect(&rows, node), Some(rect));
         assert!(!paintable_geometry::has_scrollable_overflow(&rows, node));
         assert_eq!(*geometry, previous_geometry);
@@ -108,87 +315,229 @@ mod tests {
         let mut arena = LayoutNodeArena::new();
         let node = arena.allocate_for_test().slot;
         arena.populate_paintable_row(node);
-        arena
-            .paintable_side_data(node)
-            .overflow_valid_across_recommits
-            .set(true);
+        arena.committed_side_data_mut(node).overflow_valid_across_recommits = true;
         arena.paintable_side_data(node).overflow_measured_this_commit.set(true);
         arena.paintable_rows_mut().begin_paintable_row_recommit(node);
-        assert!(arena.paintable_side_data(node).overflow_valid_across_recommits.get());
+        assert!(arena.live_committed_side_data(node).overflow_valid_across_recommits);
 
         let rows = arena.paintable_rows();
         let geometry = rows.paintable_data(node);
         let previous_geometry = *geometry;
         rows.clear_cached_overflow_data(node);
         assert_eq!(*geometry, previous_geometry);
-        assert!(!arena.paintable_side_data(node).overflow_valid_across_recommits.get());
+        assert!(!arena.live_committed_side_data(node).overflow_valid_across_recommits);
         assert!(!arena.paintable_side_data(node).overflow_measured_this_commit.get());
     }
-}
 
-#[repr(align(64))]
-struct PaintableRowChunk {
-    slots: [PaintableData; PAINTABLE_SLOTS_PER_CHUNK],
-}
+    #[test]
+    fn row_reset_version_changes_for_each_kind_of_reset() {
+        let mut arena = LayoutNodeArena::new();
+        let node = arena.allocate_for_test().slot;
+        arena.populate_paintable_row(node);
+        let initial_version = arena.paintable_rows().paintable_row_reset_version(node);
 
-fn new_chunk() -> Box<PaintableRowChunk> {
-    // SAFETY: Every slot is written with PaintableData::default() before the chunk is exposed;
-    // the chunk is built in place on the heap because it is too large for the stack.
-    unsafe {
-        let mut chunk = Box::<PaintableRowChunk>::new_uninit();
-        let slots = &raw mut (*chunk.as_mut_ptr()).slots;
-        for offset in 0..PAINTABLE_SLOTS_PER_CHUNK {
-            (&raw mut (*slots)[offset]).write(PaintableData::default());
-        }
-        chunk.assume_init()
+        arena.paintable_rows_mut().begin_paintable_row_recommit(node);
+        let recommitted_version = arena.paintable_rows().paintable_row_reset_version(node);
+        assert_eq!(recommitted_version, initial_version + 1);
+
+        let reset = arena.prepare_paintable_row_cleared_reset(node).unwrap();
+        arena.paintable_row_cleared(reset);
+        let cleared_version = arena.paintable_rows().paintable_row_reset_version(node);
+        assert_eq!(cleared_version, recommitted_version + 1);
+
+        arena.populate_paintable_row(node);
+        let reset = arena.prepare_paintable_row_freed_reset(node.slot_index()).unwrap();
+        arena.paintable_row_freed(reset);
+        assert_eq!(
+            arena.paintable_rows().paintable_row_reset_version(node),
+            cleared_version + 1
+        );
     }
 }
 
-type ChromeStateCallback = (
-    *mut c_void,
-    unsafe extern "C" fn(*mut c_void, NodeSlotId, PaintableRowResetKind),
-);
+/// The document's callback for rows a payment reset, and whether the row its viewport is bound to was recommitted among
+/// them.
+pub(crate) type ChromeStateCallback = (*mut c_void, unsafe extern "C" fn(*mut c_void, bool));
 
 #[derive(Clone, Copy)]
 pub(crate) struct PaintableRowReset {
     slot: NodeSlotId,
     kind: PaintableRowResetKind,
-    callback: Option<ChromeStateCallback>,
 }
 
 impl PaintableRowReset {
-    pub(crate) fn invoke_callback(self) {
-        if let Some((context, callback)) = self.callback {
+    /// The row the reset is of, where the arena freed it.
+    pub(crate) fn freed_row(&self) -> Option<NodeSlotId> {
+        (self.kind == PaintableRowResetKind::Freed).then_some(self.slot)
+    }
+}
+
+/// What a payment tells the document of the rows it reset: that some were, and whether the row its viewport is bound to
+/// was recommitted. Which rows is for the document's chrome widgets to tell by their rows' reset versions, so a commit
+/// that resets every row of the document tells it once, not once per row.
+#[derive(Default)]
+pub(crate) struct RowResetsForHost {
+    rows_reset: bool,
+    viewport_row_recommitted: bool,
+}
+
+impl RowResetsForHost {
+    pub(crate) fn note_reset(&mut self) {
+        self.rows_reset = true;
+    }
+
+    pub(crate) fn note_viewport_row_recommitted(&mut self) {
+        self.rows_reset = true;
+        self.viewport_row_recommitted = true;
+    }
+
+    pub(crate) fn tell(self, main_thread: &crate::stage::MainThread) {
+        if !self.rows_reset {
+            return;
+        }
+        if let Some((context, callback)) = main_thread
+            .host_tables()
+            .and_then(|host_tables| host_tables.chrome_state_callback.get())
+        {
             // SAFETY: Registration and unregistration keep the callback context live.
-            unsafe { callback(context, self.slot, self.kind) };
+            unsafe { callback(context, self.viewport_row_recommitted) };
         }
     }
 }
 
+// The unique node id of what each box is the box of, as the document names it: an element, the
+// element a pseudo-element was generated for, or the document itself for the viewport. It is the
+// name the compositor scrolls and snaps by, and it is not the style node id - it outlives a style
+// tree - so the document publishes it as a box is bound to what it is the box of.
+//
+// Dense by slot, because nearly every element box has one. Each entry names the row that published
+// it, so a slot that has been recycled since answers for the new row and not the old one.
 #[derive(Default)]
-struct CommittedFragmentLinkSlot {
+pub(crate) struct UniqueNodeIdColumn {
+    ids: RefCell<CowColumn<(NodeSlotId, i64), PAINTABLE_SLOTS_PER_CHUNK>>,
+}
+
+fn unique_node_id_of(entry: Option<&(NodeSlotId, i64)>, slot: NodeSlotId) -> i64 {
+    match entry {
+        Some(&(published_for, id)) if !slot.is_invalid() && published_for == slot => id,
+        _ => 0,
+    }
+}
+
+impl PublishedRows {
+    /// The unique node id the document published for what a box is the box of, or zero.
+    pub(crate) fn unique_node_id(&self, slot: NodeSlotId) -> i64 {
+        unique_node_id_of(self.unique_node_ids.get(slot.slot_index() as usize), slot)
+    }
+}
+
+impl UniqueNodeIdColumn {
+    pub(crate) fn id(&self, slot: NodeSlotId) -> i64 {
+        unique_node_id_of(self.ids.borrow().get(slot.slot_index() as usize), slot)
+    }
+
+    pub(crate) fn publish(&self, slot: NodeSlotId, id: i64) {
+        if slot.is_invalid() || self.id(slot) == id {
+            return;
+        }
+        let index = slot.slot_index() as usize;
+        let mut ids = self.ids.borrow_mut();
+        ids.grow_to(index + 1);
+        ids.set(index, (slot, id)).expect("the column grew to hold the slot");
+    }
+
+    pub(crate) fn forget(&self, slot: NodeSlotId) {
+        if slot.is_invalid() || self.id(slot) == 0 {
+            return;
+        }
+        self.ids
+            .borrow_mut()
+            .set(slot.slot_index() as usize, (NodeSlotId::INVALID, 0));
+    }
+}
+
+/// The fragment link a layout slot committed. A link is shared, so a chunk a published generation
+/// still holds is copied one reference count per slot.
+#[derive(Clone, Default)]
+pub(crate) struct CommittedFragmentLinkSlot {
     layout_slot_generation: u8,
     geometry_epoch: u32,
     geometry_is_current: bool,
-    link: Option<Box<fragment_tree::FragmentLink>>,
+    link: Option<std::sync::Arc<fragment_tree::FragmentLink>>,
+}
+
+impl PartialEq for CommittedFragmentLinkSlot {
+    fn eq(&self, other: &Self) -> bool {
+        self.layout_slot_generation == other.layout_slot_generation
+            && self.geometry_epoch == other.geometry_epoch
+            && self.geometry_is_current == other.geometry_is_current
+            && crate::cow_column::same_payload(self.link.as_ref(), other.link.as_ref(), |a, b| {
+                a.places_same_fragment_identically_to(b)
+            })
+    }
+}
+
+impl CommittedFragmentLinkSlot {
+    pub(crate) fn link(&self) -> Option<&fragment_tree::FragmentLink> {
+        self.link.as_deref()
+    }
+
+    fn link_for(&self, layout_slot_generation: u8) -> Option<&fragment_tree::FragmentLink> {
+        (self.layout_slot_generation == layout_slot_generation)
+            .then_some(self.link.as_deref())
+            .flatten()
+    }
 }
 
 #[derive(Default)]
 pub(crate) struct PaintableRowStore {
-    chunks: Vec<Box<PaintableRowChunk>>,
+    rows: CowColumn<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>,
+    /// The rows as last published, for the main side to read, sharing unchanged chunks with
+    /// `rows`. The layout commit and the visual context update release it when they start, since
+    /// nothing reads it while they run and releasing it lets them write chunks in place, and
+    /// publish again when they are done. A row a main-side writer changes is published when the
+    /// main side next reads the rows.
+    published: Option<PublishedRows>,
     side_data: RefCell<Vec<PaintableSideData>>,
+    committed_side_data: RefCell<CowColumn<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>>,
     pub(crate) row_paint_states: RefCell<Vec<RowPaintState>>,
     pub(crate) damage: DamageSet,
     visual_context_records: RefCell<Vec<Option<PaintableVisualContextRecord>>>,
+    /// The node handles of each row's visual context record, published with the rows for the
+    /// recording to read.
+    visual_context_node_handles: RefCell<VisualContextNodeHandleColumn>,
     pub(crate) stacking_context_entries:
-        RefCell<Vec<Option<Box<crate::painting::stacking_context::entries::StackingContextEntries>>>>,
+        RefCell<crate::painting::stacking_context::entries::StackingContextEntryColumn>,
     pub(crate) stacking_context_roots_flagged_for_resort: RefCell<Vec<NodeSlotId>>,
     line_roots_needing_fragment_ownership: RefCell<Vec<NodeSlotId>>,
     absolute_rect_memo: RefCell<Vec<Option<(NodeSlotId, u64, crate::css::css_pixels::CssPixelRect)>>>,
     absolute_rect_memo_epoch: Cell<u64>,
-    committed_fragment_links: RefCell<Vec<CommittedFragmentLinkSlot>>,
-    chrome_state_callback: Cell<Option<ChromeStateCallback>>,
-    paint_recording_in_progress: Cell<bool>,
+    committed_fragment_links: RefCell<CowColumn<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>>,
+    layout_commit_generation: Cell<u64>,
+    scroll_offsets: ScrollOffsetColumn,
+    image_map_areas: ImageMapAreaColumn,
+    unique_node_ids: UniqueNodeIdColumn,
+    visual_context_tree_inputs: Cell<crate::painting::host::FfiVisualContextTreeInputs>,
+}
+
+pub(crate) type VisualContextNodeHandleColumn =
+    CowColumn<Option<std::sync::Arc<BoxVisualContextNodeHandles>>, PAINTABLE_SLOTS_PER_CHUNK>;
+
+/// Sets the node handles published for a row, copying its chunk only when they change.
+fn publish_visual_context_node_handles(
+    column: &mut VisualContextNodeHandleColumn,
+    index: usize,
+    handles: Option<&BoxVisualContextNodeHandles>,
+) {
+    if column
+        .get(index)
+        .is_none_or(|published| published.as_deref() == handles)
+    {
+        return;
+    }
+    column
+        .set(index, handles.cloned().map(std::sync::Arc::new))
+        .expect("the row is in the column");
 }
 
 pub(crate) struct PaintableRows<Arena> {
@@ -204,13 +553,51 @@ impl Clone for PaintableRowsRef<'_> {
     }
 }
 
-pub(crate) trait PaintableRowsRead: Deref<Target = LayoutNodeArena> {
-    fn paintable_data(&self, id: NodeSlotId) -> &PaintableData;
-    fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool;
+/// [`PaintableRowsRead`] of the rows the arena holds, for the owner's passes over the paint state, which read the arena
+/// beside them.
+pub(crate) trait ArenaRowsRead: PaintableRowsRead + Deref<Target = LayoutNodeArena> {}
+
+impl<Rows: PaintableRowsRead + Deref<Target = LayoutNodeArena>> ArenaRowsRead for Rows {}
+
+pub(crate) trait PaintableRowsRead: PaintRead {
+    /// The scroll offset the document published for a box, or zero.
+    fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint;
+    /// The unique node id the document published for what a box is the box of, or zero.
+    fn unique_node_id(&self, id: NodeSlotId) -> i64;
+    /// Reads the image map areas the document published.
+    fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R;
 }
 
-pub(crate) trait PaintableRowsWrite: PaintableRowsRead {
-    fn paintable_data_mut(&mut self, id: NodeSlotId) -> &mut PaintableData;
+/// A row's committed side data, as a published generation or the live column holds it.
+pub(crate) enum CommittedSideDataRef<'a> {
+    Published(&'a CommittedSideData),
+    Live(Ref<'a, CommittedSideData>),
+}
+
+impl Deref for CommittedSideDataRef<'_> {
+    type Target = CommittedSideData;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Published(side_data) => side_data,
+            Self::Live(side_data) => side_data,
+        }
+    }
+}
+
+/// A row's paintable data, for writing. See [`RowMut`].
+pub(crate) type PaintableDataMut<'a> =
+    RowMut<&'a mut CowColumn<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>, PaintableData, PAINTABLE_SLOTS_PER_CHUNK>;
+
+/// A row's committed side data, for writing. See [`RowMut`].
+pub(crate) type CommittedSideDataMut<'a> = RowMut<
+    RefMut<'a, CowColumn<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>>,
+    CommittedSideData,
+    PAINTABLE_SLOTS_PER_CHUNK,
+>;
+
+pub(crate) trait PaintableRowsWrite: ArenaRowsRead {
+    fn paintable_data_mut(&mut self, id: NodeSlotId) -> PaintableDataMut<'_>;
 }
 
 impl<Arena> Deref for PaintableRows<Arena>
@@ -238,55 +625,40 @@ where
     Arena: Deref<Target = LayoutNodeArena>,
 {
     pub(crate) fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
-        assert!(!id.is_invalid(), "invalid paintable arena slot ID");
-        let index = id.slot_index() as usize;
-        let chunk = self
-            .arena
-            .paintable_rows
-            .chunks
-            .get(index / PAINTABLE_SLOTS_PER_CHUNK)
-            .expect("invalid paintable arena slot ID");
-        let data = &chunk.slots[index % PAINTABLE_SLOTS_PER_CHUNK];
-        assert_eq!(
-            data.slot_generation,
-            id.generation(),
-            "paintable arena read a stale or unused slot"
-        );
-        data
-    }
-
-    pub(crate) fn paintable_data_ptr(&self, id: NodeSlotId) -> *const PaintableData {
-        self.paintable_data(id)
+        self.arena.live_paintable_data(id)
     }
 
     pub(crate) fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
         if id.is_invalid() {
             return false;
         }
-        let index = id.slot_index() as usize;
-        let Some(chunk) = self.arena.paintable_rows.chunks.get(index / PAINTABLE_SLOTS_PER_CHUNK) else {
+        let Some(data) = self.arena.paintable_rows.rows.get(id.slot_index() as usize) else {
             return false;
         };
-        let generation = chunk.slots[index % PAINTABLE_SLOTS_PER_CHUNK].slot_generation;
-        generation != 0 && generation == id.generation()
+        data.slot_generation != 0 && data.slot_generation == id.generation()
+    }
+
+    pub(crate) fn committed_side_data(&self, id: NodeSlotId) -> CommittedSideDataRef<'_> {
+        CommittedSideDataRef::Live(self.arena.live_committed_side_data(id))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn paintable_row_reset_version(&self, id: NodeSlotId) -> u64 {
+        self.arena
+            .paintable_rows
+            .rows
+            .get(id.slot_index() as usize)
+            .map_or(0, |row| row.row_reset_version)
     }
 
     pub(crate) fn clear_cached_overflow_data(&self, id: NodeSlotId) {
         if !self.paintable_row_is_populated(id) {
             return;
         }
-        self.arena
-            .paintable_side_data(id)
-            .overflow_valid_across_recommits
-            .set(false);
-    }
-
-    pub(crate) fn inline_pieces_root(&self, inline_paintable: NodeSlotId) -> Option<NodeSlotId> {
-        if !self.paintable_row_is_populated(inline_paintable) {
-            return None;
+        if self.arena.live_committed_side_data(id).overflow_valid_across_recommits {
+            self.arena.committed_side_data_mut(id).overflow_valid_across_recommits = false;
+            self.arena.note_row_overflow_unmeasured(id);
         }
-        let root = self.paintable_data(inline_paintable).containing_block;
-        (self.paintable_row_is_populated(root) && node_painting::has_lines(self, root)).then_some(root)
     }
 
     /// A style repaint of a row also repaints the anonymous boxes it generated and, for an
@@ -347,28 +719,20 @@ where
             }
         }
     }
-
-    pub(crate) fn prepare_paintable_row_recommit_notification(&self, id: NodeSlotId) -> PaintableRowReset {
-        assert!(self.paintable_row_is_populated(id));
-        self.arena
-            .prepare_paintable_row_reset(id, PaintableRowResetKind::Recommitted)
-    }
 }
 
 impl<Arena> PaintableRows<Arena>
 where
     Arena: DerefMut<Target = LayoutNodeArena>,
 {
-    pub(crate) fn paintable_data_mut(&mut self, id: NodeSlotId) -> &mut PaintableData {
+    pub(crate) fn paintable_data_mut(&mut self, id: NodeSlotId) -> PaintableDataMut<'_> {
         assert!(!id.is_invalid(), "invalid paintable arena slot ID");
-        let index = id.slot_index() as usize;
-        let chunk = self
+        let data = self
             .arena
             .paintable_rows
-            .chunks
-            .get_mut(index / PAINTABLE_SLOTS_PER_CHUNK)
+            .rows
+            .row_mut(id.slot_index() as usize)
             .expect("invalid paintable arena slot ID");
-        let data = &mut chunk.slots[index % PAINTABLE_SLOTS_PER_CHUNK];
         assert_eq!(
             data.slot_generation,
             id.generation(),
@@ -379,7 +743,8 @@ where
 
     pub(crate) fn begin_paintable_row_recommit(&mut self, id: NodeSlotId) {
         {
-            let data = self.paintable_data_mut(id);
+            let mut data = self.paintable_data_mut(id);
+            data.row_reset_version += 1;
             data.offset = used_values::FfiCssPixelPoint::default();
             data.content_size = used_values::FfiCssPixelSize::default();
             data.local_padding_box_union = used_values::FfiCssPixelRect::default();
@@ -390,11 +755,23 @@ where
             .overflow_measured_this_commit
             .set(false);
         // The row's damage is deliberately kept; the commit diff pushes what actually changed.
-        self.arena.paintable_side_data_mut(id).clear_committed_records();
+        let committed = self.arena.live_committed_side_data(id);
+        let clears = committed.has_committed_records() || committed.fragment_ownership.is_some();
+        drop(committed);
+        if clears {
+            let mut committed = self.arena.committed_side_data_mut(id);
+            committed.clear_committed_records();
+            if let Some(filter) = committed.fragment_ownership.take() {
+                drop(committed);
+                self.arena
+                    .paintable_side_data_mut(id)
+                    .fragment_ownership_before_recommit = Some(filter);
+            }
+        }
     }
 }
 
-impl<Arena> PaintableRowsRead for PaintableRows<Arena>
+impl<Arena> GeometryRead for PaintableRows<Arena>
 where
     Arena: Deref<Target = LayoutNodeArena>,
 {
@@ -405,13 +782,59 @@ where
     fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
         PaintableRows::paintable_row_is_populated(self, id)
     }
+
+    fn with_committed_fragment_link<R>(
+        &self,
+        id: NodeSlotId,
+        read: impl FnOnce(Option<&fragment_tree::FragmentLink>) -> R,
+    ) -> R {
+        self.arena.with_committed_fragment_link(id, read)
+    }
+
+    fn committed_side_data(&self, id: NodeSlotId) -> CommittedSideDataRef<'_> {
+        PaintableRows::committed_side_data(self, id)
+    }
+
+    read_live_geometry!(std::ops::Deref::deref);
+
+    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect> {
+        LayoutNodeArena::memoized_absolute_rect(self, id)
+    }
+
+    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: CssPixelRect) {
+        LayoutNodeArena::memoize_absolute_rect(self, id, rect);
+    }
+}
+
+impl<Arena> PaintRead for PaintableRows<Arena>
+where
+    Arena: Deref<Target = LayoutNodeArena>,
+{
+    read_live_arena!(std::ops::Deref::deref);
+}
+
+impl<Arena> PaintableRowsRead for PaintableRows<Arena>
+where
+    Arena: Deref<Target = LayoutNodeArena>,
+{
+    fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint {
+        self.arena.paintable_rows.scroll_offsets.offset(id)
+    }
+
+    fn unique_node_id(&self, id: NodeSlotId) -> i64 {
+        self.arena.paintable_rows.unique_node_ids.id(id)
+    }
+
+    fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R {
+        self.arena.paintable_rows.image_map_areas.with_areas(read)
+    }
 }
 
 impl<Arena> PaintableRowsWrite for PaintableRows<Arena>
 where
     Arena: DerefMut<Target = LayoutNodeArena>,
 {
-    fn paintable_data_mut(&mut self, id: NodeSlotId) -> &mut PaintableData {
+    fn paintable_data_mut(&mut self, id: NodeSlotId) -> PaintableDataMut<'_> {
         PaintableRows::paintable_data_mut(self, id)
     }
 }
@@ -436,11 +859,7 @@ impl PaintableRowStore {
     }
 
     pub(crate) fn invalidate_committed_geometry(&self, layout_slot_index: u32) {
-        if let Some(slot) = self
-            .committed_fragment_links
-            .borrow_mut()
-            .get_mut(layout_slot_index as usize)
-        {
+        if let Some(mut slot) = RowMut::new(self.committed_fragment_links.borrow_mut(), layout_slot_index as usize) {
             slot.geometry_is_current = false;
         }
     }
@@ -453,8 +872,7 @@ impl PaintableRowStore {
         self.committed_fragment_links
             .borrow()
             .get(layout_slot_index as usize)
-            .filter(|slot| slot.layout_slot_generation == layout_slot_generation)
-            .and_then(|slot| slot.link.as_deref().cloned())
+            .and_then(|slot| slot.link_for(layout_slot_generation).cloned())
     }
 
     pub(crate) fn with_committed_fragment_link<R>(
@@ -467,8 +885,7 @@ impl PaintableRowStore {
         read(
             slots
                 .get(layout_slot_index as usize)
-                .filter(|slot| slot.layout_slot_generation == layout_slot_generation)
-                .and_then(|slot| slot.link.as_deref()),
+                .and_then(|slot| slot.link_for(layout_slot_generation)),
         )
     }
 
@@ -477,26 +894,41 @@ impl PaintableRowStore {
         layout_slot_index: u32,
         layout_slot_generation: u8,
         geometry_epoch: Option<u32>,
-        link: fragment_tree::FragmentLink,
+        link: &fragment_tree::FragmentLink,
     ) {
         let mut slots = self.committed_fragment_links.borrow_mut();
-        if slots.len() <= layout_slot_index as usize {
-            slots.resize_with(layout_slot_index as usize + 1, CommittedFragmentLinkSlot::default);
+        slots.grow_to(layout_slot_index as usize + 1);
+        let geometry_is_current = geometry_epoch.is_some();
+        let geometry_epoch = geometry_epoch.unwrap_or_default();
+        // A commit places most fragments again the way the row already holds them.
+        if slots.get(layout_slot_index as usize).is_some_and(|slot| {
+            slot.layout_slot_generation == layout_slot_generation
+                && slot.geometry_epoch == geometry_epoch
+                && slot.geometry_is_current == geometry_is_current
+                && slot
+                    .link()
+                    .is_some_and(|committed| link.places_same_fragment_identically_to(committed))
+        }) {
+            return;
         }
-        let slot = &mut slots[layout_slot_index as usize];
-        if slot.layout_slot_generation != layout_slot_generation {
-            *slot = CommittedFragmentLinkSlot {
-                layout_slot_generation,
-                link: Some(Box::new(link)),
-                ..Default::default()
-            };
-        } else if let Some(retained_link) = &mut slot.link {
-            **retained_link = link;
-        } else {
-            slot.link = Some(Box::new(link));
+        let mut slot = slots
+            .row_mut(layout_slot_index as usize)
+            .expect("the column grew to hold the slot");
+        // A link no published generation shares is overwritten in place.
+        if slot.layout_slot_generation == layout_slot_generation
+            && let Some(retained_link) = slot.link.as_mut().and_then(std::sync::Arc::get_mut)
+        {
+            retained_link.clone_from(link);
+            slot.geometry_epoch = geometry_epoch;
+            slot.geometry_is_current = geometry_is_current;
+            return;
         }
-        slot.geometry_epoch = geometry_epoch.unwrap_or_default();
-        slot.geometry_is_current = geometry_epoch.is_some();
+        *slot = CommittedFragmentLinkSlot {
+            layout_slot_generation,
+            geometry_epoch,
+            geometry_is_current,
+            link: Some(std::sync::Arc::new(link.clone())),
+        };
     }
 
     pub(crate) fn take_committed_fragment_link(
@@ -504,22 +936,17 @@ impl PaintableRowStore {
         layout_slot_index: u32,
         layout_slot_generation: u8,
     ) -> Option<fragment_tree::FragmentLink> {
-        self.committed_fragment_links
-            .borrow_mut()
-            .get_mut(layout_slot_index as usize)
-            .filter(|slot| slot.layout_slot_generation == layout_slot_generation)
-            .and_then(|slot| slot.link.take())
-            .map(|link| *link)
+        let mut slot = RowMut::new(self.committed_fragment_links.borrow_mut(), layout_slot_index as usize)?;
+        if slot.layout_slot_generation != layout_slot_generation || slot.link.is_none() {
+            return None;
+        }
+        slot.link.take().map(std::sync::Arc::unwrap_or_clone)
     }
 
-    pub(crate) fn reset_committed_fragment_link_slot(&self, layout_slot_index: u32) {
-        if let Some(slot) = self
-            .committed_fragment_links
-            .borrow_mut()
-            .get_mut(layout_slot_index as usize)
-        {
-            *slot = CommittedFragmentLinkSlot::default();
-        }
+    pub(crate) fn reset_committed_fragment_link_slot(&mut self, layout_slot_index: u32) {
+        self.committed_fragment_links
+            .get_mut()
+            .set(layout_slot_index as usize, CommittedFragmentLinkSlot::default());
     }
 }
 
@@ -529,9 +956,22 @@ impl LayoutNodeArena {
             return;
         }
         let inputs = crate::painting::paint_order_plan::PaintOrderInputs::gather(&self.paintable_rows(), row);
-        if self.row_paint_state(row).update_order_inputs(inputs) {
+        if self.update_paint_order_inputs(row, inputs) {
             self.note_paint_order_changed(row);
         }
+    }
+
+    /// Records the paint-order decisions gathered for a row, and returns whether they changed.
+    pub(crate) fn update_paint_order_inputs(
+        &self,
+        row: NodeSlotId,
+        inputs: crate::painting::paint_order_plan::PaintOrderInputs,
+    ) -> bool {
+        if self.live_committed_side_data(row).order_inputs == inputs {
+            return false;
+        }
+        self.committed_side_data_mut(row).order_inputs = inputs;
+        true
     }
 
     // A row whose ordering decisions changed is placed differently by its ancestors' plans and
@@ -593,6 +1033,11 @@ impl LayoutNodeArena {
         self.needs_full_scrollable_overflow_recalculation.set(true);
     }
 
+    pub(crate) fn has_scheduled_scrollable_overflow_recalculation(&self) -> bool {
+        self.needs_full_scrollable_overflow_recalculation.get()
+            || !self.boxes_needing_scrollable_overflow_recalculation.borrow().is_empty()
+    }
+
     pub(crate) fn take_scrollable_overflow_recalculation_state(&self) -> (Vec<NodeSlotId>, bool) {
         (
             std::mem::take(&mut *self.boxes_needing_scrollable_overflow_recalculation.borrow_mut()),
@@ -602,18 +1047,6 @@ impl LayoutNodeArena {
 
     pub(crate) fn paintable_rows_mut(&mut self) -> PaintableRowsMut<'_> {
         PaintableRows { arena: self }
-    }
-
-    pub(crate) fn set_chrome_state_callback(
-        &self,
-        context: *mut c_void,
-        callback: unsafe extern "C" fn(*mut c_void, NodeSlotId, PaintableRowResetKind),
-    ) {
-        self.paintable_rows.chrome_state_callback.set(Some((context, callback)));
-    }
-
-    pub(crate) fn clear_chrome_state_callback(&self) {
-        self.paintable_rows.chrome_state_callback.set(None);
     }
 
     pub(crate) fn with_committed_fragment_link<R>(
@@ -640,11 +1073,7 @@ impl LayoutNodeArena {
     }
 
     fn prepare_paintable_row_reset(&self, slot: NodeSlotId, kind: PaintableRowResetKind) -> PaintableRowReset {
-        PaintableRowReset {
-            slot,
-            kind,
-            callback: self.paintable_rows.chrome_state_callback.get(),
-        }
+        PaintableRowReset { slot, kind }
     }
 
     pub(crate) fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
@@ -673,15 +1102,40 @@ impl LayoutNodeArena {
         self.paintable_rows.side_data.borrow().len()
     }
 
-    pub(crate) fn set_paint_recording_in_progress(&self, in_progress: bool) {
-        self.paintable_rows.paint_recording_in_progress.set(in_progress);
+    /// The scroll offset each box holds, as published by the one place the DOM stores it.
+    pub(crate) fn scroll_offsets(&self) -> &ScrollOffsetColumn {
+        &self.paintable_rows.scroll_offsets
     }
 
-    pub(crate) fn debug_assert_not_recording(&self) {
-        debug_assert!(
-            !self.paintable_rows.paint_recording_in_progress.get(),
-            "paint damage pushed during display list recording would be missed by it"
-        );
+    /// The areas of the image map each image is associated with, as the document published them.
+    pub(crate) fn image_map_areas(&self) -> &ImageMapAreaColumn {
+        &self.paintable_rows.image_map_areas
+    }
+
+    /// The unique node id each box is the box of something with, as the document published it.
+    pub(crate) fn unique_node_ids(&self) -> &UniqueNodeIdColumn {
+        &self.paintable_rows.unique_node_ids
+    }
+
+    /// What the document last published about the viewport the render side draws into.
+    pub(crate) fn visual_context_tree_inputs(&self) -> crate::painting::host::FfiVisualContextTreeInputs {
+        self.paintable_rows.visual_context_tree_inputs.get()
+    }
+
+    pub(crate) fn publish_visual_context_tree_inputs(&self, inputs: crate::painting::host::FfiVisualContextTreeInputs) {
+        self.paintable_rows.visual_context_tree_inputs.set(inputs);
+    }
+
+    /// Counts the layout commits the arena has published. A main-side reader that remembers the
+    /// generation it read at can tell whether the committed geometry it saw is still the one
+    /// published, without asking what was dirty at the time.
+    pub(crate) fn layout_commit_generation(&self) -> u64 {
+        self.paintable_rows.layout_commit_generation.get()
+    }
+
+    pub(crate) fn note_layout_commit(&self) {
+        let generation = &self.paintable_rows.layout_commit_generation;
+        generation.set(generation.get().wrapping_add(1));
     }
 
     pub(crate) fn inline_pieces_root(&self, inline_paintable: NodeSlotId) -> Option<NodeSlotId> {
@@ -689,45 +1143,69 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn populate_paintable_row(&mut self, layout_node: NodeSlotId) {
+        self.note_committed_box_changed(layout_node);
         self.note_overflow_contained_box_added(layout_node);
         let overflow_style = self
             .node_style_if_live(layout_node)
             .map(crate::painting::scrollable_overflow::OverflowStyle::new);
-        let store = &mut self.paintable_rows;
-        let index = layout_node.slot_index() as usize;
-        let chunks = &mut store.chunks;
-        let mut side_data = store.side_data.borrow_mut();
-        let mut row_paint_states = store.row_paint_states.borrow_mut();
-        let mut absolute_rect_memo = store.absolute_rect_memo.borrow_mut();
-        let mut visual_context_records = store.visual_context_records.borrow_mut();
-        let mut stacking_context_entries = store.stacking_context_entries.borrow_mut();
-        while side_data.len() <= index {
-            if side_data.len().is_multiple_of(PAINTABLE_SLOTS_PER_CHUNK) {
-                chunks.push(new_chunk());
+        {
+            let store = &mut self.paintable_rows;
+            let index = layout_node.slot_index() as usize;
+            let mut side_data = store.side_data.borrow_mut();
+            let mut row_paint_states = store.row_paint_states.borrow_mut();
+            let mut absolute_rect_memo = store.absolute_rect_memo.borrow_mut();
+            let mut visual_context_records = store.visual_context_records.borrow_mut();
+            let mut stacking_context_entries = store.stacking_context_entries.borrow_mut();
+            while side_data.len() <= index {
+                side_data.push(PaintableSideData::default());
+                row_paint_states.push(RowPaintState::default());
+                absolute_rect_memo.push(None);
+                visual_context_records.push(None);
             }
-            side_data.push(PaintableSideData::default());
-            row_paint_states.push(RowPaintState::default());
-            absolute_rect_memo.push(None);
-            visual_context_records.push(None);
-            stacking_context_entries.push(None);
-        }
+            stacking_context_entries.grow_to(side_data.len());
+            let visual_context_node_handles = store.visual_context_node_handles.get_mut();
+            visual_context_node_handles.grow_to(side_data.len());
+            publish_visual_context_node_handles(visual_context_node_handles, index, None);
 
-        chunks[index / PAINTABLE_SLOTS_PER_CHUNK].slots[index % PAINTABLE_SLOTS_PER_CHUNK] = PaintableData {
-            slot_generation: layout_node.generation(),
-            ..PaintableData::default()
-        };
-        side_data[index] = PaintableSideData {
-            overflow_style,
-            ..Default::default()
-        };
-        row_paint_states[index].clear();
-        absolute_rect_memo[index] = None;
-        visual_context_records[index] = None;
-        stacking_context_entries[index] = None;
+            store.rows.grow_to(side_data.len());
+            let committed_side_data = store.committed_side_data.get_mut();
+            committed_side_data.grow_to(side_data.len());
+            committed_side_data
+                .set(index, CommittedSideData::default())
+                .expect("the row was just grown");
+            let row_reset_version = store.rows.get(index).map_or(0, |row| row.row_reset_version);
+            store
+                .rows
+                .set(
+                    index,
+                    PaintableData {
+                        slot_generation: layout_node.generation(),
+                        row_reset_version,
+                        ..PaintableData::default()
+                    },
+                )
+                .expect("the row was just grown");
+            side_data[index] = PaintableSideData {
+                overflow_style,
+                ..Default::default()
+            };
+            row_paint_states[index].clear();
+            absolute_rect_memo[index] = None;
+            self.scrollable_overflow.rows_to_measure.get_mut().push(layout_node);
+            visual_context_records[index] = None;
+            crate::painting::stacking_context::entries::drop_table(&mut stacking_context_entries, index);
+        }
+        self.flush_committed_box_changes();
     }
 
     fn reset_paintable_row(&mut self, row_is_still_linked: bool, reset: PaintableRowReset) {
         let id = reset.slot;
+        if reset.kind == crate::painting::paintable_data::PaintableRowResetKind::Freed {
+            self.paintable_rows.scroll_offsets.forget(id);
+            self.paintable_rows.unique_node_ids.forget(id);
+            self.paintable_rows.image_map_areas.forget(id);
+        }
+        self.note_committed_box_changed(id);
         if row_is_still_linked {
             // A cleared row is still linked, so the ancestor whose plans listed it is known now.
             self.push_enclosing_paint_order_damage(id);
@@ -756,12 +1234,28 @@ impl LayoutNodeArena {
         self.clear_absolute_rect_memo();
         let store = &mut self.paintable_rows;
         let index = id.slot_index() as usize;
-        store.chunks[index / PAINTABLE_SLOTS_PER_CHUNK].slots[index % PAINTABLE_SLOTS_PER_CHUNK] =
-            PaintableData::default();
+        let row_reset_version = store.rows.get(index).map_or(0, |row| row.row_reset_version) + 1;
+        store
+            .rows
+            .set(
+                index,
+                PaintableData {
+                    row_reset_version,
+                    ..PaintableData::default()
+                },
+            )
+            .expect("invalid paintable arena slot ID");
         store.side_data.borrow_mut()[index] = PaintableSideData::default();
+        store
+            .committed_side_data
+            .get_mut()
+            .set(index, CommittedSideData::default())
+            .expect("invalid paintable arena slot ID");
         store.row_paint_states.borrow()[index].clear();
         store.visual_context_records.borrow_mut()[index] = None;
-        store.stacking_context_entries.borrow_mut()[index] = None;
+        publish_visual_context_node_handles(store.visual_context_node_handles.get_mut(), index, None);
+        crate::painting::stacking_context::entries::drop_table(store.stacking_context_entries.get_mut(), index);
+        self.flush_committed_box_changes();
     }
 
     pub(crate) fn paintable_visual_context_record(
@@ -790,15 +1284,21 @@ impl LayoutNodeArena {
 
     pub(crate) fn set_paintable_visual_context_record(&self, id: NodeSlotId, record: PaintableVisualContextRecord) {
         debug_assert!(self.paintable_row_is_populated(id));
-        let inputs = self.row_paint_state(id).order_inputs().map(|inputs| {
+        let prepared = self.live_committed_side_data(id).prepared_order_inputs();
+        let inputs = prepared.map(|inputs| {
             inputs.with_visual_context(
                 &record.stacking_context,
                 crate::painting::style_queries::z_index(self, id),
             )
         });
+        publish_visual_context_node_handles(
+            &mut self.paintable_rows.visual_context_node_handles.borrow_mut(),
+            id.slot_index() as usize,
+            Some(&record.node_handles),
+        );
         self.paintable_rows.visual_context_records.borrow_mut()[id.slot_index() as usize] = Some(record);
         if let Some(inputs) = inputs {
-            if self.row_paint_state(id).update_order_inputs(inputs) {
+            if self.update_paint_order_inputs(id, inputs) {
                 self.note_paint_order_changed(id);
             }
         } else {
@@ -809,6 +1309,10 @@ impl LayoutNodeArena {
 
     pub(crate) fn drop_all_visual_context_records(&self) {
         self.paintable_rows.visual_context_records.borrow_mut().fill(None);
+        let mut handles = self.paintable_rows.visual_context_node_handles.borrow_mut();
+        for index in 0..self.paintable_row_count() {
+            publish_visual_context_node_handles(&mut handles, index, None);
+        }
     }
 
     pub(crate) fn with_paintable_visual_context_node_handles<R>(
@@ -820,38 +1324,6 @@ impl LayoutNodeArena {
             Some(record) => read(&record.node_handles),
             None => read(&EMPTY_BOX_VISUAL_CONTEXT_NODE_HANDLES),
         }
-    }
-
-    /// The nodes of the box that an animation of the kind drives: the effect nodes of an opacity,
-    /// background color or filter animation, or the spatial nodes of a transform animation, as far
-    /// as the tree holds nodes of the right kind for them.
-    pub(crate) fn paintable_visual_animation_target_indices(
-        &self,
-        id: NodeSlotId,
-        tree: Option<&crate::painting::visual_context::VisualContextTree>,
-        target_kind: crate::painting::host::FfiVisualAnimationTargetKind,
-    ) -> Vec<u32> {
-        use crate::painting::host::FfiVisualAnimationTargetKind;
-        let Some(tree) = tree else {
-            return Vec::new();
-        };
-        self.with_paintable_visual_context_node_handles(id, |handles| {
-            let valid_targets = |indices: &mut dyn Iterator<Item = u32>| -> Vec<u32> {
-                indices
-                    .filter(|&index| tree.visual_animation_target_is_valid(target_kind, index))
-                    .collect()
-            };
-            match target_kind {
-                FfiVisualAnimationTargetKind::Opacity
-                | FfiVisualAnimationTargetKind::BackgroundColor
-                | FfiVisualAnimationTargetKind::Filter => {
-                    valid_targets(&mut handles.effects.iter().map(|index| index.0))
-                }
-                FfiVisualAnimationTargetKind::Transform => {
-                    valid_targets(&mut handles.spatial.iter().map(|index| index.0))
-                }
-            }
-        })
     }
 
     pub(crate) fn mark_paintable_subtree_may_own_geometry_dependent_nodes(&self, id: NodeSlotId) -> Option<bool> {
@@ -937,13 +1409,153 @@ impl LayoutNodeArena {
         self.paintable_rows().paintable_row_is_populated(id)
     }
 
-    fn paintable_data_by_index(&self, index: u32) -> &PaintableData {
-        let chunk = self
+    /// Lets a writer that runs while nothing reads the published rows write their chunks in place: the rows published
+    /// last let go of them until the writer's unit publishes again.
+    pub(crate) fn release_published_paintable_rows(&mut self) {
+        self.paintable_rows.published = None;
+        self.release_published_paintable_rows_of_row_snapshot();
+    }
+
+    /// Brings the published generation of the rows up to date with what writers changed since it was published.
+    pub(crate) fn publish_paintable_rows(&mut self) -> PublishedRows {
+        let visual_context_tree = self.paint_state().borrow().visual_context.tree.clone();
+        let store = &mut self.paintable_rows;
+        let fragment_links = store.committed_fragment_links.get_mut();
+        let side_data = store.committed_side_data.get_mut();
+        let unique_node_ids = store.unique_node_ids.ids.get_mut();
+        let stacking_context_entries = store.stacking_context_entries.get_mut();
+        let visual_context_node_handles = store.visual_context_node_handles.get_mut();
+        let Some(published) = &mut store.published else {
+            let published = PublishedRows {
+                rows: store.rows.publish(),
+                fragment_links: fragment_links.publish(),
+                side_data: side_data.publish(),
+                unique_node_ids: unique_node_ids.publish(),
+                stacking_context_entries: stacking_context_entries.publish(),
+                visual_context_node_handles: visual_context_node_handles.publish(),
+                scroll_offsets: store.scroll_offsets.snapshot(),
+                image_map_areas: store.image_map_areas.snapshot(),
+                visual_context_tree,
+                hit_test_list: self.hit_test_list.get_mut().clone(),
+            };
+            store.published = Some(published.clone());
+            return published;
+        };
+        if store.rows.written_since_publish() {
+            published.rows = store.rows.publish();
+        }
+        if fragment_links.written_since_publish() {
+            published.fragment_links = fragment_links.publish();
+        }
+        if side_data.written_since_publish() {
+            published.side_data = side_data.publish();
+        }
+        if unique_node_ids.written_since_publish() {
+            published.unique_node_ids = unique_node_ids.publish();
+        }
+        if stacking_context_entries.written_since_publish() {
+            published.stacking_context_entries = stacking_context_entries.publish();
+        }
+        if visual_context_node_handles.written_since_publish() {
+            published.visual_context_node_handles = visual_context_node_handles.publish();
+        }
+        published.scroll_offsets = store.scroll_offsets.snapshot();
+        published.image_map_areas = store.image_map_areas.snapshot();
+        published.visual_context_tree = visual_context_tree;
+        published.hit_test_list = self.hit_test_list.get_mut().clone();
+        published.clone()
+    }
+
+    /// What the document thread reads of the paint state beside the rows, as it is now.
+    pub(crate) fn paint_status(&self) -> PaintStatus {
+        let overflow = &self.scrollable_overflow;
+        let paint_state = self.paint_state().borrow();
+        PaintStatus {
+            scrollable_overflow_unmeasured: overflow.full_layout_commit.get()
+                || !overflow.rows_to_measure.borrow().is_empty()
+                || self.has_scheduled_scrollable_overflow_recalculation(),
+            scrollable_overflow_recalculations: overflow.recalculations.get(),
+            visual_context_dirty_boxes: paint_state.visual_context.dirty_boxes.boxes.len(),
+            layout_commit_generation: self.layout_commit_generation(),
+            last_recording_missed_vector_images: paint_state
+                .last_recording
+                .as_ref()
+                .is_some_and(|recording| !recording.missed_vector_images.is_empty()),
+            root_background_source: paint_state.root_background_source.unwrap_or_default(),
+        }
+    }
+
+    /// Publishes the rows as committed: with the scrollable overflow a commit or a writer left measured first.
+    pub(crate) fn publish_committed_rows(&mut self) {
+        self.measure_scrollable_overflow_on_stage_before_publication();
+        self.publish_rows();
+    }
+
+    /// Publishes the rows as they are now, for a recording to read while the arena goes on
+    /// changing.
+    pub(crate) fn freeze_paint_frame(&mut self) -> PublishedFrame {
+        self.publish_rows();
+        let retired_slots = self.retire_freed_slots_while_frame_lives();
+        let hit_test_item_capacity_hint = self.hit_test_list.get_mut().as_ref().map_or(0, |list| list.items.len());
+        let paint_state = crate::painting::published_frame::PublishedPaintState::new(
+            &self.paint_state().borrow(),
+            hit_test_item_capacity_hint,
+        );
+        let damage = self.paint_damage_for_frame();
+        PublishedFrame::new(self.published_rows(), retired_slots, damage, paint_state)
+    }
+
+    /// The geometry epoch of the absolute rect memo, which a publication of the rows carries.
+    pub(crate) fn absolute_rect_memo_epoch(&self) -> u64 {
+        self.paintable_rows.absolute_rect_memo_epoch.get()
+    }
+
+    /// Reads the rows as committed, which it publishes first.
+    #[cfg(test)]
+    pub(crate) fn with_committed_rows<R>(
+        &mut self,
+        read: impl FnOnce(&crate::painting::published_frame::PaintSource<'_>) -> R,
+    ) -> R {
+        self.publish_committed_rows();
+        let rows = self.published_rows();
+        let absolute_rects = RefCell::default();
+        read(&crate::painting::published_frame::PaintSource::of_rows(
+            &rows,
+            &absolute_rects,
+        ))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn published_fragment_link_for_test(&self, id: NodeSlotId) -> Option<fragment_tree::FragmentLink> {
+        self.paintable_rows
+            .published
+            .as_ref()?
+            .fragment_links
+            .get(id.slot_index() as usize)?
+            .link_for(id.generation())
+            .cloned()
+    }
+
+    pub(crate) fn live_paintable_data(&self, id: NodeSlotId) -> &PaintableData {
+        assert!(!id.is_invalid(), "invalid paintable arena slot ID");
+        let data = self
             .paintable_rows
-            .chunks
-            .get(index as usize / PAINTABLE_SLOTS_PER_CHUNK)
-            .expect("invalid paintable arena slot index");
-        &chunk.slots[index as usize % PAINTABLE_SLOTS_PER_CHUNK]
+            .rows
+            .get(id.slot_index() as usize)
+            .expect("invalid paintable arena slot ID");
+        assert_eq!(
+            data.slot_generation,
+            id.generation(),
+            "paintable arena read a stale or unused slot"
+        );
+        data
+    }
+
+    fn paintable_data_by_index(&self, index: u32) -> &PaintableData {
+        self.paintable_rows
+            .rows
+            .get(index as usize)
+            .expect("invalid paintable arena slot index")
     }
 
     pub(crate) fn transfer_fragments_to_replacement_node(
@@ -956,13 +1568,16 @@ impl LayoutNodeArena {
             return;
         }
         self.push_paint_damage(containing_block, PaintDamage::ALL_PRODUCERS);
-        let mut side = self.paintable_side_data_mut(containing_block);
+        if self.live_committed_side_data(containing_block).inline_content.is_none() {
+            return;
+        }
+        let mut side = self.committed_side_data_mut(containing_block);
         let Some(content) = side.inline_content.as_mut() else {
             return;
         };
         // Replacement preserves current paint geometry until the next layout commit. Give that
         // version new node identities without modifying retained run outputs or copying glyphs.
-        let content = std::rc::Rc::make_mut(content);
+        let content = std::sync::Arc::make_mut(content);
         for fragment in &mut content.fragments {
             if fragment.layout_node == old_node {
                 fragment.layout_node = new_node;
@@ -986,16 +1601,49 @@ impl LayoutNodeArena {
         })
     }
 
+    pub(crate) fn svg_filter_bounds(&self, id: NodeSlotId) -> Option<used_values::FfiCssPixelRect> {
+        self.live_committed_side_data(id).svg_filter_bounds
+    }
+
+    pub(crate) fn fragment_ownership_filter(
+        &self,
+        id: NodeSlotId,
+    ) -> Option<crate::painting::fragment_ownership::FragmentOwnershipFilter> {
+        self.live_committed_side_data(id).fragment_ownership.as_deref().cloned()
+    }
+
     pub(crate) fn paintable_side_data_mut(&self, id: NodeSlotId) -> RefMut<'_, PaintableSideData> {
         debug_assert!(self.paintable_row_is_populated(id));
         RefMut::map(self.paintable_rows.side_data.borrow_mut(), |side_data| {
             &mut side_data[id.slot_index() as usize]
         })
     }
+
+    /// The side data a row is committing, as the render side reads it. The main side reads it
+    /// through [`PaintableRowsRead::committed_side_data`], which sees the published generation.
+    pub(crate) fn live_committed_side_data(&self, id: NodeSlotId) -> Ref<'_, CommittedSideData> {
+        debug_assert!(self.paintable_row_is_populated(id));
+        Ref::map(self.paintable_rows.committed_side_data.borrow(), |side_data| {
+            side_data
+                .get(id.slot_index() as usize)
+                .expect("invalid paintable arena slot ID")
+        })
+    }
+
+    /// Writing copies the row's chunk only if a published generation shares it and the row
+    /// changes.
+    pub(crate) fn committed_side_data_mut(&self, id: NodeSlotId) -> CommittedSideDataMut<'_> {
+        debug_assert!(self.paintable_row_is_populated(id));
+        RowMut::new(
+            self.paintable_rows.committed_side_data.borrow_mut(),
+            id.slot_index() as usize,
+        )
+        .expect("invalid paintable arena slot ID")
+    }
 }
 
 pub(crate) fn with_inline_pieces(
-    arena: &impl PaintableRowsRead,
+    arena: &impl GeometryRead,
     inline_paintable: NodeSlotId,
     mut callback: impl FnMut(&InlineBoxPieceRecord, &PaintableData) -> bool,
 ) {
@@ -1003,8 +1651,8 @@ pub(crate) fn with_inline_pieces(
         return;
     };
     let data = arena.paintable_data(inline_paintable);
-    let root_side = arena.paintable_side_data(root);
-    for piece_index in &arena.paintable_side_data(inline_paintable).piece_indices {
+    let root_side = arena.committed_side_data(root);
+    for piece_index in arena.committed_side_data(inline_paintable).piece_indices() {
         let piece = &root_side.inline_box_pieces()[*piece_index as usize];
         if !callback(piece, data) {
             return;

@@ -34,7 +34,7 @@ pub(crate) struct LineRootChanges {
 fn same_inline_content(left: &fragment_tree::Fragment, right: &fragment_tree::Fragment) -> bool {
     match (&left.line_data, &right.line_data) {
         (None, None) => true,
-        (Some(left), Some(right)) => std::rc::Rc::ptr_eq(left, right) || left == right,
+        (Some(left), Some(right)) => std::sync::Arc::ptr_eq(left, right) || left == right,
         _ => false,
     }
 }
@@ -73,8 +73,10 @@ fn has_descendant_dependent_paint(arena: &LayoutNodeArena, node: NodeSlotId) -> 
 pub(crate) struct PaintableCommit<'a> {
     arena: &'a mut LayoutNodeArena,
     is_full_layout: bool,
-    committed_navigable_container_viewports: Vec<NodeSlotId>,
-    row_reset_notifications: Vec<crate::painting::paintable_rows::PaintableRowReset>,
+    /// The navigable container viewports the commit reached, with the content size each was
+    /// committed with before, if it had a row.
+    committed_navigable_container_viewports: Vec<(NodeSlotId, Option<used_values::FfiCssPixelSize>)>,
+    row_resets: crate::painting::paintable_rows::RowResetsForHost,
     overflow_invalidated_boxes: crate::fast_hash::FastSet<NodeSlotId>,
 }
 
@@ -85,7 +87,7 @@ impl<'a> PaintableCommit<'a> {
             arena,
             is_full_layout,
             committed_navigable_container_viewports: Vec::new(),
-            row_reset_notifications: Vec::new(),
+            row_resets: Default::default(),
             overflow_invalidated_boxes: Default::default(),
         }
     }
@@ -98,6 +100,7 @@ impl<'a> PaintableCommit<'a> {
         self.arena
     }
 
+    /// Hands the main side the rows this commit wrote.
     pub(crate) fn discard_absolute_rects_memoized_during_commit(&self) {
         self.arena().clear_absolute_rect_memo();
     }
@@ -135,7 +138,7 @@ impl<'a> PaintableCommit<'a> {
                         .prepare_paintable_row_cleared_reset(node)
                         .expect("live row for node could not be cleared")
                 };
-                self.row_reset_notifications.push(reset);
+                self.row_resets.note_reset();
                 self.arena_mut().paintable_row_cleared(reset);
             }
             return PreparedPaintable {
@@ -145,7 +148,10 @@ impl<'a> PaintableCommit<'a> {
             };
         }
         if node_kind == NodeKind::NavigableContainerViewport {
-            self.committed_navigable_container_viewports.push(node);
+            let previous_content_size =
+                row_existed_before_this_commit.then(|| self.arena().paintable_rows().paintable_data(node).content_size);
+            self.committed_navigable_container_viewports
+                .push((node, previous_content_size));
         }
         if reuses_committed_subtree {
             assert!(
@@ -172,11 +178,11 @@ impl<'a> PaintableCommit<'a> {
             }
         }
         if row_existed_before_this_commit {
-            let notification = self
-                .arena()
-                .paintable_rows()
-                .prepare_paintable_row_recommit_notification(node);
-            self.row_reset_notifications.push(notification);
+            if node_kind == NodeKind::Viewport {
+                self.row_resets.note_viewport_row_recommitted();
+            } else {
+                self.row_resets.note_reset();
+            }
         }
         let arena = self.arena_mut();
         if row_existed_before_this_commit {
@@ -201,15 +207,26 @@ impl<'a> PaintableCommit<'a> {
         }
     }
 
-    pub(crate) fn take_row_reset_notifications(&mut self) -> Vec<crate::painting::paintable_rows::PaintableRowReset> {
-        std::mem::take(&mut self.row_reset_notifications)
+    pub(crate) fn take_row_resets(&mut self) -> crate::painting::paintable_rows::RowResetsForHost {
+        std::mem::take(&mut self.row_resets)
     }
 
-    pub(crate) fn committed_navigable_container_viewport_shells(&self) -> Vec<*mut std::ffi::c_void> {
+    pub(crate) fn committed_navigable_container_viewports(
+        &self,
+    ) -> &[(NodeSlotId, Option<used_values::FfiCssPixelSize>)] {
+        &self.committed_navigable_container_viewports
+    }
+
+    /// Whether the commit gave a navigable container viewport another content size than it had,
+    /// which the navigable it hosts is laid out at.
+    pub(crate) fn resized_a_navigable_container_viewport(&self) -> bool {
         self.committed_navigable_container_viewports
             .iter()
-            .map(|node| self.arena().node_shell(*node))
-            .collect()
+            .any(|(node, previous_content_size)| {
+                let rows = self.arena().paintable_rows();
+                !rows.paintable_row_is_populated(*node)
+                    || *previous_content_size != Some(rows.paintable_data(*node).content_size)
+            })
     }
 
     pub(crate) fn replace_committed_fragment_link(
@@ -333,9 +350,8 @@ impl<'a> PaintableCommit<'a> {
         if !fragment_content_unchanged
             || !self
                 .arena()
-                .paintable_side_data(node)
+                .live_committed_side_data(node)
                 .overflow_valid_across_recommits
-                .get()
         {
             self.schedule_scrollable_overflow_recalculation(node);
         } else if !offset_unchanged {
@@ -347,15 +363,15 @@ impl<'a> PaintableCommit<'a> {
         {
             let arena = self.arena_mut();
             let mut paintable_rows = arena.paintable_rows_mut();
-            let data = paintable_rows.paintable_data_mut(node);
+            let mut data = paintable_rows.paintable_data_mut(node);
             data.content_size = new_content_size;
             data.offset = link.committed_offset;
         }
-        let data = self.arena().data(node);
         self.arena().set_committed_fragment_link(
-            data,
-            link.clone(),
-            self.arena().epoch_of_geometry_laid_out_in_this_pass(data),
+            node,
+            link,
+            self.arena()
+                .epoch_of_geometry_laid_out_in_this_pass(self.arena().data(node)),
         );
         ReplacedCommittedFragmentLink {
             content_size_change,
@@ -370,15 +386,13 @@ impl<'a> PaintableCommit<'a> {
     pub(crate) fn set_line_data(
         &self,
         slot: NodeSlotId,
-        line_data: &std::rc::Rc<crate::layout::inline_content::InlineContent>,
+        line_data: &std::sync::Arc<crate::layout::inline_content::InlineContent>,
     ) -> bool {
         if !node_painting::has_lines(self.arena(), slot) {
             return false;
         }
         let has_pieces = !line_data.inline_box_pieces.is_empty();
-        let mut side = self.arena().paintable_side_data_mut(slot);
-        side.inline_content = Some(line_data.clone());
-        drop(side);
+        self.arena().committed_side_data_mut(slot).inline_content = Some(line_data.clone());
         if has_pieces {
             self.arena().note_line_root_needs_fragment_ownership(slot);
         }
@@ -434,9 +448,10 @@ impl<'a> PaintableCommit<'a> {
         } else {
             NodeSlotId::INVALID
         };
-        let data = paintable_rows.paintable_data_mut(node);
+        let mut data = paintable_rows.paintable_data_mut(node);
         let containing_block_changed = data.containing_block != containing_block;
         data.containing_block = containing_block;
+        drop(data);
         if containing_block_changed {
             paintable_rows.note_visual_context_box_dirty(node, VisualContextBoxDirtyKind::ContainingBlockChanged);
             paintable_rows.push_paint_damage(node, PaintDamage::MOVED);
@@ -448,7 +463,7 @@ impl<'a> PaintableCommit<'a> {
         let mut paintable_rows = arena.paintable_rows_mut();
         let mut piece_indices_by_node: Vec<(NodeSlotId, Vec<u32>)> = Vec::new();
         for (piece_index, piece) in paintable_rows
-            .paintable_side_data(slot)
+            .committed_side_data(slot)
             .inline_box_pieces()
             .iter()
             .enumerate()
@@ -487,7 +502,7 @@ impl<'a> PaintableCommit<'a> {
                 }
             };
             for piece_index in &piece_indices {
-                let piece = paintable_rows.paintable_side_data(slot).inline_box_pieces()[*piece_index as usize];
+                let piece = paintable_rows.committed_side_data(slot).inline_box_pieces()[*piece_index as usize];
                 let border_rect = CssPixelRect::from(piece.border_box_rect);
                 if piece.is_geometry_only_placeholder {
                     let content_rect = border_rect;
@@ -520,7 +535,7 @@ impl<'a> PaintableCommit<'a> {
             let padding_union = padding_union.expect("padding union set alongside content union");
             let border_union = border_union.expect("border union set alongside content union");
             {
-                let data = paintable_rows.paintable_data_mut(piece_node);
+                let mut data = paintable_rows.paintable_data_mut(piece_node);
                 let new_offset = content_union.location().into();
                 let new_content_size = content_union.size().into();
                 let new_padding_box_union = padding_union.translated(-content_union.x, -content_union.y).into();
@@ -533,13 +548,14 @@ impl<'a> PaintableCommit<'a> {
                 data.content_size = new_content_size;
                 data.local_padding_box_union = new_padding_box_union;
                 data.local_border_box_union = new_border_box_union;
+                drop(data);
                 if inline_geometry_changed {
                     paintable_rows
                         .note_visual_context_box_dirty(piece_node, VisualContextBoxDirtyKind::InlineGeometryChanged);
                 }
             }
             // This box has at most one piece per line, so its piece indices are ordered by line.
-            paintable_rows.paintable_side_data_mut(piece_node).piece_indices = piece_indices;
+            paintable_rows.committed_side_data_mut(piece_node).piece_indices = Some(piece_indices.into());
         }
     }
 }

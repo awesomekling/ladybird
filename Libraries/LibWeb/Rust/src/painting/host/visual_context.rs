@@ -6,7 +6,6 @@
 
 use crate::css::easing::FfiEasingDescriptor;
 use crate::css::ffi_support::FfiUtf16View;
-use crate::layout::used_values;
 use crate::layout::used_values::OptionalCssPixelRect;
 use libgfx_rust::filter::Filter;
 use libgfx_rust::{Color, CompositingAndBlendingOperator, IntRect, InterpolationColorSpace};
@@ -47,6 +46,8 @@ pub struct FfiVisualContextUpdateOutcome {
     pub structural_epoch_changed: bool,
     pub requires_display_list_recording: bool,
     pub structural_epoch: u64,
+    /// Whether the update changed the tree at all: a node's payload, or its structure.
+    pub tree_changed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -144,30 +145,6 @@ pub(crate) struct ResolvedSvgFilter {
     /// primitives.
     pub filter: Option<Filter>,
     pub svg_filter_bounds: OptionalCssPixelRect,
-}
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiVisualContextHostCallbacks {
-    pub context: *mut c_void,
-    pub tree_inputs: unsafe extern "C" fn(*mut c_void) -> FfiVisualContextTreeInputs,
-    pub scroll_offset: unsafe extern "C" fn(*mut c_void, *mut c_void) -> used_values::FfiCssPixelPoint,
-    pub node_identity: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i64,
-}
-
-impl FfiVisualContextHostCallbacks {
-    pub(crate) fn tree_inputs(&self) -> FfiVisualContextTreeInputs {
-        // SAFETY: The C++ host answers synchronously.
-        unsafe { (self.tree_inputs)(self.context) }
-    }
-    pub(crate) fn node_identity(&self, layout_node_shell: *mut c_void) -> i64 {
-        // SAFETY: The C++ host answers synchronously from a live layout node shell.
-        unsafe { (self.node_identity)(self.context, layout_node_shell) }
-    }
-    pub(crate) fn scroll_offset(&self, layout_node_shell: *mut c_void) -> used_values::FfiCssPixelPoint {
-        // SAFETY: The C++ host answers synchronously from a live layout node shell.
-        unsafe { (self.scroll_offset)(self.context, layout_node_shell) }
-    }
 }
 
 /// Whether a keyframe gives a property a value of its own, takes the target's underlying style

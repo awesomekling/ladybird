@@ -4,21 +4,29 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+//! A document's hit-test list, and the queries made of it.
+//!
+//! A hit test, its caret lines and its resolution to the rows a hit names read the rows the list was
+//! recorded over as [`PaintRead`] answers them, and nothing else: whatever answers [`PaintRead`], a
+//! published frame included, answers a hit test. A hit names rows; which DOM node a row stands for,
+//! and whether that node lies in a scope, is the caller's to decide.
+
 pub mod caret;
 pub mod geometry;
 pub mod query;
 pub mod resolve;
+pub mod snapshot;
+pub mod snapshot_caret;
 
 use crate::css::css_pixels::CssPixels;
 use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};
 use crate::css::style::fast_hash::FastMap;
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::host::FfiHitTestQueryCallbacks;
-use crate::painting::paintable_rows::PaintableRowsRef;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::visual_context::{ClipBehavior, VisualContextTree};
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -54,7 +62,7 @@ pub struct HitTestItem {
     pub block_container: NodeSlotId,
     pub context: ContextRef,
     pub border_radii: BorderRadii,
-    pub path: Option<Rc<libgfx_rust::path::OwnedPath>>,
+    pub path: Option<Arc<libgfx_rust::path::OwnedPath>>,
     pub winding_rule: i32,
     pub writing_mode: u8,
     pub inline_axis_is_reverse: bool,
@@ -70,7 +78,7 @@ impl HitTestItem {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct SpatialIndex {
     pub cells: FastMap<u64, Vec<usize>>,
     pub unbucketed_items: Vec<usize>,
@@ -124,10 +132,12 @@ pub fn rects_overlap_in_block_axis(a: CssPixelRect, b: CssPixelRect, writing_mod
         && block_axis_start(b, writing_mode) < block_axis_end(a, writing_mode)
 }
 
-#[derive(Default)]
+/// A published generation of the rows pins the list recorded against it. The derived structures
+/// are built before publication, when a query first needs them.
+#[derive(Clone, Default)]
 pub struct HitTestList {
     pub generation: u64,
-    pub items: std::rc::Rc<Vec<HitTestItem>>,
+    pub items: Arc<Vec<HitTestItem>>,
     pub item_capacity_hint_from_previous_list: usize,
     /// Point queries read only the spatial indexes, and caret navigation reads only the caret lines,
     /// which resolve line box geometry for every caret-capable item. Each is built on first use.
@@ -145,7 +155,7 @@ impl HitTestList {
             !self.spatial_indexes_built && !self.caret_lines_built,
             "hit-test item appended after the derived structures were built"
         );
-        let items = std::rc::Rc::make_mut(&mut self.items);
+        let items = Arc::make_mut(&mut self.items);
         if items.capacity() == 0 {
             items.reserve(self.item_capacity_hint_from_previous_list);
         }
@@ -160,14 +170,14 @@ impl HitTestList {
         if source.is_empty() {
             return;
         }
-        let items = Rc::make_mut(&mut self.items);
+        let items = Arc::make_mut(&mut self.items);
         if items.capacity() == 0 {
             items.reserve(self.item_capacity_hint_from_previous_list.max(source.len()));
         }
         items.extend_from_slice(source);
     }
 
-    pub(crate) fn caret_line_rect_for_item(rows: &PaintableRowsRef<'_>, item: &HitTestItem) -> CssPixelRect {
+    pub(crate) fn caret_line_rect_for_item(rows: &impl PaintRead, item: &HitTestItem) -> CssPixelRect {
         let Some(line_rect) = geometry::containing_line_box_rect(rows, item) else {
             return item.caret_rect;
         };
@@ -193,12 +203,12 @@ impl HitTestList {
         }
     }
 
-    pub(crate) fn build_caret_lines_if_needed(&mut self, arena: &LayoutNodeArena) {
+    pub(crate) fn build_caret_lines_if_needed(&mut self, arena: &impl PaintRead) {
         if self.caret_lines_built {
             return;
         }
         self.caret_lines_built = true;
-        let rows = arena.paintable_rows();
+        let rows = arena;
         // Inline boxes and text from one layout line can be separated in paint order.
         // Gather that line's caret targets together while preserving the order in
         // which lines first appeared, and the paint order of targets within each line.
@@ -220,7 +230,7 @@ impl HitTestList {
         }
         for group in groups {
             for item_index in group {
-                self.add_item_to_caret_items(&rows, item_index);
+                self.add_item_to_caret_items(rows, item_index);
             }
         }
     }
@@ -280,7 +290,7 @@ impl HitTestList {
         }
     }
 
-    fn add_item_to_caret_items(&mut self, rows: &PaintableRowsRef<'_>, item_index: usize) {
+    fn add_item_to_caret_items(&mut self, rows: &impl PaintRead, item_index: usize) {
         let item = &self.items[item_index];
         let caret_item_index = self.caret_item_indices.len();
         self.caret_item_indices.push(item_index);

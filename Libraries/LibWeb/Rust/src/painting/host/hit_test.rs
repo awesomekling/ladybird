@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use crate::layout::node_data::NodeSlotId;
 use crate::layout::used_values;
 use crate::painting::display_list::commands::ContextRef;
 use std::ffi::c_void;
@@ -20,14 +19,25 @@ pub struct FfiHitTestQueryCallbacks {
     pub chrome_metrics: crate::painting::ffi::FfiChromeMetrics,
     pub viewport_wheel_overflow_x: u8,
     pub viewport_wheel_overflow_y: u8,
-    pub shell_in_scope: unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool,
+    /// For a caret line search confined to a DOM node, whether each caret line is in scope: one of
+    /// its caret items stands for that node or for a node below it in the DOM tree, which the host
+    /// decides from the nodes a snapshot names for the line
+    /// (`hit_test_snapshot_visit_caret_line_nodes`). Empty for an unscoped search; a line past
+    /// the end is out of scope.
+    pub lines_in_scope: *const bool,
+    pub lines_in_scope_len: usize,
 }
 
 impl FfiHitTestQueryCallbacks {
-    pub(crate) fn shell_in_scope(&self, shell: *mut c_void) -> bool {
-        // SAFETY: The C++ host answers synchronously.
-        unsafe { (self.shell_in_scope)(self.context, shell) }
+    pub(crate) fn line_is_in_scope(&self, line_index: usize) -> bool {
+        if self.lines_in_scope.is_null() {
+            return false;
+        }
+        // SAFETY: The host keeps the mask alive for the synchronous query.
+        let lines_in_scope = unsafe { std::slice::from_raw_parts(self.lines_in_scope, self.lines_in_scope_len) };
+        lines_in_scope.get(line_index).copied().unwrap_or(false)
     }
+
     pub(crate) fn scroll_offsets(&self) -> &[libgfx_rust::FloatPoint] {
         if self.scroll_offsets.is_null() {
             return &[];
@@ -37,40 +47,63 @@ impl FfiHitTestQueryCallbacks {
     }
 }
 
+/// A caret boundary, as the node identities a hit test item can be compared against.
+///
+/// The five questions a caret position query asks of a candidate item all reduce to "which node
+/// is it", so the host resolves the boundary's neighbourhood once before the query runs and the
+/// query compares identities. A node the style mirror holds no identity for is named by 0, which
+/// matches nothing: an item that stands for no DOM node is named by 0 as well.
 #[derive(Clone, Copy)]
 #[repr(C)]
-pub struct FfiCaretPositionQueryCallbacks {
-    pub context: *mut c_void,
-    pub shell_is_query_node: unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool,
-    pub query_boundary_descends_to_shell: unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool,
-    pub query_boundary_follows_shell_end: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> bool,
-    pub query_is_adjacent_to_shell: unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool,
-    pub query_boundary_precedes_shell: unsafe extern "C" fn(*mut c_void, *mut c_void) -> bool,
+pub struct FfiCaretPositionQuery {
+    /// The node the boundary is inside.
+    pub node: u32,
+    /// The child at the boundary's offset, or 0 when the node has no child there.
+    pub child_at_offset: u32,
+    /// The child before the boundary's offset, or 0 at offset 0.
+    pub child_before_offset: u32,
+    /// The length of the node `child_before_offset` names.
+    pub child_before_offset_length: usize,
+    /// `child_at_offset` and the chain of first children descending from it, in order.
+    pub boundary_descent: *const u32,
+    pub boundary_descent_len: usize,
 }
 
-impl FfiCaretPositionQueryCallbacks {
-    pub(crate) fn shell_is_query_node(&self, shell: *mut c_void) -> bool {
-        // SAFETY: The C++ host compares the shell's DOM node synchronously.
-        unsafe { (self.shell_is_query_node)(self.context, shell) }
-    }
-    pub(crate) fn query_boundary_precedes_shell(&self, shell: *mut c_void) -> bool {
-        // SAFETY: The C++ host compares the shell's DOM node synchronously.
-        unsafe { (self.query_boundary_precedes_shell)(self.context, shell) }
+impl FfiCaretPositionQuery {
+    fn names(named: u32, node: u32) -> bool {
+        named != 0 && named == node
     }
 
-    pub(crate) fn query_boundary_descends_to_shell(&self, shell: *mut c_void) -> bool {
-        // SAFETY: The C++ host walks the query boundary synchronously.
-        unsafe { (self.query_boundary_descends_to_shell)(self.context, shell) }
+    fn boundary_descent(&self) -> &[u32] {
+        if self.boundary_descent.is_null() {
+            return &[];
+        }
+        // SAFETY: The host keeps the descent alive for the synchronous query.
+        unsafe { std::slice::from_raw_parts(self.boundary_descent, self.boundary_descent_len) }
     }
 
-    pub(crate) fn query_boundary_follows_shell_end(&self, shell: *mut c_void, end_offset: usize) -> bool {
-        // SAFETY: The C++ host compares the query boundary synchronously.
-        unsafe { (self.query_boundary_follows_shell_end)(self.context, shell, end_offset) }
+    pub(crate) fn is_query_node(&self, node: u32) -> bool {
+        Self::names(self.node, node)
     }
 
-    pub(crate) fn query_is_adjacent_to_shell(&self, shell: *mut c_void) -> bool {
-        // SAFETY: The C++ host compares the query boundary synchronously.
-        unsafe { (self.query_is_adjacent_to_shell)(self.context, shell) }
+    /// Whether the boundary sits immediately before `node` among its parent's children.
+    pub(crate) fn boundary_precedes(&self, node: u32) -> bool {
+        Self::names(self.child_at_offset, node)
+    }
+
+    /// Whether the boundary sits at the end of `node`, which ends at `end_offset`.
+    pub(crate) fn boundary_follows_end(&self, node: u32, end_offset: usize) -> bool {
+        Self::names(self.child_before_offset, node) && end_offset == self.child_before_offset_length
+    }
+
+    /// Whether the boundary sits on either side of `node`.
+    pub(crate) fn is_adjacent_to(&self, node: u32) -> bool {
+        Self::names(self.child_at_offset, node) || Self::names(self.child_before_offset, node)
+    }
+
+    /// Whether descending through first children from the boundary reaches `node`.
+    pub(crate) fn boundary_descends_to(&self, node: u32) -> bool {
+        node != 0 && self.boundary_descent().contains(&node)
     }
 }
 
@@ -127,17 +160,6 @@ pub struct FfiCaretLineForPosition {
     pub line_index: usize,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-#[repr(C)]
-pub struct FfiResolvedHit {
-    pub dispatch_shell: *mut c_void,
-    pub allow_pseudo_fallback: bool,
-    pub fallback_dispatch_shell: *mut c_void,
-    pub has_index_in_node: bool,
-    pub index_in_node: usize,
-    pub is_text_fragment: bool,
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FfiCaretBoundaryKind {
@@ -152,24 +174,13 @@ pub enum FfiCaretBoundaryKind {
 #[repr(C)]
 pub struct FfiResolvedCaret {
     pub has_position: bool,
-    pub node_shell: *mut c_void,
+    /// The DOM node the position is in, as the host names one.
+    pub node: crate::painting::hit_test::snapshot::FfiHitNodeIdentity,
     pub boundary: FfiCaretBoundaryKind,
     pub offset: usize,
     pub affinity_is_upstream: bool,
     pub has_debug_rect: bool,
     pub debug_rect: used_values::FfiCssPixelRect,
-}
-
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-pub struct FfiHitTestItemExport {
-    pub can_produce_caret_position: bool,
-    pub paintable: NodeSlotId,
-    pub hit_node: NodeSlotId,
-    pub chrome_widget_kind: u8,
-    pub caret_node_shell: *mut c_void,
-    pub caret_rect: used_values::FfiCssPixelRect,
-    pub context: ContextRef,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

@@ -18,10 +18,13 @@ pub(crate) fn for_each_box_with_auto_content_visibility(
         return;
     }
     arena.for_each_node_in_layout_subtree_in_pre_order_with_pruning(root, |node| {
-        if node_painting::forms_unconnected_subtree(arena.data(node).kind.get()) {
+        if arena
+            .node_kind_if_live(node)
+            .is_some_and(node_painting::forms_unconnected_subtree)
+        {
             return false;
         }
-        if !arena.node_dom_node_is_element(node) || !arena.paintable_row_is_populated(node) {
+        if !arena.node_is_element_backed(node) || !arena.paintable_row_is_populated(node) {
             return true;
         }
         let content_visibility_is_auto = arena

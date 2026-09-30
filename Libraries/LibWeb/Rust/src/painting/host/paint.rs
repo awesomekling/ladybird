@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use crate::css::css_pixels::CssPixels;
 use crate::layout::svg_formatting_context::FfiSvgNumberPercentage;
 use crate::layout::used_values;
 use crate::painting::display_list::commands::{OptionalAffineTransform, OptionalColor};
 use libgfx_rust::{Color, IntRect, InterpolationColorSpace};
+use std::borrow::Cow;
 use std::ffi::c_void;
 
 #[derive(Clone, Copy, Debug)]
@@ -42,6 +42,8 @@ pub struct FfiRecordingInputs {
     pub selection_background_dark: Color,
     pub palette_is_dark: bool,
     pub document_has_supported_color_schemes: bool,
+    pub document_declares_light_or_dark_color_scheme: bool,
+    pub image_color_scheme_fallback: u8,
     pub has_inspector_highlight: bool,
     pub inspector_highlight_paintable: crate::layout::node_data::NodeSlotId,
     pub tooltip_color: Color,
@@ -69,6 +71,7 @@ impl FfiRecordingInputs {
         &self,
         tree_inputs: super::FfiVisualContextTreeInputs,
         root_background_source: super::FfiRootBackgroundSource,
+        vector_image_display_lists: std::sync::Arc<crate::painting::record::vector_images::VectorImageDisplayLists>,
     ) -> crate::painting::record::inputs::RecordingInputs<'_> {
         use crate::painting::display_list::commands::UniqueNodeId;
         use crate::painting::force_dark::ForceDarkSettings;
@@ -141,6 +144,9 @@ impl FfiRecordingInputs {
             selection_background_dark: self.selection_background_dark,
             palette_is_dark: self.palette_is_dark,
             document_has_supported_color_schemes: self.document_has_supported_color_schemes,
+            document_declares_light_or_dark_color_scheme: self.document_declares_light_or_dark_color_scheme,
+            image_color_scheme_fallback: self.image_color_scheme_fallback,
+            vector_image_display_lists,
             inspector_highlight: self.has_inspector_highlight.then(|| {
                 // SAFETY: The caller lends the label bytes and supplies live fonts for this overlay.
                 let (text, fonts) = unsafe {
@@ -162,11 +168,11 @@ impl FfiRecordingInputs {
             tooltip_text_color: self.tooltip_text_color,
             tooltip_border_color: self.tooltip_border_color,
             grid_overlays: (!grid_overlays.is_empty()).then(|| GridOverlays {
-                inputs: grid_overlays,
+                inputs: Cow::Borrowed(grid_overlays),
                 // SAFETY: The caller supplies live label fonts when grid overlays are enabled.
                 fonts: unsafe { self.grid_label_fonts.retain() },
             }),
-            flex_overlays,
+            flex_overlays: Cow::Borrowed(flex_overlays),
             caret_debug_rect: self
                 .caret_debug_rect
                 .has_value
@@ -185,7 +191,7 @@ impl FfiRecordingInputs {
             }),
             focused_area_outline: (!outline_path.is_empty()).then_some(FocusedAreaOutline {
                 image: self.focused_area_outline.image,
-                path_bytes: outline_path,
+                path_bytes: Cow::Borrowed(outline_path),
                 color: self.focused_area_outline.color,
                 width: self.focused_area_outline.width,
             }),
@@ -317,8 +323,11 @@ pub struct FfiNaturalSize {
 pub struct FfiImageContent {
     pub kind: FfiImageContentKind,
     pub vector_content_identity: u64,
+    // Names the image itself rather than the content it currently holds, so the publish can find
+    // it again from what the recording published even after the content changed.
+    pub vector_image_identity: u64,
     pub vector_has_active_view_box: bool,
-    pub frame: *const c_void,
+    pub frame_id: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -365,7 +374,7 @@ pub struct FfiVideoPaintFacts {
     pub video_src_height: i32,
     pub video_sink_resource_id: u64,
     pub video_sink_handle: u64,
-    pub poster_frame: *const c_void,
+    pub poster_frame_id: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -421,15 +430,6 @@ pub struct FfiSvgPatternDescription {
 
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
-pub struct FfiSelectionShadowLayer {
-    pub color: Color,
-    pub offset_x: CssPixels,
-    pub offset_y: CssPixels,
-    pub blur_radius: CssPixels,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-#[repr(C)]
 pub struct FfiSelectionStyleFacts {
     pub colors_authored: bool,
     pub background_color: Color,
@@ -454,10 +454,8 @@ pub enum FfiLayerImageList {
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct FfiVectorImageRenderRequest {
-    pub owner: crate::layout::node_data::NodeSlotId,
-    pub is_replaced_content: bool,
-    pub list: FfiLayerImageList,
-    pub computed_index: u32,
+    pub image_identity: u64,
+    pub color_scheme: u8,
     pub css_width: crate::css::css_pixels::CssPixels,
     pub css_height: crate::css::css_pixels::CssPixels,
     pub raster_scale: f32,
@@ -484,11 +482,24 @@ pub struct FfiCanvasPaintFacts {
     pub content_generation: u64,
 }
 
+/// A `Web::HTML::CrossProcessId`. A zero id names no navigable.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(C)]
+pub struct FfiCrossProcessId {
+    pub namespace_id: u64,
+    pub local_id: u64,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(C)]
 pub struct FfiNavigableContainerPaintFacts {
     pub has_composited_context: bool,
     pub composited_context_id: u64,
+    /// The container's content navigable, if this process hosts it, so that a hit on the
+    /// container's viewport names the navigable the event goes to without asking the DOM. Content
+    /// hosted by another process leaves this zero: a navigable standing in for it locally carries
+    /// the same id, and an event over it goes to the process hosting the content instead.
+    pub local_content_navigable: FfiCrossProcessId,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -526,35 +537,145 @@ pub struct FfiSnapAreaGeometry {
     pub always_stop: bool,
 }
 
+/// An SVG-as-image render the host made: the display list it paints with, and the render itself,
+/// which the caller owns.
+#[repr(C)]
+pub struct FfiVectorImageRender {
+    pub display_list_id: u64,
+    pub render: *const c_void,
+}
+
+/// Renders SVG-as-image documents for a recording. Each call lays out and records another
+/// document, so only the main thread makes them, outside every paint pass.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiVectorImageCallbacks {
+    pub context: *mut c_void,
+    pub resolve_vector_image_display_list:
+        unsafe extern "C" fn(*mut c_void, *const FfiVectorImageRenderRequest) -> FfiVectorImageRender,
+    pub release_vector_image_render: unsafe extern "C" fn(*const c_void),
+}
+
+impl FfiVectorImageCallbacks {
+    pub(crate) fn resolve_vector_image_display_list(
+        &self,
+        _: &crate::stage::MainThread,
+        request: crate::painting::record::vector_images::VectorImageRenderRequest,
+    ) -> crate::painting::record::vector_images::VectorImageRender {
+        // SAFETY: The C++ host records the image's display list synchronously and reads the
+        // request only for the duration of the call.
+        let render = unsafe { (self.resolve_vector_image_display_list)(self.context, &request.to_ffi()) };
+        // SAFETY: The host made the render for the request and hands it over, and releases what it made with
+        // `release_vector_image_render`.
+        unsafe {
+            crate::painting::record::vector_images::VectorImageRender::adopt(
+                request,
+                crate::painting::display_list::commands::DisplayListResourceId(render.display_list_id),
+                render.render,
+                self.release_vector_image_render,
+            )
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiRecordingPublishCallbacks {
     pub context: *mut c_void,
     pub add_font: unsafe extern "C" fn(*mut c_void, *const c_void),
     pub add_image_frame: unsafe extern "C" fn(*mut c_void, *const c_void),
-    pub resolve_vector_image_display_list: unsafe extern "C" fn(*mut c_void, *const FfiVectorImageRenderRequest) -> u64,
     pub add_video_sink: unsafe extern "C" fn(*mut c_void, u64, u64),
+    pub add_vector_image_render: unsafe extern "C" fn(*mut c_void, *const c_void),
 }
 
-impl FfiRecordingPublishCallbacks {
-    pub(crate) fn add_font(&self, font: &libgfx_rust::font::FontHandle) {
+#[derive(Clone, Copy)]
+pub(crate) struct RecordingPublishHost {
+    context: *mut c_void,
+    add_font: unsafe extern "C" fn(*mut c_void, *const c_void),
+    add_image_frame: unsafe extern "C" fn(*mut c_void, *const c_void),
+    add_video_sink: unsafe extern "C" fn(*mut c_void, u64, u64),
+    add_vector_image_render: unsafe extern "C" fn(*mut c_void, *const c_void),
+}
+
+impl From<FfiRecordingPublishCallbacks> for RecordingPublishHost {
+    fn from(host: FfiRecordingPublishCallbacks) -> Self {
+        Self {
+            context: host.context,
+            add_font: host.add_font,
+            add_image_frame: host.add_image_frame,
+            add_video_sink: host.add_video_sink,
+            add_vector_image_render: host.add_vector_image_render,
+        }
+    }
+}
+
+/// Proof that the caller may hand resources to a recording publication's host: the main thread, or
+/// the presentation stage of the frame in flight, which the navigable's resource storage is lent to.
+pub(crate) trait PublishesToHost {}
+
+impl PublishesToHost for crate::stage::MainThread<'_> {}
+
+/// The presentation stage of the frame in flight, which publishes a recording from its ticket, or a
+/// flight's present stage, which owns the arena whose recording it publishes. The host lends it the
+/// resource storage the publication adds to until the frame is taken in.
+pub(crate) struct FramePresentation {
+    not_send_or_sync: std::marker::PhantomData<*const ()>,
+}
+
+impl FramePresentation {
+    /// # Safety
+    ///
+    /// Only the presentation stage of the frame in flight may mint this, while it runs.
+    pub(crate) unsafe fn new() -> Self {
+        Self {
+            not_send_or_sync: std::marker::PhantomData,
+        }
+    }
+}
+
+impl PublishesToHost for FramePresentation {}
+
+/// A publication the owner runs in a pass the document thread waits for, which lends it the resource storage the
+/// publication adds to.
+pub(crate) struct WaitedPublication {
+    not_send_or_sync: std::marker::PhantomData<*const ()>,
+}
+
+impl WaitedPublication {
+    /// # Safety
+    ///
+    /// Only a paint pass the document thread waits for may mint this, while it runs.
+    pub(crate) unsafe fn new() -> Self {
+        Self {
+            not_send_or_sync: std::marker::PhantomData,
+        }
+    }
+}
+
+impl PublishesToHost for WaitedPublication {}
+
+impl RecordingPublishHost {
+    pub(crate) fn add_font(&self, _: &impl PublishesToHost, font: &libgfx_rust::font::FontHandle) {
         // SAFETY: The C++ host registers the live font synchronously.
         unsafe { (self.add_font)(self.context, font.as_raw()) };
     }
 
-    pub(crate) fn add_image_frame(&self, frame: &libgfx_rust::image_frame::ImageFrameHandle) {
+    pub(crate) fn add_image_frame(&self, _: &impl PublishesToHost, frame: &libgfx_rust::image_frame::ImageFrameHandle) {
         // SAFETY: The C++ host copies the live frame synchronously.
         unsafe { (self.add_image_frame)(self.context, frame.as_raw()) };
     }
 
-    pub(crate) fn resolve_vector_image_display_list(&self, request: &FfiVectorImageRenderRequest) -> u64 {
-        // SAFETY: The C++ host records the image's display list synchronously and reads the
-        // request only for the duration of the call.
-        unsafe { (self.resolve_vector_image_display_list)(self.context, request) }
-    }
-
-    pub(crate) fn add_video_sink(&self, resource_id: u64, sink_handle: u64) {
+    pub(crate) fn add_video_sink(&self, _: &impl PublishesToHost, resource_id: u64, sink_handle: u64) {
         // SAFETY: The C++ host registers the sink synchronously.
         unsafe { (self.add_video_sink)(self.context, resource_id, sink_handle) };
+    }
+
+    pub(crate) fn add_vector_image_render(
+        &self,
+        _: &impl PublishesToHost,
+        render: &crate::painting::record::vector_images::VectorImageRender,
+    ) {
+        // SAFETY: The C++ host adds what the live render holds synchronously.
+        unsafe { (self.add_vector_image_render)(self.context, render.as_raw()) };
     }
 }

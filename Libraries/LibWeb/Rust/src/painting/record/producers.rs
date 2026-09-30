@@ -19,8 +19,10 @@ use crate::layout::node_data::{NodeFlag, NodeSlotId};
 use crate::painting::display_list::builder::CommandRange;
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::force_dark::ForceDarkRole;
+use crate::painting::geometry_read::GeometryRead;
 use crate::painting::paint_order_plan::{PaintScope, PaintScopePlan};
 use crate::painting::paintable_data::PaintableFlag;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::damage::PaintDamage;
 use crate::painting::record::svg_resources::MaskLayerSet;
 use crate::painting::scroll_snap;
@@ -101,7 +103,7 @@ impl<O: Observer> PaintRecorder<'_, O> {
     fn record_scope_preamble(&mut self, owner: NodeSlotId) {
         let context = self.own_context(owner);
         self.recorder.set_accumulated_visual_context(context);
-        if let Some(svg_filter_bounds) = self.layout_arena.paintable_side_data(owner).svg_filter_bounds.get() {
+        if let Some(svg_filter_bounds) = self.layout_arena.svg_filter_bounds(owner) {
             let device_rect = self
                 .converter
                 .enclosing_device_rect(CssPixelRect::from(svg_filter_bounds));
@@ -276,6 +278,8 @@ impl<O: Observer> AssemblyHost for PaintRecorder<'_, O> {
             .expect("clean output is copied from a published frame");
         let destination = self.output_position();
         if !bytes.is_empty() {
+            self.resources
+                .note_copied_vector_images(&frame.display_list, &frame.vector_images, bytes.clone());
             self.recorder.append_cached_command_range_verbatim(
                 &frame.display_list,
                 CommandRange {

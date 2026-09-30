@@ -6,6 +6,7 @@
 
 use super::order_tree::ProducerKind;
 use super::verify::CaptureLog;
+use crate::layout::debug_text::DebugText;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::paint_order_plan::{PaintScope, PaintScopeKind, StackingContextPaintPhase};
 use std::cell::RefCell;
@@ -132,14 +133,19 @@ impl CaptureLog {
         self.end(empty);
     }
 
-    pub(crate) fn format(&self, mut name: impl FnMut(NodeSlotId) -> String) -> String {
+    /// The log as text, with each box an event is about named by `name`.
+    pub(crate) fn format(&self, mut name: impl FnMut(&mut DebugText, NodeSlotId)) -> DebugText {
         assert!(self.open_events.is_empty(), "incomplete recording trace");
-        let mut output = String::new();
+        let mut output = DebugText::default();
         if let Some(damage) = self.damage {
             writeln!(
-                output,
+                output.text(),
                 "damage: rows={} moved={} order={} eligibility={} all={}",
-                damage.rows, damage.moved, damage.order, damage.eligibility, damage.all
+                damage.rows,
+                damage.moved,
+                damage.order,
+                damage.eligibility,
+                damage.all
             )
             .unwrap();
         }
@@ -147,18 +153,24 @@ impl CaptureLog {
         for event in &self.events {
             let depth = event.parent.map_or(0, |parent| depths[parent] + 1);
             depths.push(depth);
-            let label = match event.operation {
-                Operation::Scope(scope) => match scope.kind {
-                    PaintScopeKind::PaintedAsStackingContext => name(scope.owner),
-                    PaintScopeKind::Descendants(phase) => {
-                        format!("{}/descendants({})", name(scope.owner), phase_name(phase))
+            output.text().push_str(&"  ".repeat(depth));
+            match event.operation {
+                Operation::Scope(scope) => {
+                    name(&mut output, scope.owner);
+                    if let PaintScopeKind::Descendants(phase) = scope.kind {
+                        write!(output.text(), "/descendants({})", phase_name(phase)).unwrap();
                     }
-                },
-                Operation::Producer(owner, kind) => format!("{}/{}", name(owner), producer_name(kind)),
-                Operation::Named(owner, label) => {
-                    owner.map_or_else(|| format!("@{label}"), |owner| format!("{}/{label}", name(owner)))
                 }
-            };
+                Operation::Producer(owner, kind) => {
+                    name(&mut output, owner);
+                    write!(output.text(), "/{}", producer_name(kind)).unwrap();
+                }
+                Operation::Named(None, label) => write!(output.text(), "@{label}").unwrap(),
+                Operation::Named(Some(owner), label) => {
+                    name(&mut output, owner);
+                    write!(output.text(), "/{label}").unwrap();
+                }
+            }
             let action = match event.action {
                 Action::Assemble => "ASSEMBLE",
                 Action::Replan => "REPLAN",
@@ -171,7 +183,7 @@ impl CaptureLog {
             } else {
                 ""
             };
-            writeln!(output, "{}{label} {action}{empty}", "  ".repeat(depth)).unwrap();
+            writeln!(output.text(), " {action}{empty}").unwrap();
         }
         output
     }
@@ -241,7 +253,7 @@ mod tests {
             true,
         );
         log.end(false);
-        let text = log.format(|_| "box".to_string());
+        let text = log.format(|text, _| text.text().push_str("box")).finish(|_, _| {});
         assert_eq!(
             text,
             "damage: rows=1 moved=0 order=0 eligibility=0 all=false\nbox ASSEMBLE\n  box/background COPY\n  box/foreground RECORD (empty)\n  box/outline SKIP\n"

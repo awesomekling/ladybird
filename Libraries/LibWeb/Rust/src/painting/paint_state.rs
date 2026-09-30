@@ -5,12 +5,17 @@
  */
 
 use crate::layout::node_data::NodeSlotId;
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub(crate) struct PendingRecording {
     pub(crate) recording: crate::painting::record::RecordingResult,
     pub(crate) recording_from_scratch: Option<crate::painting::record::RecordingResult>,
     pub(crate) publishes_recording: bool,
+    /// The generation of the arena's render state the recording was made for.
+    pub(crate) frame_generation: u64,
+    /// The SVG paint resources of the frame recorded, whose filter images the publication hands the
+    /// host.
+    pub(crate) svg_paint_resources: Arc<crate::painting::svg_paint_resources::SvgPaintResourceRows>,
 }
 
 pub(crate) struct PendingRecordingTrace {
@@ -18,24 +23,33 @@ pub(crate) struct PendingRecordingTrace {
     pub(crate) should_paint_overlay: bool,
 }
 
+/// What a clock lease's tick records its document's display list with.
+#[derive(Clone)]
+pub(crate) struct ClockRecording {
+    pub(crate) viewport: NodeSlotId,
+    pub(crate) inputs: crate::painting::record::RecordingInputs<'static>,
+}
+
 #[derive(Default)]
 pub struct PaintState {
     pub(crate) trace_recordings: bool,
-    pub(crate) pending_recording_trace: Option<PendingRecordingTrace>,
-    pub(crate) pending_recording: Option<PendingRecording>,
+    // The SVG-as-image renders the next recording looks up, resolved by the main thread.
+    pub(crate) vector_image_display_lists:
+        std::sync::Arc<crate::painting::record::vector_images::VectorImageDisplayLists>,
     pub(crate) visual_context: crate::painting::visual_context::VisualContextState,
     pub(crate) root_background_source: Option<crate::painting::host::FfiRootBackgroundSource>,
     pub(crate) hit_test_list_generation: u64,
-    pub(crate) last_recording: Option<Rc<crate::painting::record::RecordingOutput>>,
-    pub(crate) published_frame: Option<Rc<crate::painting::record::RecordingOutput>>,
-    pub(crate) published_hit_test_items: Option<Rc<crate::painting::record::PublishedHitTestItems>>,
-    // The paint-order tree describing the published frame; a recording appends to it and
-    // publication or discarding decides what stays.
-    pub(crate) paint_order_tree: std::cell::RefCell<crate::painting::record::order_tree::PaintOrderTree>,
-    pub(crate) selection: Option<crate::painting::selection::SelectionRange>,
-    pub(crate) selection_pseudo_styles:
-        std::collections::HashMap<NodeSlotId, Rc<crate::painting::record::paint::text::SelectionStyleAnswer>>,
+    pub(crate) last_recording: Option<Arc<crate::painting::record::RecordingOutput>>,
+    pub(crate) selection: Option<Arc<crate::painting::selection::SelectionRange>>,
+    // The inputs of the last recording the main thread published, which
+    // a clock lease's ticks record again with while the main thread idles.
+    pub(crate) clock_recording: Option<ClockRecording>,
+    // Shared with the frames published since it last changed.
+    pub(crate) selection_pseudo_styles: Arc<SelectionPseudoStyles>,
 }
+
+pub(crate) type SelectionPseudoStyles =
+    std::collections::HashMap<NodeSlotId, Arc<crate::painting::record::paint::text::SelectionStyleAnswer>>;
 
 impl PaintState {
     pub(crate) fn update_root_background_source(

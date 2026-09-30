@@ -71,15 +71,17 @@ pub(crate) fn scrolling_box_for_scroll_step(
             && scrolling_box_moved_by(arena, node, accepted_delta, scroll_offset_of_layout_node)
     };
 
-    let mut node = target;
-    while let Some(data) = arena.node_data_if_live(node) {
-        if data.kind.get() == NodeKind::Viewport {
+    let mut node = Some(target);
+    while let Some(current) = node
+        && let Some(kind) = arena.node_kind_if_live(current)
+    {
+        if kind == NodeKind::Viewport {
             break;
         }
-        if scroll_step_moves(node) {
-            return node;
+        if scroll_step_moves(current) {
+            return current;
         }
-        node = arena.containing_block_by_walking_ancestors(node);
+        node = arena.node_containing_block_if_live(current);
     }
 
     if arena.slot_is_live(viewport) && scroll_step_moves(viewport) {
@@ -97,24 +99,26 @@ pub(crate) fn for_each_wheel_scrollable_box_in_containing_block_chain(
     scroll_offset_of_layout_node: &dyn Fn(NodeSlotId) -> CssPixelPoint,
     mut push_scrollable_box: impl FnMut(NodeSlotId, f64, f64),
 ) {
-    let mut node = start;
-    while let Some(data) = arena.node_data_if_live(node) {
-        if data.kind.get() != NodeKind::Viewport {
-            let axes = wheel_scrollable_axes(arena, node, viewport_wheel_overflow);
+    let mut node = Some(start);
+    while let Some(current) = node
+        && let Some(kind) = arena.node_kind_if_live(current)
+    {
+        if kind != NodeKind::Viewport {
+            let axes = wheel_scrollable_axes(arena, current, viewport_wheel_overflow);
             let accepted_delta_x = if axes.horizontal { wheel_delta_x } else { 0.0 };
             let accepted_delta_y = if axes.vertical { wheel_delta_y } else { 0.0 };
             if accepted_delta_x != 0.0 || accepted_delta_y != 0.0 {
-                push_scrollable_box(node, accepted_delta_x, accepted_delta_y);
+                push_scrollable_box(current, accepted_delta_x, accepted_delta_y);
                 let accepted_delta = CssPixelPoint::new(
                     CssPixels::nearest_value_for(accepted_delta_x),
                     CssPixels::nearest_value_for(accepted_delta_y),
                 );
-                if scrolling_box_moved_by(arena, node, accepted_delta, scroll_offset_of_layout_node) {
+                if scrolling_box_moved_by(arena, current, accepted_delta, scroll_offset_of_layout_node) {
                     return;
                 }
             }
         }
-        node = arena.containing_block_by_walking_ancestors(node);
+        node = arena.node_containing_block_if_live(current);
     }
 }
 
@@ -123,17 +127,18 @@ pub(crate) fn first_wheel_scrollable_box_in_containing_block_chain(
     start: NodeSlotId,
     viewport_wheel_overflow: ViewportWheelOverflow,
 ) -> NodeSlotId {
-    let mut node = start;
-    while let Some(data) = arena.node_data_if_live(node) {
-        let backed_by_element_or_viewport =
-            data.kind.get() == NodeKind::Viewport || arena.node_dom_node_is_element(node);
-        if backed_by_element_or_viewport && arena.paintable_row_is_populated(node) {
-            let axes = wheel_scrollable_axes(arena, node, viewport_wheel_overflow);
+    let mut node = Some(start);
+    while let Some(current) = node
+        && let Some(kind) = arena.node_kind_if_live(current)
+    {
+        let backed_by_element_or_viewport = kind == NodeKind::Viewport || arena.node_is_element_backed(current);
+        if backed_by_element_or_viewport && arena.paintable_row_is_populated(current) {
+            let axes = wheel_scrollable_axes(arena, current, viewport_wheel_overflow);
             if axes.horizontal || axes.vertical {
-                return node;
+                return current;
             }
         }
-        node = arena.containing_block_by_walking_ancestors(node);
+        node = arena.node_containing_block_if_live(current);
     }
     NodeSlotId::INVALID
 }

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::painting::geometry_read::GeometryRead;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::trace::{Observer, Operation};
 
 use crate::css::css_enums;
@@ -67,7 +69,7 @@ pub(crate) fn paint_background<O: Observer>(recorder: &mut PaintRecorder<'_, O>,
         table_backgrounds::paint_table_part_background(recorder, paintable);
         return;
     }
-    let Some(inputs) = resolve_background_for_paint(recorder, paintable) else {
+    let Some(inputs) = resolve_background_for_paint(recorder.layer_resolution_context(), paintable) else {
         return;
     };
     paint_resolved_background(recorder, paintable, &inputs);
@@ -84,7 +86,7 @@ pub(crate) fn paint_background_within<O: Observer>(
         return;
     };
     let resolved = resolve_background_layers(
-        recorder,
+        recorder.layer_resolution_context(),
         paintable,
         style,
         paintable,
@@ -406,7 +408,7 @@ pub(crate) fn paint_decoded_image_frame<O: Observer>(
 
 pub(crate) fn paint_image_content<O: Observer>(
     recorder: &mut PaintRecorder<'_, O>,
-    source: crate::painting::record::vector_images::VectorImageSource,
+    facts_owner: NodeSlotId,
     content: &crate::painting::image_content::ImageContent,
     dest_rect: FloatRect,
     image_rendering: u8,
@@ -424,14 +426,20 @@ pub(crate) fn paint_image_content<O: Observer>(
             ForceDarkRole::Background,
         ),
         ImageContent::Vector {
-            has_active_view_box, ..
-        } => recorder.paint_vector_image(
-            source,
-            *has_active_view_box,
-            dest_rect,
-            accumulated_scale,
-            compositing_and_blending_operator,
-        ),
+            image_identity,
+            has_active_view_box,
+            ..
+        } => {
+            let color_scheme = recorder.image_color_scheme(facts_owner);
+            recorder.paint_vector_image(
+                *image_identity,
+                color_scheme,
+                *has_active_view_box,
+                dest_rect,
+                accumulated_scale,
+                compositing_and_blending_operator,
+            );
+        }
         ImageContent::None | ImageContent::Raster(None) => {}
     }
 }
@@ -449,13 +457,11 @@ fn paint_image_layer<O: Observer>(
 ) {
     let converter = recorder.converter;
     let image = layer.image.expect("an imageless layer never reaches the image paint");
-    let vector_image_source = crate::painting::record::vector_images::VectorImageSource::Layer {
-        owner: image.facts_owner,
-        list: image.list,
-        computed_index: image.computed_index,
-    };
-    let facts =
-        crate::painting::record::paint::background_resolution::committed_layer_image_paint_facts(recorder, &image);
+    let facts_owner = image.facts_owner;
+    let facts = crate::painting::record::paint::background_resolution::committed_layer_image_paint_facts(
+        recorder.layout_arena,
+        &image,
+    );
     let mut image_rect = layer.image_rect;
     let mut background_positioning_area = layer.background_positioning_area;
 
@@ -470,11 +476,15 @@ fn paint_image_layer<O: Observer>(
             {
                 // Select an existing space above scrolling, retaining the clips and effects
                 // of the background paint. Background attachment doesn't add AVC nodes.
-                let tree = recorder.paint_state.visual_context.tree.as_ref().unwrap();
+                let tree = recorder.paint_state.visual_context_tree.as_ref();
+                debug_assert!(tree.is_some(), "a painted box has a visual context tree");
                 let mut spatial = recorder.data(paintable).accumulated_visual_context.spatial;
                 let mut index = spatial;
                 while index != VISUAL_VIEWPORT_NODE_INDEX {
-                    let node = &tree.spatial_nodes[index.0 as usize];
+                    let Some(node) = tree.and_then(|tree| tree.spatial_nodes.get(index.0 as usize)) else {
+                        debug_assert!(false, "a spatial node's ancestors are in its tree");
+                        break;
+                    };
                     if node.data.is_scroll_like() {
                         spatial = node.parent;
                     }
@@ -667,7 +677,7 @@ fn paint_image_layer<O: Observer>(
         if dest_rect.height == 0 {
             dest_rect.height = 1;
         }
-        if let crate::painting::image_content::ImageContent::Vector { .. } = &facts.content {
+        if let crate::painting::image_content::ImageContent::Vector { image_identity, .. } = &facts.content {
             if clip_rect.is_empty() {
                 return;
             }
@@ -676,14 +686,20 @@ fn paint_image_layer<O: Observer>(
                 (dest_rect.width, dest_rect.height),
                 (dest_rect.width, dest_rect.height),
             );
-            let display_list_id = recorder.resources.vector_image_placeholder(
+            let color_scheme = recorder.image_color_scheme(facts_owner);
+            let Some(display_list_id) = recorder.resources.vector_image_display_list(
                 crate::painting::record::vector_images::VectorImageRenderRequest::new(
-                    vector_image_source,
+                    *image_identity,
+                    color_scheme,
                     CssPixels::from_integer(i64::from(dest_rect.width)),
                     CssPixels::from_integer(i64::from(dest_rect.height)),
                     1.0,
                 ),
-            );
+                &recorder.inputs.vector_image_display_lists,
+            ) else {
+                recorder.missed_vector_image();
+                return;
+            };
             let group = recorder.recorder.begin_repeated_tile();
             recorder.recorder.paint_nested_display_list(
                 display_list_id,
@@ -851,7 +867,7 @@ fn paint_image_layer<O: Observer>(
                 recorder.accumulated_2d_scale_at(recorder.recorder.accumulated_visual_context().spatial);
             paint_image_content(
                 recorder,
-                vector_image_source,
+                facts_owner,
                 &facts.content,
                 dest_rect,
                 image_rendering,
@@ -918,7 +934,7 @@ fn append_text_clip_paths<O: Observer>(recorder: &mut PaintRecorder<'_, O>, pain
     let scale = recorder.inputs.device_pixels_per_css_pixel;
 
     let append_fragment = |recorder: &mut PaintRecorder<'_, O>, owner: NodeSlotId, fragment_index: usize| {
-        let side = recorder.layout_arena.paintable_side_data(owner);
+        let side = recorder.layout_arena.committed_side_data(owner);
         let fragment = &side.fragments()[fragment_index];
         let is_text = recorder
             .layout_arena
@@ -972,8 +988,8 @@ fn append_text_clip_paths<O: Observer>(recorder: &mut PaintRecorder<'_, O>, pain
             && node_painting::has_lines(recorder.layout_arena, root)
         {
             let layout_arena = recorder.layout_arena;
-            for piece_index in &layout_arena.paintable_side_data(paintable).piece_indices {
-                let side = layout_arena.paintable_side_data(root);
+            for piece_index in layout_arena.committed_side_data(paintable).piece_indices() {
+                let side = layout_arena.committed_side_data(root);
                 let piece = &side.inline_box_pieces()[*piece_index as usize];
                 for fragment_index in piece.first_fragment_index..piece.first_fragment_index + piece.fragment_count {
                     append_fragment(recorder, root, fragment_index as usize);
@@ -1001,7 +1017,7 @@ fn append_text_clip_paths<O: Observer>(recorder: &mut PaintRecorder<'_, O>, pain
             stack.push(first_child);
         }
         if node_painting::has_lines(recorder.layout_arena, current) {
-            let count = recorder.layout_arena.paintable_side_data(current).fragments().len();
+            let count = recorder.layout_arena.committed_side_data(current).fragments().len();
             for fragment_index in 0..count {
                 append_fragment(recorder, current, fragment_index);
             }

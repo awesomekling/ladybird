@@ -8,16 +8,17 @@ use super::builder::{for_each_command, inline_transform_of, read_command};
 use super::commands::*;
 use super::nested_records::{NestedRecordsRole, for_each_nested_record_span, span_bytes};
 use crate::css::color_resolution::format_to_8bit_compatible;
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::dump::{
     format_float_like_ak, push_affine_transform, push_float_like_ak, push_float_point, push_float_rect,
     push_float_size, push_int_point, push_int_rect, push_int_size,
 };
+use crate::painting::published_frame::PaintRead;
 #[cfg(test)]
 use crate::painting::visual_context::VisualContextTree;
 use crate::painting::visual_context::VisualContextTreeDump;
 use crate::painting::visual_context::dump::SlotKind;
+use crate::render_owner::ScriptForcedRead;
 use libgfx_rust::path::OwnedPath;
 use libgfx_rust::{
     Color, CompositingAndBlendingOperator, CornerRadii, FloatPoint, FloatRect, FloatSize, IntPoint, IntRect, IntSize,
@@ -27,12 +28,18 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::fmt::Write;
 
+pub(crate) struct MainThreadFfiEntry {
+    _private: (),
+}
+
+const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiPaintingDumpCallbacks {
     pub context: *mut c_void,
     pub debug_description:
-        unsafe extern "C" fn(context: *mut c_void, layout_node_shell: *mut c_void, description_sink: *mut c_void),
+        unsafe extern "C" fn(context: *mut c_void, layout_node: NodeSlotId, description_sink: *mut c_void),
     pub command_bytes:
         unsafe extern "C" fn(context: *mut c_void, display_list: *const c_void, byte_count: *mut usize) -> *const u8,
     pub command_runs: unsafe extern "C" fn(
@@ -44,12 +51,19 @@ pub struct FfiPaintingDumpCallbacks {
     pub append_text: unsafe extern "C" fn(context: *mut c_void, bytes: *const u8, byte_count: usize),
 }
 
-impl FfiPaintingDumpCallbacks {
-    fn debug_description(&self, layout_node_shell: *mut c_void) -> String {
+struct PaintingDumpHost<'a> {
+    callbacks: FfiPaintingDumpCallbacks,
+    _main_thread: &'a crate::stage::MainThread<'a>,
+}
+
+impl PaintingDumpHost<'_> {
+    fn debug_description(&self, layout_node: NodeSlotId) -> String {
         let mut description = Vec::new();
         // SAFETY: The C++ host fills the description sink synchronously through the exported push
         // function.
-        unsafe { (self.debug_description)(self.context, layout_node_shell, (&raw mut description).cast()) };
+        unsafe {
+            (self.callbacks.debug_description)(self.callbacks.context, layout_node, (&raw mut description).cast());
+        };
         String::from_utf8_lossy(&description).into_owned()
     }
 
@@ -57,7 +71,8 @@ impl FfiPaintingDumpCallbacks {
         let mut byte_count = 0;
         // SAFETY: The host owns the display list for the duration of the dump and returns a span
         // that stays live for this call.
-        let bytes = unsafe { (self.command_bytes)(self.context, display_list, &raw mut byte_count) };
+        let bytes =
+            unsafe { (self.callbacks.command_bytes)(self.callbacks.context, display_list, &raw mut byte_count) };
         if byte_count == 0 {
             return &[];
         }
@@ -69,24 +84,25 @@ impl FfiPaintingDumpCallbacks {
     fn command_runs(&self, display_list: *const c_void) -> &[DisplayListCommandRun] {
         let mut run_count = 0;
         // SAFETY: The host owns the display list for the duration of the dump and returns its live runs.
-        let runs = unsafe { (self.command_runs)(self.context, display_list, &raw mut run_count) };
+        let runs = unsafe { (self.callbacks.command_runs)(self.callbacks.context, display_list, &raw mut run_count) };
         // SAFETY: The host reported `run_count` readable runs at `runs`.
         unsafe { libcompositing_rust::ffi::ffi_slice(runs, run_count) }
     }
 
     fn nested_display_list(&self, display_list_id: DisplayListResourceId) -> *const c_void {
         // SAFETY: Nested ids come from records the host produced, so they resolve in its storage.
-        let display_list = unsafe { (self.nested_display_list)(self.context, display_list_id.0) };
+        let display_list = unsafe { (self.callbacks.nested_display_list)(self.callbacks.context, display_list_id.0) };
         assert!(!display_list.is_null());
         display_list
     }
 
     fn append_text(&self, text: &str) {
         // SAFETY: The C++ sink copies the completed dump synchronously.
-        unsafe { (self.append_text)(self.context, text.as_ptr(), text.len()) };
+        unsafe { (self.callbacks.append_text)(self.callbacks.context, text.as_ptr(), text.len()) };
     }
 }
 
+#[derive(Default)]
 struct VisualContextNodeOwners {
     spatial: HashMap<u32, NodeSlotId>,
     clip: HashMap<u32, NodeSlotId>,
@@ -94,18 +110,16 @@ struct VisualContextNodeOwners {
 }
 
 impl VisualContextNodeOwners {
-    fn collect(arena: &LayoutNodeArena, viewport: NodeSlotId) -> Self {
-        let paintable_rows = arena.paintable_rows();
+    fn collect(arena: &impl PaintRead, viewport: NodeSlotId) -> Self {
         let mut owners = Self {
             spatial: HashMap::new(),
             clip: HashMap::new(),
             effect: HashMap::new(),
         };
         owners.spatial.insert(VISUAL_VIEWPORT_NODE_INDEX.0, viewport);
-        owners.spatial.insert(
-            paintable_rows.paintable_data(viewport).own_scroll_node_index.0,
-            viewport,
-        );
+        owners
+            .spatial
+            .insert(arena.paintable_data(viewport).own_scroll_node_index.0, viewport);
         let mut pending = vec![viewport];
         while let Some(slot) = pending.pop() {
             arena.with_paintable_visual_context_node_handles(slot, |handles| {
@@ -155,14 +169,28 @@ pub unsafe extern "C" fn painting_dump(
     display_list: *const c_void,
     callbacks: FfiPaintingDumpCallbacks,
 ) {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let callbacks = PaintingDumpHost {
+        callbacks,
+        _main_thread: &main_thread,
+    };
     assert!(!display_list.is_null());
-    let arena = unsafe { crate::painting::ffi::arena_from_handle(arena) };
+    // SAFETY: Guaranteed by the caller.
+    let owners = unsafe {
+        crate::painting::ffi::read_current(arena, ScriptForcedRead::at_script_entry(), |rows| {
+            let mut owners = VisualContextNodeOwners::collect(rows, viewport);
+            for owners in [&mut owners.spatial, &mut owners.clip, &mut owners.effect] {
+                owners.retain(|_, owner| rows.slot_is_live(*owner));
+            }
+            owners
+        })
+    };
     let visual_context_tree = unsafe { libcompositing_rust::ffi::tree_from_handle(visual_context_tree) };
     let command_runs = unsafe { libcompositing_rust::ffi::ffi_slice(command_runs, command_run_count) };
-    let owners = VisualContextNodeOwners::collect(arena, viewport);
     let mut output = visual_context_tree.dump_nodes_reachable_from_runs(command_runs, |kind, index| {
-        let shell = arena.shell_if_live(owners.owner(kind, index)?);
-        (!shell.is_null()).then(|| callbacks.debug_description(shell))
+        owners
+            .owner(kind, index)
+            .map(|owner| callbacks.debug_description(owner))
     });
     output.push_str("\nDisplayList:\n");
     dump_commands(&mut output, &callbacks, display_list, 0);
@@ -175,7 +203,7 @@ fn push_indent(output: &mut String, indent: usize) {
 
 fn dump_commands(
     output: &mut String,
-    callbacks: &FfiPaintingDumpCallbacks,
+    callbacks: &PaintingDumpHost<'_>,
     display_list: *const c_void,
     base_indent: usize,
 ) {
@@ -188,7 +216,7 @@ fn dump_commands(
 
 fn dump_command_bytes(
     output: &mut String,
-    callbacks: &FfiPaintingDumpCallbacks,
+    callbacks: &PaintingDumpHost<'_>,
     command_bytes: &[u8],
     context: ContextRef,
     base_indent: usize,
@@ -242,7 +270,7 @@ fn nested_display_lists(command_type: DisplayListCommandType, payload: &[u8]) ->
 
 fn dump_records_inside(
     output: &mut String,
-    callbacks: &FfiPaintingDumpCallbacks,
+    callbacks: &PaintingDumpHost<'_>,
     command_type: DisplayListCommandType,
     payload: &[u8],
     context: ContextRef,

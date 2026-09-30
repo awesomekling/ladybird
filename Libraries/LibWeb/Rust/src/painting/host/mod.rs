@@ -36,14 +36,47 @@ impl Default for FfiRootBackgroundSource {
 #[repr(C)]
 pub struct FfiGeometryHostCallbacks {
     pub context: *mut std::ffi::c_void,
-    pub clamp_scroll_offset_if_nonzero: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void),
-    pub layout_node_is_in_focused_text_control:
-        unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> bool,
+    /// Stores a scroll offset the render side settled on. Called after the pass that settled it,
+    /// never from inside one.
+    pub set_scroll_offset: unsafe extern "C" fn(
+        *mut std::ffi::c_void,
+        crate::layout::node_data::NodeSlotId,
+        crate::layout::used_values::FfiCssPixelPoint,
+    ),
 }
 
-impl FfiGeometryHostCallbacks {
-    pub(crate) fn layout_node_is_in_focused_text_control(&self, layout_node_shell: *mut std::ffi::c_void) -> bool {
-        // SAFETY: The C++ host answers synchronously from a live layout node shell.
-        unsafe { (self.layout_node_is_in_focused_text_control)(self.context, layout_node_shell) }
+#[derive(Clone, Copy)]
+pub(crate) struct GeometryHostCallbacks {
+    context: *mut std::ffi::c_void,
+    set_scroll_offset: unsafe extern "C" fn(
+        *mut std::ffi::c_void,
+        crate::layout::node_data::NodeSlotId,
+        crate::layout::used_values::FfiCssPixelPoint,
+    ),
+}
+
+impl From<FfiGeometryHostCallbacks> for GeometryHostCallbacks {
+    fn from(host: FfiGeometryHostCallbacks) -> Self {
+        Self {
+            context: host.context,
+            set_scroll_offset: host.set_scroll_offset,
+        }
+    }
+}
+
+impl GeometryHostCallbacks {
+    /// # Safety
+    ///
+    /// `layout_node` must name a live row. The host re-enters geometry queries and writes the
+    /// store the offset lives in, so no arena or cache borrow may be held across this call and no
+    /// pass may be running.
+    pub(crate) unsafe fn set_scroll_offset(
+        &self,
+        _: &crate::stage::MainThread,
+        layout_node: crate::layout::node_data::NodeSlotId,
+        offset: crate::layout::used_values::FfiCssPixelPoint,
+    ) {
+        // SAFETY: The caller guarantees the row is live and no borrow is held.
+        unsafe { (self.set_scroll_offset)(self.context, layout_node, offset) };
     }
 }

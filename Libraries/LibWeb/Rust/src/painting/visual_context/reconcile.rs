@@ -254,6 +254,7 @@ fn write_node<N: ReconciledNode>(
         }
     }
     if !payload_matches {
+        delta.payload_changed = true;
         if node.patch_requires_recording() {
             delta.requires_display_list_recording = true;
         }

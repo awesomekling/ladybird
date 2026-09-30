@@ -134,7 +134,7 @@ pub enum PaintStyle {
         end_radius: f32,
     },
     Pattern {
-        tile_records: std::rc::Rc<Vec<u8>>,
+        tile_records: std::sync::Arc<Vec<u8>>,
         tile_rect: FloatRect,
         content_scale: FloatSize,
         pattern_transform: OptionalAffineTransform,
@@ -240,7 +240,7 @@ pub struct GlyphRunForRecording<'a> {
 pub struct IsolatedGroupEffects {
     pub clip_rect: Option<FloatRect>,
     pub opacity: f32,
-    pub filter: Option<std::rc::Rc<Vec<u8>>>,
+    pub filter: Option<std::sync::Arc<Vec<u8>>>,
     pub compositing_and_blending_operator: CompositingAndBlendingOperator,
     pub mask_kind: MaskKind,
 }

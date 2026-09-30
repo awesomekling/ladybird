@@ -11,7 +11,6 @@ use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::node_painting;
 use crate::painting::paint_order;
-use crate::painting::paint_order_plan::PaintOrderInputs;
 use std::cell::{Cell, Ref, RefCell};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -125,7 +124,6 @@ pub(crate) struct RowPaintState {
     // The recording sequence number the row was last pushed in; publication clears rows pushed
     // before the recording it publishes started and keeps rows pushed after.
     damage_stamp: Cell<u32>,
-    order_inputs: Cell<PaintOrderInputs>,
 }
 
 impl RowPaintState {
@@ -133,19 +131,9 @@ impl RowPaintState {
         self.damage.get()
     }
 
-    pub(crate) fn order_inputs(&self) -> Option<PaintOrderInputs> {
-        let inputs = self.order_inputs.get();
-        inputs.is_initialized().then_some(inputs)
-    }
-
-    pub(crate) fn update_order_inputs(&self, inputs: PaintOrderInputs) -> bool {
-        self.order_inputs.replace(inputs) != inputs
-    }
-
     pub(crate) fn clear(&self) {
         self.damage.set(PaintDamage::NONE);
         self.damage_stamp.set(0);
-        self.order_inputs.set(PaintOrderInputs::default());
     }
 
     fn add(&self, damage: PaintDamage, stamp: u32) -> bool {
@@ -173,7 +161,79 @@ impl DamageSet {
     }
 }
 
+/// The paint damage a recording reads: the rows damaged when its frame was published, with their
+/// damage, and whether damage covered everything. It is the frame's own copy, so a push made while
+/// the recording runs lands in the live set for the next one.
+#[derive(Default)]
+pub(crate) struct FrameDamage {
+    // Sorted by slot, holding each populated row with non-empty damage once.
+    rows: Vec<(NodeSlotId, PaintDamage)>,
+    all: bool,
+    scroll_metadata_everywhere: bool,
+}
+
+impl FrameDamage {
+    /// No damage, as a read outside a frame sees.
+    pub(crate) const NONE: Self = Self {
+        rows: Vec::new(),
+        all: false,
+        scroll_metadata_everywhere: false,
+    };
+
+    pub(crate) fn of_row(&self, row: NodeSlotId) -> PaintDamage {
+        self.rows
+            .binary_search_by_key(&(row.slot_index(), row.generation()), |(listed, _)| {
+                (listed.slot_index(), listed.generation())
+            })
+            .map_or(PaintDamage::NONE, |index| self.rows[index].1)
+    }
+
+    pub(crate) fn rows(&self) -> Vec<NodeSlotId> {
+        self.rows.iter().map(|(row, _)| *row).collect()
+    }
+
+    pub(crate) fn covers_everything(&self) -> bool {
+        self.all
+    }
+
+    pub(crate) fn scroll_metadata_everywhere(&self) -> bool {
+        self.scroll_metadata_everywhere
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        !self.all && !self.scroll_metadata_everywhere && self.rows.is_empty()
+    }
+
+    /// The damage a recording starts from, for the trace header.
+    pub(crate) fn summary(&self) -> crate::painting::record::trace::DamageSummary {
+        let mut summary = crate::painting::record::trace::DamageSummary {
+            all: self.all,
+            ..Default::default()
+        };
+        for (_, damage) in &self.rows {
+            summary.rows += 1;
+            summary.moved += usize::from(damage.contains(PaintDamage::MOVED));
+            summary.order += usize::from(damage.intersects(PaintDamage::ORDER | PaintDamage::CONTEXT_ORDER));
+            summary.eligibility += usize::from(damage.contains(PaintDamage::ELIGIBILITY));
+        }
+        summary
+    }
+}
+
 impl LayoutNodeArena {
+    /// Copies the damage pushed so far for a frame to publish.
+    pub(crate) fn paint_damage_for_frame(&self) -> FrameDamage {
+        FrameDamage {
+            rows: self
+                .damaged_paint_rows()
+                .into_iter()
+                .map(|row| (row, self.row_paint_state(row).damage()))
+                .collect(),
+            all: self.paint_damage_covers_everything(),
+            scroll_metadata_everywhere: self.scroll_metadata_damaged_everywhere(),
+        }
+    }
+
     pub(crate) fn row_paint_state(&self, row: NodeSlotId) -> Ref<'_, RowPaintState> {
         Ref::map(self.paintable_rows.row_paint_states.borrow(), |states| {
             &states[row.slot_index() as usize]
@@ -187,8 +247,8 @@ impl LayoutNodeArena {
         self.row_paint_state(row).damage()
     }
 
+    #[track_caller]
     pub(crate) fn push_paint_damage(&self, row: NodeSlotId, damage: PaintDamage) {
-        self.debug_assert_not_recording();
         if damage.is_empty() || !self.paintable_row_is_populated(row) {
             return;
         }
@@ -210,6 +270,7 @@ impl LayoutNodeArena {
     // Producers that read descendants, such as an SVG root or a snap container's scroll
     // metadata, learn about damage below them from this hint. The walk stops at the first
     // ancestor already hinted.
+    #[track_caller]
     fn hint_descendant_readers_above(&self, row: NodeSlotId, stamp: u32, states: &[RowPaintState]) {
         let set = &self.paintable_rows.damage;
         let mut current = row;
@@ -249,6 +310,7 @@ impl LayoutNodeArena {
         None
     }
 
+    #[track_caller]
     pub(crate) fn push_paint_damage_to_paint_subtree(&self, root: NodeSlotId, damage: PaintDamage) {
         let rows = self.paintable_rows();
         paint_order::for_each_in_paint_subtree(&rows, root, |row| self.push_paint_damage(row, damage));
@@ -256,6 +318,7 @@ impl LayoutNodeArena {
 
     /// The fan-out of a style repaint: the row, the anonymous boxes it generated, and for an
     /// inline the ancestors up to the line root that paints its pieces.
+    #[track_caller]
     pub(crate) fn push_paint_damage_for_repaint(&self, row: NodeSlotId, damage: PaintDamage) {
         self.paintable_rows()
             .for_each_row_repainted_with(row, |repainted| self.push_paint_damage(repainted, damage));
@@ -296,13 +359,11 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn push_all_paint_damage(&self) {
-        self.debug_assert_not_recording();
         let set = &self.paintable_rows.damage;
         set.all.set(set.stamp_for_push());
     }
 
     pub(crate) fn push_scroll_metadata_damage_everywhere(&self) {
-        self.debug_assert_not_recording();
         let set = &self.paintable_rows.damage;
         set.scroll_metadata_everywhere.set(set.stamp_for_push());
     }
@@ -313,34 +374,6 @@ impl LayoutNodeArena {
 
     pub(crate) fn scroll_metadata_damaged_everywhere(&self) -> bool {
         self.paintable_rows.damage.scroll_metadata_everywhere.get() != 0
-    }
-
-    pub(crate) fn has_paint_damage(&self) -> bool {
-        self.paint_damage_covers_everything()
-            || self.scroll_metadata_damaged_everywhere()
-            || self
-                .paintable_rows
-                .damage
-                .rows
-                .borrow()
-                .iter()
-                .any(|row| self.paintable_row_is_populated(*row) && !self.row_paint_state(*row).damage().is_empty())
-    }
-
-    /// The damage a recording starts from, for the trace header.
-    pub(crate) fn paint_damage_summary(&self) -> crate::painting::record::trace::DamageSummary {
-        let mut summary = crate::painting::record::trace::DamageSummary {
-            all: self.paint_damage_covers_everything(),
-            ..Default::default()
-        };
-        for row in self.damaged_paint_rows() {
-            let damage = self.row_paint_state(row).damage();
-            summary.rows += 1;
-            summary.moved += usize::from(damage.contains(PaintDamage::MOVED));
-            summary.order += usize::from(damage.intersects(PaintDamage::ORDER | PaintDamage::CONTEXT_ORDER));
-            summary.eligibility += usize::from(damage.contains(PaintDamage::ELIGIBILITY));
-        }
-        summary
     }
 
     pub(crate) fn damaged_paint_rows(&self) -> Vec<NodeSlotId> {
@@ -412,7 +445,7 @@ mod tests {
 
     fn populated_child(arena: &mut LayoutNodeArena, parent: NodeSlotId) -> NodeSlotId {
         let row = arena.allocate_for_test().slot;
-        arena.data(row).kind.set(NodeKind::Box);
+        arena.write_shape(row).set_kind(NodeKind::Box);
         if !parent.is_invalid() {
             arena.insert_child(parent, row, NodeSlotId::INVALID);
         }
@@ -460,7 +493,7 @@ mod tests {
         let owner = populated_child(&mut arena, root);
         let sibling = populated_child(&mut arena, root);
         let unpopulated = arena.allocate_for_test().slot;
-        arena.data(unpopulated).kind.set(NodeKind::InlineNode);
+        arena.write_shape(unpopulated).set_kind(NodeKind::InlineNode);
         arena.insert_child(owner, unpopulated, NodeSlotId::INVALID);
         let child = populated_child(&mut arena, unpopulated);
         settle(&arena);
@@ -513,7 +546,7 @@ mod tests {
         let root = populated_child(&mut arena, NodeSlotId::INVALID);
         let svg_root = populated_child(&mut arena, root);
         let mask = populated_child(&mut arena, svg_root);
-        arena.data(mask).kind.set(NodeKind::SVGMaskBox);
+        arena.write_shape(mask).set_kind(NodeKind::SVGMaskBox);
         let mask_content = populated_child(&mut arena, mask);
         settle(&arena);
 
@@ -616,13 +649,13 @@ mod tests {
     fn repaint_fan_out_reaches_anonymous_boxes_and_the_line_root_of_an_inline() {
         let mut arena = LayoutNodeArena::new();
         let line_root = populated_child(&mut arena, NodeSlotId::INVALID);
-        arena.data(line_root).kind.set(NodeKind::BlockContainer);
+        arena.write_shape(line_root).set_kind(NodeKind::BlockContainer);
         let inline = populated_child(&mut arena, line_root);
-        arena.data(inline).kind.set(NodeKind::InlineNode);
+        arena.write_shape(inline).set_kind(NodeKind::InlineNode);
         let anonymous = populated_child(&mut arena, inline);
-        arena.data(anonymous).kind.set(NodeKind::BlockContainer);
-        let flags = &arena.data(anonymous).flags;
-        flags.set(flags.get() | crate::layout::node_data::NodeFlag::Anonymous as u32);
+        arena.write_shape(anonymous).set_kind(NodeKind::BlockContainer);
+        let data = arena.write_shape(anonymous);
+        data.set_flags(data.flags.get() | crate::layout::node_data::NodeFlag::Anonymous as u32);
         settle(&arena);
 
         arena.push_paint_damage_for_repaint(inline, PaintDamage::ALL_DRAW);

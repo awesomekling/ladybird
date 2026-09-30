@@ -10,7 +10,8 @@ use super::*;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::host::FfiVisualContextTreeInputs;
 use crate::painting::paintable_geometry;
-use crate::painting::paintable_rows::PaintableRowsRead;
+use crate::painting::paintable_rows::ArenaRowsRead;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::style_queries;
 use libgfx_rust::CornerRadii;
 use libgfx_rust::{
@@ -22,7 +23,7 @@ use libgfx_rust::{
 // ratio, mirroring how ordinary content records in CSS pixels scaled by it; the node folds the
 // viewport box's position in its own recorded space together with the viewBox transform.
 pub(crate) fn compute_svg_viewport_transform_data(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl PaintRead,
     slot: NodeSlotId,
     viewbox_transform: AffineTransform,
     pixel_ratio: f64,
@@ -46,10 +47,7 @@ pub(crate) fn compute_svg_viewport_transform_data(
     }
 }
 
-pub(crate) fn svg_viewport_transform_of(
-    layout_arena: &crate::layout::LayoutNodeArena,
-    slot: NodeSlotId,
-) -> Option<AffineTransform> {
+pub(crate) fn svg_viewport_transform_of(layout_arena: &impl PaintRead, slot: NodeSlotId) -> Option<AffineTransform> {
     crate::painting::paintable_geometry::committed_svg_viewport_transform(layout_arena, slot).map(Into::into)
 }
 
@@ -62,7 +60,7 @@ pub(crate) struct BoxFacts {
     pub overflow_clip: Option<ClipData>,
     pub css_clip: Option<ClipData>,
     pub line_clamp_float_clip: Option<ClipData>,
-    pub clip_path: Option<(std::rc::Rc<libgfx_rust::path::OwnedPath>, IntRect, WindingRule)>,
+    pub clip_path: Option<(std::sync::Arc<libgfx_rust::path::OwnedPath>, IntRect, WindingRule)>,
     pub mask_layers: Vec<MaskData>,
     pub establishes_absolute_containing_block: bool,
     pub establishes_fixed_containing_block: bool,
@@ -88,11 +86,50 @@ impl BoxFacts {
             .is_some_and(|effects| effects.backdrop_filter.is_some())
     }
 
+    /// Gathers a box's facts for the visual context update, which keeps the bounds of the SVG
+    /// filter the box references on its row.
     pub(crate) fn gather(
-        layout_arena: &impl PaintableRowsRead,
+        layout_arena: &impl crate::painting::paintable_rows::ArenaRowsRead,
         slot: NodeSlotId,
         pixel_ratio: f64,
         consults_default_scroll_shift_anchors: bool,
+    ) -> Self {
+        let default_scroll_shift_anchor = if consults_default_scroll_shift_anchors {
+            layout_arena.default_scroll_shift_anchor(slot)
+        } else {
+            NodeSlotId::INVALID
+        };
+        Self::gather_with_effects(
+            layout_arena,
+            slot,
+            pixel_ratio,
+            default_scroll_shift_anchor,
+            |layout_arena| super::node_values::compute_effects_data(layout_arena, slot, pixel_ratio),
+        )
+    }
+
+    /// Gathers the facts of a box painted inside an SVG resource, which the visual context does
+    /// not reach, along with the bounds of the SVG filter it references.
+    pub(crate) fn gather_for_resource_content(
+        layout_arena: &impl PaintRead,
+        slot: NodeSlotId,
+        pixel_ratio: f64,
+    ) -> (Self, Option<crate::layout::used_values::FfiCssPixelRect>) {
+        let mut svg_filter_bounds = None;
+        let facts = Self::gather_with_effects(layout_arena, slot, pixel_ratio, NodeSlotId::INVALID, |layout_arena| {
+            let (effects, bounds) = super::node_values::resolve_effects_data(layout_arena, slot, pixel_ratio)?;
+            svg_filter_bounds = bounds;
+            effects
+        });
+        (facts, svg_filter_bounds)
+    }
+
+    fn gather_with_effects<Arena: PaintRead>(
+        layout_arena: &Arena,
+        slot: NodeSlotId,
+        pixel_ratio: f64,
+        default_scroll_shift_anchor: NodeSlotId,
+        effects: impl FnOnce(&Arena) -> Option<EffectsData>,
     ) -> Self {
         let mut facts = Self {
             needs_compositor_background_color_effect: layout_arena.node_has_compositor_animation_frame(
@@ -113,11 +150,7 @@ impl BoxFacts {
             backface_hidden: false,
             establishes_or_extends_3d_rendering_context: false,
             may_have_clip: false,
-            default_scroll_shift_anchor: if consults_default_scroll_shift_anchors {
-                layout_arena.default_scroll_shift_anchor(slot)
-            } else {
-                NodeSlotId::INVALID
-            },
+            default_scroll_shift_anchor,
         };
         if let Some((transform, transform_is_invertible)) =
             super::node_values::compute_transform(layout_arena, slot, pixel_ratio)
@@ -126,7 +159,7 @@ impl BoxFacts {
             facts.transform_is_invertible = transform_is_invertible;
         }
         facts.perspective = super::node_values::compute_perspective_data(layout_arena, slot, pixel_ratio);
-        facts.effects = super::node_values::compute_effects_data(layout_arena, slot, pixel_ratio).map(std::rc::Rc::new);
+        facts.effects = effects(layout_arena).map(std::rc::Rc::new);
         facts.backface_hidden = super::node_values::backface_hidden(layout_arena, slot);
         let node = slot;
         facts.establishes_or_extends_3d_rendering_context =
@@ -136,7 +169,7 @@ impl BoxFacts {
         facts.establishes_absolute_containing_block = establishes_absolute;
         facts.establishes_fixed_containing_block = establishes_fixed;
         facts.clip_path = super::basic_shapes::compute_basic_shape_clip_path_data(layout_arena, slot, pixel_ratio)
-            .map(|(path, bounding_rect, fill_rule)| (std::rc::Rc::new(path), bounding_rect, fill_rule));
+            .map(|(path, bounding_rect, fill_rule)| (std::sync::Arc::new(path), bounding_rect, fill_rule));
         let converter = crate::painting::display_list::device_pixels::DevicePixelConverter::new(pixel_ratio);
         facts.mask_layers = super::node_values::mask_layer_presence(layout_arena, slot, true)
             .into_iter()
@@ -185,7 +218,7 @@ pub(crate) struct FreshTree {
 }
 
 pub(crate) fn create_fresh_tree_with_viewport_nodes(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     viewport: NodeSlotId,
     inputs: &FfiVisualContextTreeInputs,
 ) -> FreshTree {

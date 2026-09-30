@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::trace::Observer;
 
 use super::{PaintPhase, PaintRecorder};
 use crate::css::style::fast_hash::FastSet;
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeKind, NodeSlotId};
 use crate::layout::node_facts;
+use crate::lent::Lender;
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::display_list::device_pixels::DevicePixelConverter;
 use crate::painting::display_list::recorder::DisplayListRecorder;
@@ -27,36 +28,35 @@ use crate::painting::record::scratch::RecordingScratch;
 use crate::painting::record::svg_resources::MaskLayerSet;
 use crate::painting::record::trace::{Action, Operation};
 use crate::painting::record::{PublishedHitTestItems, RecordingOutput, RecordingResult};
-use std::rc::Rc;
 use std::sync::Arc;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_display_list(
-    layout_arena: &LayoutNodeArena,
-    paint_state: &crate::painting::paint_state::PaintState,
+    frame: &crate::painting::published_frame::PublishedFrame,
+    absolute_rects: &std::cell::RefCell<crate::painting::record::recorder_state::AbsoluteRectMemo>,
     scratch: &mut RecordingScratch,
     tree: &mut PaintOrderTree,
     viewport: NodeSlotId,
     inputs: &RecordingInputs<'_>,
-    hit_test_list_generation: u64,
-    source_frame: Option<Rc<RecordingOutput>>,
-    source_items: Option<Rc<PublishedHitTestItems>>,
+    source_frame: Option<Arc<RecordingOutput>>,
+    source_items: Option<Arc<PublishedHitTestItems>>,
+    hit_test_lists: &mut Lender<HitTestList>,
     plan_from_prepared_inputs: bool,
     trace: bool,
 ) -> RecordingResult {
-    scratch.begin_recording(layout_arena.paintable_row_count());
+    scratch.begin_recording(frame.paintable_row_capacity());
     macro_rules! record {
         ($observer:ty) => {
             record_display_list_impl::<$observer>(
-                layout_arena,
-                paint_state,
+                frame,
+                absolute_rects,
                 scratch,
                 tree,
                 viewport,
                 inputs,
-                hit_test_list_generation,
                 source_frame,
                 source_items,
+                hit_test_lists,
                 plan_from_prepared_inputs,
             )
         };
@@ -72,23 +72,24 @@ pub(crate) fn record_display_list(
 
 #[allow(clippy::too_many_arguments)]
 fn record_display_list_impl<O: Observer>(
-    layout_arena: &LayoutNodeArena,
-    paint_state: &crate::painting::paint_state::PaintState,
+    frame: &crate::painting::published_frame::PublishedFrame,
+    absolute_rects: &std::cell::RefCell<crate::painting::record::recorder_state::AbsoluteRectMemo>,
     scratch: &mut RecordingScratch,
     tree: &mut PaintOrderTree,
     viewport: NodeSlotId,
     inputs: &RecordingInputs<'_>,
-    hit_test_list_generation: u64,
-    source_frame: Option<Rc<RecordingOutput>>,
-    source_items: Option<Rc<PublishedHitTestItems>>,
+    source_frame: Option<Arc<RecordingOutput>>,
+    source_items: Option<Arc<PublishedHitTestItems>>,
+    hit_test_lists: &mut Lender<HitTestList>,
     plan_from_prepared_inputs: bool,
 ) -> RecordingResult {
     debug_assert!(
         inputs.publishes_recording || source_frame.is_none(),
         "a recording that publishes nothing has no published frame to copy from"
     );
-    let structural_epoch = paint_state.visual_context.structural_epoch();
-    let paintable_rows = layout_arena.paintable_rows();
+    let paint_state = frame.paint_state();
+    let structural_epoch = paint_state.structural_epoch();
+    let paintable_rows = crate::painting::published_frame::PaintSource::new(frame, absolute_rects);
     let frame_inputs = FrameInputs::from_recording_inputs(inputs, paint_state);
     let root_background_canvas_rect = root_background_canvas_rect(
         &paintable_rows,
@@ -101,8 +102,8 @@ fn record_display_list_impl<O: Observer>(
         .as_ref()
         .is_some_and(|frame| frame.frame_inputs == frame_inputs)
         && source_items.is_some()
-        && !layout_arena.paint_damage_covers_everything()
-        && !layout_arena.scroll_metadata_damaged_everywhere();
+        && !frame.damage().covers_everything()
+        && !frame.damage().scroll_metadata_everywhere();
     let (source_frame, source_items) = if source_is_usable {
         (source_frame, source_items)
     } else {
@@ -125,11 +126,7 @@ fn record_display_list_impl<O: Observer>(
         blocking_wheel_event_region_count: 0,
         observer: O::default(),
         list: HitTestList {
-            item_capacity_hint_from_previous_list: layout_arena
-                .hit_test_list
-                .borrow()
-                .as_ref()
-                .map_or(0, |list| list.items.len()),
+            item_capacity_hint_from_previous_list: paint_state.hit_test_item_capacity_hint,
             ..HitTestList::default()
         },
         scratch,
@@ -137,7 +134,7 @@ fn record_display_list_impl<O: Observer>(
     };
     recorder
         .observer
-        .observe(|log| log.damage = Some(layout_arena.paint_damage_summary()));
+        .observe(|log| log.damage = Some(frame.damage().summary()));
     recorder.record_canvas();
     let prologue_bytes = u32::try_from(recorder.recorder.byte_size()).expect("display list exceeds u32");
     let has_inspector_overlays = inputs.inspector_highlight.is_some()
@@ -145,6 +142,7 @@ fn record_display_list_impl<O: Observer>(
         || !inputs.flex_overlays.is_empty()
         || inputs.caret_debug_rect.is_some();
     let root_scope = PaintScope::stacking_context(viewport);
+    let frame_has_damage = !frame.damage().is_empty();
     // Nothing was pushed and nothing records every frame: the published tape and items are
     // this frame, which lets the compositor skip its update as well.
     let unchanged_frame = recorder
@@ -152,20 +150,24 @@ fn record_display_list_impl<O: Observer>(
         .as_ref()
         .zip(recorder.source_items.as_ref())
         .filter(|(frame, _)| {
-            frame_is_unchanged(tree, layout_arena.has_paint_damage())
+            frame_is_unchanged(tree, frame_has_damage)
                 && !has_inspector_overlays
                 && frame.prologue_bytes == prologue_bytes
                 && recorder.recorder.bytes() == &frame.display_list.bytes[..prologue_bytes as usize]
         })
-        .map(|(frame, items)| (frame.display_list.clone(), items.items.clone()));
+        .map(|(frame, items)| (frame.clone(), items.items.clone()));
     let display_list = match unchanged_frame {
-        Some((display_list, items)) => {
+        Some((frame, items)) => {
+            recorder
+                .resources
+                .painted_vector_images
+                .extend(frame.vector_images.iter().map(|(id, render)| (*id, render.clone())));
             recorder
                 .observer
                 .observe(|log| log.leaf(Operation::Scope(root_scope), Action::Copy, false));
             recorder.list.items = items;
             recorder.blocking_wheel_event_region_count = tree.root_entry().output().blocking_wheel_event_regions;
-            display_list
+            frame.display_list.clone()
         }
         None => {
             let source_prologue_bytes = recorder.source_frame.as_ref().map(|frame| frame.prologue_bytes);
@@ -180,17 +182,24 @@ fn record_display_list_impl<O: Observer>(
         }
     };
     let mut hit_test_list = recorder.list;
-    hit_test_list.generation = hit_test_list_generation;
+    hit_test_list.generation = paint_state.hit_test_list_generation + 1;
+    // A hit test reads the list where the rows publish it once the document takes it in, without reaching the owner,
+    // so what a query derives from the list is built here, over the rows it was recorded over.
+    hit_test_list.build_spatial_indexes_if_needed();
+    hit_test_list.build_caret_lines_if_needed(&paintable_rows);
+    hit_test_lists.take_back_let_go();
     let output = RecordingOutput {
         recorded_structural_epoch: structural_epoch,
         frame_inputs,
         root_background_canvas_rect,
         prologue_bytes,
-        hit_test_list,
+        hit_test_list: hit_test_lists.lend(hit_test_list),
         display_list,
         has_blocking_wheel_event_listeners: recorder.blocking_wheel_event_region_count > 0,
         wheel_event_listener_state_generation: inputs.wheel_event_listener_state_generation,
         is_identical_to_published_frame: false,
+        vector_images: Default::default(),
+        missed_vector_images: Default::default(),
         capture_log_for_verification: recorder.observer.finish(),
     };
     RecordingResult {
@@ -222,7 +231,7 @@ impl<O: Observer> PaintRecorder<'_, O> {
 
         // For elements with SVG filters, emit a transparent FillRect to trigger filter application.
         // This ensures content-generating filters (feFlood, feImage) work even with empty source.
-        if let Some(svg_filter_bounds) = self.layout_arena.paintable_side_data(svg_box).svg_filter_bounds.get() {
+        if let Some(svg_filter_bounds) = self.layout_arena.svg_filter_bounds(svg_box) {
             let device_rect = self
                 .converter
                 .enclosing_device_rect(crate::css::css_pixels::CssPixelRect::from(svg_filter_bounds));

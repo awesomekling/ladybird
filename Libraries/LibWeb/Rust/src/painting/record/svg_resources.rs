@@ -9,7 +9,9 @@ use crate::layout::node_data::{NodeKind, NodeSlotId};
 use crate::painting::display_list::builder::PendingInlineClip;
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::display_list::recorder::{IsolatedGroupEffects, OpenRecorderGroup};
+use crate::painting::geometry_read::GeometryRead;
 use crate::painting::node_painting;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::order_tree::ProducerKind;
 use crate::painting::record::trace::{Action, Observer, Operation};
 use crate::painting::record::{PaintPhase, PaintRecorder};
@@ -112,7 +114,7 @@ impl<O: Observer> PaintRecorder<'_, O> {
         paintable: NodeSlotId,
         origin: MaskLayerOrigin,
     ) -> Option<(EffectNodeIndex, MaskData)> {
-        let tree = self.paint_state.visual_context.tree.as_deref()?;
+        let tree = self.paint_state.visual_context_tree.as_deref()?;
         self.layout_arena
             .with_paintable_visual_context_node_handles(paintable, |handles| {
                 handles
@@ -225,8 +227,12 @@ impl<O: Observer> PaintRecorder<'_, O> {
             .node_style_if_live(paintable)
             .expect("the mask recording target holds a live layout node");
         let is_root_element = crate::painting::style_queries::node_is_root_element(layout_arena, paintable);
-        let resolved =
-            crate::painting::record::paint::background_resolution::resolve_mask_layers(self, paintable, style, area);
+        let resolved = crate::painting::record::paint::background_resolution::resolve_mask_layers(
+            self.layer_resolution_context(),
+            paintable,
+            style,
+            area,
+        );
         // A mask's output is coverage rather than color anyone sees, and a luminance mask's lightness is its alpha,
         // so force-dark stays out of it.
         let suspended_force_dark = self.recorder.suspend_force_dark();
@@ -289,12 +295,8 @@ impl<O: Observer> PaintRecorder<'_, O> {
         {
             return;
         }
-        let facts = BoxFacts::gather(
-            self.layout_arena,
-            svg_box,
-            self.inputs.device_pixels_per_css_pixel,
-            false,
-        );
+        let (facts, svg_filter_bounds) =
+            BoxFacts::gather_for_resource_content(self.layout_arena, svg_box, self.inputs.device_pixels_per_css_pixel);
         self.recorder.set_accumulated_visual_context(walk.enclosing_context);
 
         let effects_group = facts
@@ -322,7 +324,7 @@ impl<O: Observer> PaintRecorder<'_, O> {
         }
 
         let enclosing_transform = self.recorder.set_ambient_inline_transform(Some(to_enclosing_space));
-        self.paint_svg_box_own_content_inside_resource(svg_box);
+        self.paint_svg_box_own_content_inside_resource(svg_box, svg_filter_bounds);
 
         let clip_depth = self.recorder.ambient_inline_clip_depth();
         if facts.may_have_clip
@@ -383,10 +385,14 @@ impl<O: Observer> PaintRecorder<'_, O> {
         }
     }
 
-    fn paint_svg_box_own_content_inside_resource(&mut self, svg_box: NodeSlotId) {
+    fn paint_svg_box_own_content_inside_resource(
+        &mut self,
+        svg_box: NodeSlotId,
+        svg_filter_bounds: Option<crate::layout::used_values::FfiCssPixelRect>,
+    ) {
         // For elements with SVG filters, emit a transparent FillRect to trigger filter application.
         // This ensures content-generating filters (feFlood, feImage) work even with empty source.
-        if let Some(svg_filter_bounds) = self.layout_arena.paintable_side_data(svg_box).svg_filter_bounds.get() {
+        if let Some(svg_filter_bounds) = svg_filter_bounds {
             let device_rect = self
                 .converter
                 .enclosing_device_rect(crate::css::css_pixels::CssPixelRect::from(svg_filter_bounds));
