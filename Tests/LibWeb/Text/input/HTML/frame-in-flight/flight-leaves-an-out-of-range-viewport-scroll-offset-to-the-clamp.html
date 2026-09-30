@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>body { margin: 0 }</style>
+<div id="tall" style="height: 3000px; background: linear-gradient(green, blue)"></div>
+<script>
+    // Content that shrinks under a scrolled viewport leaves its scroll offset past the end. The layout round that
+    // measures the new overflow clamps the offset, and the document stores the clamped offset once the flight is taken
+    // back. A flight records at the offset it sealed before its layout, so a round that clamped an offset leaves the
+    // frame to the rendering update, which records after the store: no flight presents a frame scrolled past the
+    // content. Nothing is printed until the end, as printing inserts nodes.
+    asyncTest(async done => {
+        await new Promise(resolve => window.addEventListener("load", resolve));
+        window.scrollTo(0, 2000);
+        for (let i = 0; i < 3; ++i)
+            await twoFrames();
+        const scrolledTo = window.scrollY;
+        internals.resetRenderingSchedulerCounters();
+        const presentedBefore = internals.framesPresentedByFlights(document);
+        await new Promise(resolve => requestAnimationFrame(() => {
+            tall.style.height = "1000px";
+            resolve();
+        }));
+        await twoFrames();
+        const presentedByFlight = internals.framesPresentedByFlights(document) - presentedBefore;
+        const clamped = window.scrollY === document.documentElement.scrollHeight - window.innerHeight;
+        const ends = internals.getRenderingSchedulerCounters().flightEnds;
+        const flew = Object.values(ends).some(byStage => Object.values(byStage).some(count => count > 0));
+
+        println(`scrolled to: ${scrolledTo}`);
+        println(`flight left the frame to the rendering update: ${!flew || ends.roundLeftWork.rounds === 1}`);
+        println(`no flight presented it: ${presentedByFlight === 0}`);
+        println(`clamped to the end of the content: ${clamped}`);
+        done();
+    });
+</script>

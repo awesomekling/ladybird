@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    body { margin: 0; }
+    #list > div { width: 10px; height: 1px; }
+    #target { position: absolute; left: anchor(--row-1500 left, 7px); }
+</style>
+<div id="list"></div>
+<div id="target"></div>
+<script>
+    test(() => {
+        // Thousands of sibling rows each register a name of their own, and the target anchors to one of them.
+        const list = document.getElementById("list");
+        for (let i = 0; i < 3000; ++i) {
+            const row = document.createElement("div");
+            row.style.anchorName = `--row-${i}`;
+            row.style.marginLeft = `${i % 40}px`;
+            list.prepend(row);
+        }
+        println(`target: ${document.getElementById("target").offsetLeft}`);
+
+        // Renaming the anchor row moves the target to the row that takes the name.
+        list.children[0].style.anchorName = "--row-1500";
+        list.children[1499].style.anchorName = "--row-2999";
+        println(`target after the rename: ${document.getElementById("target").offsetLeft}`);
+    });
+</script>

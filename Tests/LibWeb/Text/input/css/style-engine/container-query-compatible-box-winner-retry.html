@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    #container { container-type: inline-size; width: 200px; }
+    @container (min-width: 100px) {
+        #dependent.active { color: rgb(1, 2, 3); }
+    }
+</style>
+<div id="container"><span id="dependent"></span></div>
+<script>
+    test(() => {
+        document.body.offsetWidth;
+        const before = internals.getStyleInvalidationCounters();
+
+        container.style.color = "red";
+        dependent.classList.add("active");
+        internals.updateStyle();
+
+        const after = internals.getStyleInvalidationCounters();
+        println(`dependent color: ${getComputedStyle(dependent).color}`);
+        println(`C++ recomputations: ${after.elementStyleRecomputations - before.elementStyleRecomputations}`);
+    });
+</script>

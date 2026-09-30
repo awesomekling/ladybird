@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    body { margin: 0; }
+    #box { width: 100px; height: 10px; background-color: green; }
+    iframe { width: 200px; height: 100px; }
+</style>
+<div id="box"></div>
+<script>
+    // A read of an iframe's layout beside its container's recording in flight does not wait for that recording, which
+    // stays held in flight: not when only the iframe was dirtied, and not when the container's own layout was dirtied
+    // too, since the recording reads its own frame and never the container's arena.
+    async function readBesideContainerRecording(mutate, read) {
+        return whileFrameInFlight("mid-recording", mutate, frameInFlight => {
+            const value = read();
+            return {
+                ...frameInFlight,
+                value,
+                stillHeld: internals.waitForHeldFrame() === "mid-recording",
+            };
+        }, document);
+    }
+
+    function report(result) {
+        println(`held as armed: ${heldAsArmed(result, "mid-recording")}`);
+        println(`read: ${result.value}`);
+        println(`container recording still held: ${result.armed ? result.stillHeld : true}`);
+    }
+
+    asyncTest(async done => {
+        const frame = document.createElement("iframe");
+        frame.srcdoc = "<body style='margin: 0'><div id=inner style='width: 20px; height: 10px; background: blue'></div>";
+        const loaded = new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
+        document.body.appendChild(frame);
+        await loaded;
+        await twoFrames();
+        const inner = frame.contentDocument.getElementById("inner");
+
+        report(await readBesideContainerRecording(() => {
+            box.style.backgroundColor = "blue";
+        }, () => {
+            inner.style.width = "30px";
+            return inner.offsetWidth;
+        }));
+        await twoFrames();
+
+        report(await readBesideContainerRecording(() => {
+            box.style.backgroundColor = "green";
+        }, () => {
+            box.style.width = "120px";
+            inner.style.width = "40px";
+            return inner.offsetWidth;
+        }));
+        await twoFrames();
+
+        println(`after: ${getComputedStyle(box).backgroundColor} ${box.offsetWidth} ${inner.offsetWidth}`);
+        done();
+    });
+</script>

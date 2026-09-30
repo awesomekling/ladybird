@@ -15,9 +15,30 @@
 #include <LibWeb/CSS/RustRule.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
 #include <LibWeb/CSS/StyleSheetImport.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/SelectorRustFFI.h>
 #include <LibWeb/StyleValueRustFFI.h>
 #include <LibWeb/ValueParserRustFFI.h>
+
+// A test's style engine, born with a render state of its own as a document's is born with its document's.
+struct TestRenderState {
+    TestRenderState()
+        : handle(Web::Layout::RustFFI::render_owner_create_document())
+    {
+    }
+    ~TestRenderState() { Web::Layout::RustFFI::render_owner_destroy_document(handle); }
+
+    Web::Layout::RustFFI::FfiRenderDocument handle;
+};
+
+struct OwnedStyleEngine
+    : TestRenderState
+    , Web::CSS::StyleEngine {
+    OwnedStyleEngine()
+        : Web::CSS::StyleEngine(handle.arena, Web::CSS::StyleEngine::DeviceClass::ForegroundDesktop)
+    {
+    }
+};
 
 namespace Web::CSS::Parser {
 
@@ -359,21 +380,31 @@ static RustDeclarationBlock parse_native_declaration_block(Utf16View source)
     return RustDeclarationBlock { block };
 }
 
+// Records an element's inline style the way the host does: as a snapshot of the block that crosses with the next
+// transaction.
+static void record_inline_style_properties(Web::CSS::StyleEngine& engine, Web::CSS::StyleNodeID node, Web::CSS::RustDeclarationBlock const* declarations)
+{
+    auto const* snapshot = declarations ? Web::CSS::Parser::ValueParserFFI::rust_declaration_block_snapshot(declarations->handle()) : nullptr;
+    if (snapshot && Web::CSS::Parser::ValueParserFFI::rust_declaration_data_defines_a_css_transition(snapshot))
+        engine.note_css_transitions_may_observe_style_changes();
+    engine.record_inline_style_properties(node, snapshot);
+}
+
 TEST_CASE(style_engine_consumes_native_inline_declaration_blocks)
 {
-    StyleEngine engine(StyleEngine::DeviceClass::ForegroundDesktop);
-    auto node = engine.allocate_style_node();
+    OwnedStyleEngine engine;
+    auto node = engine.mint_style_node();
     auto declarations = parse_native_declaration_block(u"color: rgb(20, 24, 28); margin: var(--gap); --gap: 13px"sv);
     auto shared = declarations.share();
     auto transitions = parse_native_declaration_block(u"transition-duration: 1s"sv);
     auto retained = declarations.retain();
     StyleValueFFI::rust_style_ffi_counters_reset();
-    engine.set_element_inline_style_properties(node, &declarations);
+    record_inline_style_properties(engine, node, &declarations);
     EXPECT(!engine.css_transitions_may_observe_style_changes());
-    engine.set_element_inline_style_properties(node, &shared);
-    engine.set_element_inline_style_properties(node, nullptr);
+    record_inline_style_properties(engine, node, &shared);
+    record_inline_style_properties(engine, node, nullptr);
     declarations.replace(transitions);
-    engine.set_element_inline_style_properties(node, &retained);
+    record_inline_style_properties(engine, node, &retained);
     EXPECT(engine.css_transitions_may_observe_style_changes());
     for (size_t index = 0; index < StyleValueFFI::rust_style_ffi_counter_count(); ++index) {
         auto const* name_data = reinterpret_cast<char const*>(StyleValueFFI::rust_style_ffi_counter_name(index));
@@ -385,24 +416,22 @@ TEST_CASE(style_engine_consumes_native_inline_declaration_blocks)
 
 TEST_CASE(style_engine_expands_presentation_hint_shorthands_in_rust)
 {
-    StyleEngine engine(StyleEngine::DeviceClass::ForegroundDesktop);
-    auto node = engine.allocate_style_node();
+    OwnedStyleEngine engine;
+    auto node = engine.mint_style_node();
     auto inherited = parse_native_declaration_block(u"color: inherit"sv);
     Vector<StyleProperty> hints { StyleProperty { Important::No, PropertyID::Border, inherited.properties()[0].value } };
     engine.set_element_presentational_hint_properties(node, StyleEngineFFI::FfiElementDeclarationKind::PresentationalHint, hints);
     EXPECT(!engine.css_transitions_may_observe_style_changes());
+    engine.flush();
     // Border expands through intermediate shorthands such as border-width. Each resulting
     // longhand after the first must reuse the same immutable keyword value. The 17 longhands
     // comprise four widths, four styles, four colors, and five border-image properties.
-    for (size_t index = 0;; ++index) {
-        StringView name;
-        u64 value = 0;
-        VERIFY(engine.counter(index, name, value));
-        if (name == "specifiedValuesReused"sv) {
-            EXPECT_EQ(value, 16ull);
-            break;
-        }
-    }
+    Optional<u64> reused;
+    engine.for_each_counter([&](StringView name, u64 value) {
+        if (name == "specifiedValuesReused"sv)
+            reused = value;
+    });
+    EXPECT_EQ(reused, 16ull);
     auto transitions = parse_native_declaration_block(u"transition-duration: 1s"sv);
     engine.set_element_presentational_hint_properties(node, StyleEngineFFI::FfiElementDeclarationKind::PresentationalHint, transitions.properties());
     EXPECT(engine.css_transitions_may_observe_style_changes());

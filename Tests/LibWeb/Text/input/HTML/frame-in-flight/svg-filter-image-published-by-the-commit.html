@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    #filtered { width: 100px; height: 100px; filter: url(#filter); }
+</style>
+<div id="filtered"></div>
+<svg width="0" height="0">
+    <filter id="filter" x="0" y="0" width="100%" height="100%">
+        <feImage id="image" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAAAkElEQVR42u3QMQ0AAAjAsPk3DRb4eJpUQavhTIEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFnPFse76yukbN6SAAAAAElFTkSuQmCC"/>
+    </filter>
+</svg>
+<script>
+    // The filter's new image loads while the frame that recorded without it is in flight, and the layout read joins
+    // that frame. Its commit reads the visual context tree, which publishes the filter with the image the recording
+    // never saw, and the image has to reach the compositor with the tree.
+    const green = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAAAkElEQVR42u3QMQ0AAAjAsElHOhb4eJpUQWviSoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFnfFhDniR6UCYQPAAAAAElFTkSuQmCC";
+    asyncTest(async done => {
+        await twoFrames();
+        let loaded;
+        const frame = await whileFrameInFlight("mid-recording", () => {
+            image.setAttribute("href", green);
+            // Shares the filter's image request, which reports the load to the filter first.
+            const probe = new Image();
+            loaded = new Promise(resolve => probe.onload = resolve);
+            probe.src = green;
+        }, async frame => {
+            await loaded;
+            const width = filtered.offsetWidth;
+            return { ...frame, width };
+        });
+        println(`held as armed: ${heldAsArmed(frame, "mid-recording")}`);
+        println(`width at join: ${frame.width}`);
+        await twoFrames();
+        println(`width at the end: ${filtered.offsetWidth}`);
+        done();
+    });
+</script>

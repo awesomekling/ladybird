@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    body { margin: 0; }
+    #list > div { anchor-name: --row; width: 10px; height: 1px; }
+    #target { position: absolute; left: anchor(--row left, 7px); }
+</style>
+<div id="list"></div>
+<div id="target"></div>
+<script>
+    test(() => {
+        // Thousands of rows register one name. The rows arrive in reverse tree order, and the target
+        // anchors to the last of them in tree order.
+        const list = document.getElementById("list");
+        for (let i = 0; i < 3000; ++i) {
+            const row = document.createElement("div");
+            row.style.marginLeft = `${i === 0 ? 50 : i % 40}px`;
+            list.prepend(row);
+        }
+        println(`target: ${document.getElementById("target").offsetLeft}`);
+
+        // Moving the last row to the front leaves the one before it last.
+        list.prepend(list.lastElementChild);
+        println(`target after the move: ${document.getElementById("target").offsetLeft}`);
+    });
+</script>

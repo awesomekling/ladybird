@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    // A frame time past `time`, and not past now: the time a display tick at the next frame carries.
+    async function frameTimeAfter(time) {
+        while (performance.now() <= time + 1)
+            await nextTask();
+        return performance.now();
+    }
+
+    // A display frame can reach the rendering update only after a clock tick at a later
+    // frame time has presented and moved the document timeline, as after a long task. The animation frame callbacks of
+    // that rendering update get the time the timeline shows, not the time of the older display frame.
+    asyncTest(async done => {
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        let frameTime = performance.now();
+        for (let i = 0; i < 3; ++i) {
+            frameTime = await frameTimeAfter(frameTime);
+            internals.injectRenderingOpportunity(frameTime);
+            await nextTask();
+        }
+        // The rendering updates end before the test goes on.
+        while (internals.frameSchedulerState() !== "idle")
+            await nextTask();
+
+        const olderFrameTime = await frameTimeAfter(frameTime);
+        const tickTime = await frameTimeAfter(olderFrameTime);
+        const taken = await internals.injectClockTick(tickTime);
+
+        const { promise, resolve } = Promise.withResolvers();
+        requestAnimationFrame(now => resolve([now, document.timeline.currentTime]));
+        internals.injectRenderingOpportunity(olderFrameTime);
+        const [now, timelineTime] = await promise;
+        internals.setManualRenderingOpportunities(false);
+
+        println(`a lease took the tick: ${taken}`);
+        println(`animation frame time matches the timeline: ${now === timelineTime}`);
+        println(`animation frame time is not before the tick: ${now >= tickTime - 1}`);
+        done();
+    });
+</script>

@@ -33,6 +33,7 @@ struct TestWebContentClient final : public Compositor::CompositorStateWebContent
     virtual void dispatch_key_event_to_web_content(u64, Compositing::KeyEvent const&) override { }
     virtual void request_rendering_update() override { events.append("request_rendering_update"_string); }
     virtual void rendering_opportunity(Compositing::CompositorContextId, i64, double) override { }
+    virtual void clock_tick(Compositing::CompositorContextId, i64, double) override { }
     virtual void async_scroll_updates(Compositing::CompositorContextId, Compositing::PendingAsyncScrollUpdates const&) override { events.append("async_scroll_updates"_string); }
     virtual void create_video_edge(Media::VideoSinkHandle) override { }
     virtual void release_video_edge(Media::VideoSinkHandle) override { }
@@ -564,6 +565,103 @@ TEST_CASE(requesting_a_rendering_opportunity_again_only_updates_its_rate)
     EXPECT(context.rendering_opportunity_is_due(frame_time + AK::Duration::from_milliseconds(33), 60));
 }
 
+TEST_CASE(a_clock_tick_does_not_push_back_the_next_rendering_opportunity)
+{
+    TestWebContentClient client;
+    Compositing::CanvasSurfaceRegistry canvas_surface_registry;
+    Compositor::ContextState context { Compositing::CompositorContextId { 1 }, 1, client, canvas_surface_registry, false };
+
+    EXPECT(context.request_rendering_opportunity(30));
+    auto frame_time = monotonic_time_at(1'000'000'000);
+    context.did_deliver_rendering_opportunity(frame_time);
+
+    // The clock gets every display tick; the 30 fps rendering opportunity is due two ticks after the last one, as
+    // though no clock tick had been delivered in between.
+    for (size_t tick = 0; tick < 4; ++tick) {
+        auto tick_time = frame_time + AK::Duration::from_nanoseconds(static_cast<i64>(tick) * 1'000'000'000 / 60);
+        EXPECT(context.request_clock_tick(60));
+        EXPECT(context.clock_tick_is_due(tick_time, 60));
+        context.did_deliver_clock_tick(tick_time);
+        EXPECT(!context.clock_tick_requested());
+        EXPECT_EQ(context.rendering_opportunity_is_due(tick_time, 60), tick >= 2);
+    }
+    EXPECT_APPROXIMATE(context.clock_tick_frame_interval(60), 1000.0 / 60);
+    EXPECT_APPROXIMATE(context.rendering_opportunity_frame_interval(60), 2000.0 / 60);
+}
+
+TEST_CASE(requesting_a_clock_tick_again_only_updates_its_rate)
+{
+    TestWebContentClient client;
+    Compositing::CanvasSurfaceRegistry canvas_surface_registry;
+    Compositor::ContextState context { Compositing::CompositorContextId { 1 }, 1, client, canvas_surface_registry, false };
+
+    EXPECT(context.request_clock_tick(60));
+    EXPECT(!context.request_clock_tick(30));
+    EXPECT(context.clock_tick_requested());
+    EXPECT_APPROXIMATE(context.clock_tick_frame_interval(60), 2000.0 / 60);
+    EXPECT(!context.rendering_opportunity_requested());
+
+    context.cancel_clock_tick_request();
+    EXPECT(!context.clock_tick_requested());
+    EXPECT(context.request_clock_tick(30));
+}
+
+struct ClockTickRecordingWebContentClient final : public Compositor::CompositorStateWebContentClient {
+    virtual void dispatch_mouse_event_to_web_content(u64, Compositing::MouseEvent const&) override { }
+    virtual void dispatch_key_event_to_web_content(u64, Compositing::KeyEvent const&) override { }
+    virtual void request_rendering_update() override { }
+    virtual void rendering_opportunity(Compositing::CompositorContextId, i64, double) override { ++rendering_opportunities; }
+    virtual void clock_tick(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double) override { clock_tick_times.append(frame_time_nanoseconds); }
+    virtual void async_scroll_updates(Compositing::CompositorContextId, Compositing::PendingAsyncScrollUpdates const&) override { }
+    virtual void create_video_edge(Media::VideoSinkHandle) override { }
+    virtual void release_video_edge(Media::VideoSinkHandle) override { }
+    virtual void placeholder_canvas_committed(Compositing::CanvasId, Gfx::IntSize, bool) override { }
+
+    size_t rendering_opportunities { 0 };
+    Vector<i64> clock_tick_times;
+};
+
+TEST_CASE(clock_ticks_reach_a_visible_context_and_wait_while_it_is_hidden)
+{
+    Core::EventLoop event_loop;
+    TestCompositorClient compositor_client;
+    ClockTickRecordingWebContentClient client;
+    auto compositor_state = Compositor::CompositorState::create({}, false);
+    compositor_state->set_client(compositor_client);
+    u64 page_id = 1;
+    auto context_id = Compositing::compositor_context_id_for_page(page_id);
+    compositor_state->create_context(context_id, page_id, client);
+
+    // One tick per request, each on a later display tick, and none of them a rendering opportunity.
+    for (size_t tick = 1; tick <= 3; ++tick) {
+        compositor_state->request_clock_tick(context_id, 60);
+        EXPECT(spin_event_loop_until(event_loop, 2000, [&] { return client.clock_tick_times.size() == tick; }));
+    }
+    EXPECT(!spin_event_loop_until(event_loop, 100, [&] { return client.clock_tick_times.size() > 3; }));
+    for (size_t tick = 1; tick < client.clock_tick_times.size(); ++tick)
+        EXPECT(client.clock_tick_times[tick] - client.clock_tick_times[tick - 1] >= 16'000'000);
+    EXPECT_EQ(client.rendering_opportunities, 0u);
+
+    // A hidden context keeps its request, and gets its tick once it is shown.
+    compositor_state->set_context_visibility(context_id, Compositing::ContextVisibility::Hidden);
+    compositor_state->request_clock_tick(context_id, 60);
+    EXPECT(!spin_event_loop_until(event_loop, 100, [&] { return client.clock_tick_times.size() > 3; }));
+    compositor_state->set_context_visibility(context_id, Compositing::ContextVisibility::Visible);
+    EXPECT(spin_event_loop_until(event_loop, 2000, [&] { return client.clock_tick_times.size() == 4; }));
+
+    // A request whose channel went away is not delivered.
+    compositor_state->set_context_visibility(context_id, Compositing::ContextVisibility::Hidden);
+    compositor_state->request_clock_tick(context_id, 60);
+    compositor_state->cancel_clock_tick_requests_for_web_content_client(client);
+    compositor_state->set_context_visibility(context_id, Compositing::ContextVisibility::Visible);
+    EXPECT(!spin_event_loop_until(event_loop, 100, [&] { return client.clock_tick_times.size() > 4; }));
+
+    // A rendering opportunity and a clock tick requested together are both delivered.
+    compositor_state->request_rendering_opportunity(context_id, 60);
+    compositor_state->request_clock_tick(context_id, 60);
+    EXPECT(spin_event_loop_until(event_loop, 2000, [&] { return client.clock_tick_times.size() == 5 && client.rendering_opportunities == 1; }));
+}
+
 TEST_CASE(hidden_context_coalesces_presents_and_presents_once_when_shown)
 {
     Core::EventLoop event_loop;
@@ -633,6 +731,7 @@ struct RecordingWebContentClient final : public Compositor::CompositorStateWebCo
     virtual void dispatch_key_event_to_web_content(u64, Compositing::KeyEvent const&) override { }
     virtual void request_rendering_update() override { events.append("request_rendering_update"_string); }
     virtual void rendering_opportunity(Compositing::CompositorContextId, i64, double) override { }
+    virtual void clock_tick(Compositing::CompositorContextId, i64, double) override { }
     virtual void async_scroll_updates(Compositing::CompositorContextId, Compositing::PendingAsyncScrollUpdates const& updates) override
     {
         events.append("async_scroll_updates"_string);

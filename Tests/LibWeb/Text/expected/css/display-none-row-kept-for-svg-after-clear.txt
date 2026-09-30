@@ -1,0 +1,4 @@
+span has a style record once hidden: false
+style drives for the span and its arriving elements: 3
+span has a style record: true
+stop color: rgb(0, 128, 0)

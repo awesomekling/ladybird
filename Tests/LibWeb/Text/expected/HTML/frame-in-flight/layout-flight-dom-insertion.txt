@@ -1,0 +1,10 @@
+held as armed: true
+forced joins of the layout pass: 0
+layout pass still in flight after the insertions: true
+fresh width: 150
+fresh height: 16
+first text: first and more
+second connected: true
+container height: 84
+toggled height: 16
+layout passes held: true

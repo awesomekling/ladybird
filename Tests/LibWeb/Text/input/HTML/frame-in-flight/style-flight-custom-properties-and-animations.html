@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    :root { --tone: rgb(255, 0, 0); }
+    #box { width: 100px; height: 20px; color: var(--tone); background-color: var(--fill, rgb(0, 0, 0)); }
+    #child { border-color: var(--tone); border-style: solid; border-width: 1px; }
+    @keyframes grow { from { width: 100px; } to { width: 200px; } }
+    .growing { animation: grow 10s linear -5s paused; }
+    .fading { transition: opacity 1000s linear -500s; opacity: 0; }
+</style>
+<div id="box"><div id="child"></div></div>
+<script>
+    // Custom properties set and animations started while the style pass is in flight: the new values inherit and
+    // substitute in the next style update, and the animations start in it, whichever update the pass in flight is.
+    CSS.registerProperty({ name: "--size", syntax: "<length>", inherits: false, initialValue: "0px" });
+
+    asyncTest(async done => {
+        // Custom properties change on the root and on the element beside the pass, and a read sees them substituted.
+        const custom = await whileStyleInFlight("before-run", () => {
+            box.style.height = "30px";
+        }, frame => {
+            const joined = writeJoinedStylePass(() => {
+                document.documentElement.style.setProperty("--tone", "rgb(0, 128, 0)");
+                box.style.setProperty("--fill", "rgb(0, 0, 255)");
+                box.style.setProperty("--size", "12px");
+            });
+            const style = getComputedStyle(box);
+            return { ...frame, joined, color: style.color, fill: style.backgroundColor, size: style.getPropertyValue("--size") };
+        });
+        println(`custom properties: held as armed: ${styleHeldAsArmed(custom, "before-run")}`);
+        println(`custom properties: writes joined the pass: ${custom.joined}`);
+        println(`custom properties: color: ${custom.color}`);
+        println(`custom properties: fill: ${custom.fill}`);
+        println(`custom properties: registered: ${custom.size}`);
+        println(`custom properties: child inherits: ${getComputedStyle(child).borderTopColor}`);
+
+        // A CSS animation and a Web Animation start beside the finished pass, and a CSS transition starts at the
+        // style update after it.
+        box.style.opacity = "1";
+        const animated = await whileStyleInFlight("before-completion", () => {
+            box.style.height = "40px";
+        }, frame => {
+            box.classList.add("growing");
+            const animation = child.animate({ opacity: [0, 1] }, { duration: 1000, fill: "both" });
+            animation.pause();
+            animation.currentTime = 250;
+            box.classList.add("fading");
+            box.style.opacity = "";
+            return frame;
+        });
+        println(`animations: held as armed: ${styleHeldAsArmed(animated, "before-completion")}`);
+        await twoFrames();
+        const names = box.getAnimations().map(animation => animation.animationName ?? animation.transitionProperty).sort();
+        println(`animations: running on box: ${names.join(", ")}`);
+        println(`animations: css animation width: ${getComputedStyle(box).width}`);
+        println(`animations: web animation opacity: ${getComputedStyle(child).opacity}`);
+        println(`animations: transition started: ${box.getAnimations().some(animation => animation.transitionProperty === "opacity")}`);
+        done();
+    });
+</script>

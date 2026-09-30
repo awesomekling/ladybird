@@ -1,0 +1,12 @@
+plain: 0px
+negative-delay: 50px
+steps: 100px
+reverse: 200px
+alternate-reverse: 100px
+backwards-fill: 0px
+no-fill: 40px
+zero-iterations: 0px
+fractional-iterations: 150px
+ease: 80.234375px
+add-composition: 30px
+animations: 11

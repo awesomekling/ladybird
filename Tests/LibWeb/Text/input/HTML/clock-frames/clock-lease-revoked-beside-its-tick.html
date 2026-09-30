@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from { width: 100px; }
+        to { width: 2100px; }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // Ending every lease (manual rendering opportunities, or a lost compositor) while
+    // a rendering update's clock tick is in flight lets the document adopt what the tick installed first: the width
+    // the arena lays out and the width the document computes stay the same.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        internals.setRenderClockSuspended(true);
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        const armed = internals.holdNextClockTick("before-completion");
+        let heldAt = "before-completion";
+        if (armed) {
+            // The rendering update submits its clock tick once it has taken back the passes before it: one of those in
+            // flight holds nothing yet.
+            heldAt = "";
+            for (let i = 0; i < 200 && !heldAt; ++i) {
+                await new Promise(resolve => setTimeout(resolve, 5));
+                if (internals.frameSchedulerState() === "in-flight" && internals.renderingUpdateAwaitsPass())
+                    heldAt = internals.waitForHeldFrame();
+            }
+        }
+        internals.setManualRenderingOpportunities(true);
+        internals.releaseHeldFrame();
+        const laidOut = box.getBoundingClientRect().width;
+        const computed = parseFloat(getComputedStyle(box).width);
+        internals.setManualRenderingOpportunities(false);
+        internals.setRenderClockSuspended(false);
+
+        println(`held at: ${heldAt}`);
+        println(`laid-out width is the computed one: ${Math.abs(laidOut - computed) <= 0.5}`);
+        done();
+    });
+</script>

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    body { margin: 0; }
+    #container { width: 300px; padding: 5px; border: 3px solid black; }
+    #box { height: 10px; margin: 4px; padding: 2px; border: 1px solid red; }
+    #inline { font: 20px monospace; }
+</style>
+<div id="container"><div id="box"></div><span id="inline">some inline text that wraps across lines in the container</span></div>
+<script>
+    // Reads of committed geometry beside a recording in flight: the recording changes no geometry, so a document with
+    // nothing left to lay out answers from the rows its layout published, without taking the recording in, and every
+    // read agrees with the same read once the frame is done.
+    function readGeometry() {
+        const rect = box.getBoundingClientRect();
+        return {
+            boundingClientRect: `${rect.x},${rect.y} ${rect.width}x${rect.height}`,
+            clientRects: [...inline.getClientRects()].map(r => `${r.x},${r.y} ${r.width}x${r.height}`).join(" | "),
+            offsets: `${box.offsetLeft},${box.offsetTop} ${box.offsetWidth}x${box.offsetHeight}`,
+            clients: `${container.clientLeft},${container.clientTop} ${container.clientWidth}x${container.clientHeight}`,
+        };
+    }
+
+    // The rendering update records a change that lays nothing out: where a flight runs layout and recording in one, a
+    // change that lays out goes into the flight, and a read has to wait for its layout.
+    let repaints = 0;
+    function repaint() {
+        box.style.backgroundColor = ++repaints % 2 ? "green" : "blue";
+    }
+
+    asyncTest(async done => {
+        box.style.height = "20px";
+        await twoFrames();
+        const result = await whileFrameInFlight("mid-recording", repaint, frame => {
+            const joinsBefore = internals.forcedJoinCount("recording");
+            const geometry = readGeometry();
+            return {
+                ...frame,
+                geometry,
+                joins: internals.forcedJoinCount("recording") - joinsBefore,
+                stillInFlight: !frame.armed || internals.frameInFlightHoldsDocument(),
+            };
+        });
+        println(`held as armed: ${heldAsArmed(result, "mid-recording")}`);
+        println(`forced joins of the recording: ${result.joins}`);
+        println(`recording still in flight after the reads: ${result.stillInFlight}`);
+        await twoFrames();
+        const after = readGeometry();
+        for (const key of Object.keys(after))
+            println(`${key} beside the recording is the committed one: ${result.geometry[key] === after[key]}`);
+        println(`box: ${after.offsets}`);
+
+        // A dirty document lays out first, beside the recording, which reaches no arena.
+        box.style.height = "30px";
+        await twoFrames();
+        const dirty = await whileFrameInFlight("mid-recording", repaint, frame => {
+            box.style.height = "40px";
+            const joinsBefore = internals.forcedJoinCount("recording");
+            const height = box.offsetHeight;
+            return { ...frame, height, joined: !frame.armed || internals.forcedJoinCount("recording") > joinsBefore };
+        });
+        println(`dirty: held as armed: ${heldAsArmed(dirty, "mid-recording")}`);
+        println(`dirty: took the recording in: ${dirty.joined}`);
+        println(`dirty: height: ${dirty.height}`);
+
+        // Hit testing reads the hit-test list of the last recording, which the one in flight replaces: it waits for it.
+        const hit = await whileFrameInFlight("mid-recording", () => {
+            box.style.height = "50px";
+        }, frame => ({ ...frame, id: document.elementFromPoint(20, 30)?.id }));
+        println(`elementFromPoint beside a recording: ${hit.id}`);
+        done();
+    });
+</script>

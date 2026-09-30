@@ -1,0 +1,5 @@
+outer: moved
+spinner: moved
+spinnerChild: moved
+fader: moved
+faderChild: moved

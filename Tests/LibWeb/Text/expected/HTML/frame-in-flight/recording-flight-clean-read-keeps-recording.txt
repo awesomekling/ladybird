@@ -1,0 +1,3 @@
+held as armed: true
+read: rgb(0, 0, 255) 10
+presented: true

@@ -1,0 +1,5 @@
+initial width: 20
+C++ recomputations before layout: 0
+computed width after layout: 30px
+width after box commit: 30
+C++ recomputations after layout: 0

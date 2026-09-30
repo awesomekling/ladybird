@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    #container {
+        container-type: inline-size;
+        width: 300px;
+    }
+    @container (min-width: 200px) {
+        #target { color: green; }
+    }
+</style>
+<div id="container"><div id="target">target</div></div>
+<script>
+    // The layout snapshot names the style the container's box was committed with. Thousands of restyles without a
+    // layout move the container through as many records, and the engine reclaims the ones nothing holds; the committed
+    // style is still what the container query reads.
+    test(() => {
+        const container = document.getElementById("container");
+        const target = document.getElementById("target");
+        container.offsetWidth;
+        for (let i = 0; i < 3000; ++i) {
+            container.style.backgroundColor = `rgb(${i % 256}, ${(i >> 8) % 256}, 0)`;
+            target.style.outlineWidth = `${i % 7}px`;
+            getComputedStyle(target).color;
+        }
+        println(`target color: ${getComputedStyle(target).color}`);
+    });
+</script>

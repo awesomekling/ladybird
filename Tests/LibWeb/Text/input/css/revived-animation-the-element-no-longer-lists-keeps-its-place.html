@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    /* Each animation holds one constant value for its whole run, so what an element computes says
+       which animations compose into it and in which order, never how far along they are. */
+    @keyframes a {
+        from { margin-left: 10px; }
+        to { margin-left: 10px; }
+    }
+    @keyframes b {
+        from { padding-left: 20px; }
+        to { padding-left: 20px; }
+    }
+    @keyframes c {
+        from { margin-left: 30px; }
+        to { margin-left: 30px; }
+    }
+    @keyframes x {
+        from { margin-left: 40px; }
+        to { margin-left: 40px; }
+    }
+    @keyframes q {
+        from { padding-left: 50px; }
+        to { padding-left: 50px; }
+    }
+    div {
+        margin-left: 5px;
+        padding-left: 5px;
+        animation-duration: 10s;
+        animation-fill-mode: both;
+        animation-timing-function: linear;
+    }
+</style>
+<div id="target" style="animation-name: a"></div>
+<div id="mover" style="animation-name: x, a"></div>
+<script>
+    test(() => {
+        const read = element => {
+            const style = getComputedStyle(element);
+            return `${style.marginLeft} ${style.paddingLeft}`;
+        };
+        const names = element => element.getAnimations().map(animation => animation.animationName).join(" ") || "nothing";
+        const report = (label, element) => {
+            const first = read(element);
+            element.style.borderLeftWidth = `${1 + (parseInt(element.style.borderLeftWidth) || 0)}px`;
+            const second = read(element);
+            println(`${label}: ${first}${first === second ? "" : ` (recomputed to ${second})`} (${names(element)})`);
+        };
+
+        const target = document.getElementById("target");
+        println(`start: ${read(target)}`);
+        const revived = target.getAnimations()[0];
+
+        // A plan that drops `a` from the list and starts `b` in the place `a` held. `a` is
+        // cancelled, but it stays associated with the element, and it keeps the place in the
+        // `animation-name` list it was given when it was last applied.
+        target.style.animationName = "b";
+        report("after drop", target);
+
+        // Script revives the cancelled animation. The element does not list it any more, so the
+        // place it still names is one `b` now holds: two of the element's animations claim one
+        // entry of a list with one entry in it.
+        revived.play();
+        report("after revival", target);
+
+        // A plan over that list: `b` keeps its place and `c` is started into the one after it.
+        // `c` composes over the revived `a`, which the plan does not work on at all.
+        target.style.animationName = "b, c";
+        report("after start", target);
+
+        // And once more with the revived animation cancelled again, so the place it claimed is
+        // given up while the plan keeps working on the two the element lists.
+        revived.cancel();
+        target.style.animationName = "c, b";
+        report("after cancel", target);
+
+        // The same collision, on an element whose plan moves a listed animation to another place.
+        // `x` and `a` both set `margin-left`, so which of them composes last is what the element
+        // computes, and the place each holds is what decides it.
+        const mover = document.getElementById("mover");
+        println(`mover start: ${read(mover)}`);
+        const revived_x = mover.getAnimations().find(animation => animation.animationName === "x");
+
+        mover.style.animationName = "a";
+        report("mover after drop", mover);
+
+        revived_x.play();
+        report("mover after revival", mover);
+
+        // `a` moves from the first place to the second and `q` starts into the first. The revived
+        // `x` is none of the plan's business and keeps the first place it already claimed, so `a`
+        // still composes after it.
+        mover.style.animationName = "q, a";
+        report("mover after move", mover);
+    });
+</script>

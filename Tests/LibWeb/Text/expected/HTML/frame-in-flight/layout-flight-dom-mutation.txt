@@ -1,0 +1,12 @@
+insertion: held as armed: true
+insertion: container height: 60
+insertion: third width: 200
+removal: held as armed: true
+removal: container height: 35
+removal: second connected: false
+removal: first text: first, changed
+replacement: held as armed: true
+replacement: fourth width: 250
+replacement: children: 2
+replacement: span laid out: true
+layout passes held: true

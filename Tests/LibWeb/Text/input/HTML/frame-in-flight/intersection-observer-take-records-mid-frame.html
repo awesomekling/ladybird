@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="target" style="position: absolute; top: 0; width: 50px; height: 50px; background: blue"></div>
+<script>
+    // IntersectionObserver.takeRecords() while the frame records: the entries that frame's rendering update queued are
+    // taken exactly once, either here or by the callback, and none is lost or doubled.
+    asyncTest(async done => {
+        const seen = [];
+        const observer = new IntersectionObserver(entries => {
+            for (const entry of entries)
+                seen.push(entry.isIntersecting);
+        });
+        observer.observe(target);
+        await twoFrames();
+        await nextTask();
+        const initial = seen.splice(0);
+        println(`initial: ${initial.join(",")}`);
+
+        const frame = await whileFrameInFlight("mid-recording", () => {
+            target.style.top = "5000px";
+        }, frame => {
+            for (const entry of observer.takeRecords())
+                seen.push(entry.isIntersecting);
+            observer.observe(target);
+            return frame;
+        });
+        println(`held as armed: ${heldAsArmed(frame, "mid-recording")}`);
+        await twoFrames();
+        await nextTask();
+        println(`after moving out: ${seen.join(",")}`);
+        observer.disconnect();
+        done();
+    });
+</script>

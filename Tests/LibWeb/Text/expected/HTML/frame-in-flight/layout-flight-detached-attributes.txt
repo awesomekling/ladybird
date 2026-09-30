@@ -1,0 +1,7 @@
+held as armed: true
+forced joins of the layout pass: 0
+layout pass still in flight after the writes: true
+fresh height: 30
+removed element class: wide
+container height: 66
+layout passes held: true

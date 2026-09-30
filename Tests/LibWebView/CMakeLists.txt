@@ -26,7 +26,7 @@ set(TEST_SOURCES
 )
 
 if (APPLE OR LINUX)
-    list(APPEND TEST_SOURCES TestCrashReport.cpp TestFontService.cpp)
+    list(APPEND TEST_SOURCES TestCrashReport.cpp TestFontService.cpp TestRendererFontService.cpp TestRustCrateCopies.cpp)
 endif()
 
 if (APPLE)
@@ -40,6 +40,12 @@ foreach(source IN LISTS TEST_SOURCES)
     endif()
     if (source STREQUAL "TestFontService.cpp")
         list(APPEND test_libraries LibIPC LibGfx)
+    endif()
+    if (source STREQUAL "TestRendererFontService.cpp")
+        list(APPEND test_libraries LibGfx LibIPC LibThreading)
+    endif()
+    if (source STREQUAL "TestRustCrateCopies.cpp")
+        list(APPEND test_libraries LibGfx LibWeb)
     endif()
     ladybird_test("${source}" LibWebView LIBS ${test_libraries})
 endforeach()
@@ -186,6 +192,16 @@ if (BUILD_TESTING AND NOT WIN32)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test-webdriver-worker-terminated-while-starting.py $<TARGET_FILE:WebDriver>
         )
         set_tests_properties(TestWebDriverWorkerTerminatedWhileStarting PROPERTIES TIMEOUT 120)
+        add_test(
+            NAME TestWebDriverRenderClockReconnect
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test-webdriver-render-clock-reconnect.py $<TARGET_FILE:WebDriver>
+        )
+        set_tests_properties(TestWebDriverRenderClockReconnect PROPERTIES TIMEOUT 120)
+        add_test(
+            NAME TestWebDriverCompositorLossDuringWebGLSyncCall
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test-webdriver-compositor-loss-during-webgl-sync-call.py $<TARGET_FILE:WebDriver>
+        )
+        set_tests_properties(TestWebDriverCompositorLossDuringWebGLSyncCall PROPERTIES TIMEOUT 120)
     endif()
 
     add_test(

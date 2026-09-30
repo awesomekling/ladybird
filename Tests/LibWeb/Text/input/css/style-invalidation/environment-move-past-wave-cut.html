@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<style>
+    @keyframes pulse {
+        from { opacity: 0.5; }
+        to { opacity: 1; }
+    }
+    .animated {
+        animation: pulse 1s infinite;
+    }
+</style>
+<div id="a">A</div>
+<div id="b"><span id="c">C</span></div>
+<div id="d" style="--tone: held"><div id="child"><span id="grandchild">G</span></div></div>
+<script src="../../include.js"></script>
+<script>
+    test(() => {
+        document.body.offsetWidth;
+
+        // Rows whose fonts are not resolved yet park until the style pass resolves them. #b's
+        // child waits for the host to install and sample #b, which stops the wave before #d, whose
+        // row settled while #b was parked and moved the environment its descendants inherit.
+        a.style.font = "11px parked-family-a";
+        b.style.font = "12px parked-family-b";
+        b.classList.add("animated");
+        c.style.color = "green";
+        d.style.setProperty("--tone", "moved");
+        document.body.offsetWidth;
+
+        for (const element of [d, child, grandchild])
+            println(`${element.id}: ${getComputedStyle(element).getPropertyValue("--tone")}`);
+    });
+</script>

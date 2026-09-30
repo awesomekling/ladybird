@@ -1,0 +1,6 @@
+held at: before-completion
+write joined the tick: false
+read joined the tick: true
+currentTime stable within the task: true
+width is the one composed at currentTime: true
+height: 30

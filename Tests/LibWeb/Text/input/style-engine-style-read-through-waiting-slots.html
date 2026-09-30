@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<div id="outer-host"><span id="nested">nested</span></div>
+<div id="sibling-host"><span id="slotted">slotted</span></div>
+<script>
+    test(() => {
+        // The light child is assigned to a slot that is itself a light child of an inner host.
+        const outerShadow = document.getElementById("outer-host").attachShadow({ mode: "open" });
+        outerShadow.innerHTML = `<div id="inner-host"><slot></slot></div>`;
+        const innerShadow = outerShadow.getElementById("inner-host").attachShadow({ mode: "open" });
+
+        // In the shadow tree around the slot, a sibling selector decides the slot's parent.
+        const siblingShadow = document.getElementById("sibling-host").attachShadow({ mode: "open" });
+        siblingShadow.innerHTML = `<style>div { color: rgb(255, 0, 0); } .t + div { color: rgb(0, 128, 0); }</style><div><slot></slot></div>`;
+        internals.updateStyle();
+
+        // The inner host's slot, and the element the nested light child inherits from through it, are new.
+        innerShadow.innerHTML = `<div style="color: rgb(255, 165, 0)"><slot></slot></div>`;
+        println(`nested: ${getComputedStyle(nested).color}`);
+
+        const t = document.createElement("div");
+        t.className = "t";
+        siblingShadow.insertBefore(t, siblingShadow.querySelector("div"));
+        println(`slotted: ${getComputedStyle(slotted).color}`);
+    });
+</script>

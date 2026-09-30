@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    @keyframes slide {
+        from {
+            margin-left: 0px;
+        }
+        to {
+            margin-left: 200px;
+        }
+    }
+
+    @keyframes widen {
+        from {
+            width: 10px;
+        }
+        to {
+            width: 210px;
+        }
+    }
+
+    /* Every animation here is paused at time zero. One whose delay has not elapsed yet is in its
+       before phase, and with `animation-fill-mode: none` it has no progress at all: it is an
+       animation the element holds and reports, but it composes nothing, so the value stays the one
+       the element's own declarations computed. */
+    #alone {
+        animation: slide 10s linear 5s paused;
+        margin-left: 40px;
+    }
+    #two-of-them {
+        animation: slide 10s linear 5s paused, widen 10s linear 5s paused;
+        margin-left: 40px;
+        width: 70px;
+    }
+    /* One animation composes nothing and the other one does; the one that does must still land. */
+    #first-composes-nothing {
+        animation: slide 10s linear 5s paused, widen 10s linear paused;
+        margin-left: 40px;
+        width: 70px;
+    }
+    #second-composes-nothing {
+        animation: widen 10s linear paused, slide 10s linear 5s paused;
+        margin-left: 40px;
+        width: 70px;
+    }
+    /* Two animations of the same property, the later one - which wins the composite order - having
+       no progress, so the earlier one's value is what is applied. */
+    #later-composes-nothing {
+        animation: slide 10s linear -5s paused, slide 10s linear 5s paused;
+        margin-left: 40px;
+    }
+    /* The same shape, with the one that composes nothing filling backwards instead, so it does
+       have progress and does win. */
+    #later-fills-backwards {
+        animation: slide 10s linear -5s paused, slide 10s linear 5s backwards paused;
+        margin-left: 40px;
+    }
+    #on-a-pseudo-element::before {
+        content: "";
+        display: block;
+        animation: slide 10s linear 5s paused;
+        margin-left: 40px;
+    }
+</style>
+<div id="alone"></div>
+<div id="two-of-them"></div>
+<div id="first-composes-nothing"></div>
+<div id="second-composes-nothing"></div>
+<div id="later-composes-nothing"></div>
+<div id="later-fills-backwards"></div>
+<div id="on-a-pseudo-element"></div>
+<script>
+    test(() => {
+        const read = (element, pseudo) => {
+            const style = getComputedStyle(element, pseudo);
+            return `margin-left: ${style.marginLeft}, width: ${style.width}`;
+        };
+        for (const id of [
+            "alone",
+            "two-of-them",
+            "first-composes-nothing",
+            "second-composes-nothing",
+            "later-composes-nothing",
+            "later-fills-backwards",
+            "on-a-pseudo-element",
+        ]) {
+            const element = document.getElementById(id);
+            const pseudo = id === "on-a-pseudo-element" ? "::before" : null;
+            // The first read computes the element's style for the first time, which is where the
+            // animations are started. Everything here is paused at time zero, so recomputing the
+            // style afterwards - with the animations now real ones the element holds - has to
+            // arrive at exactly the same value.
+            const first = read(element, pseudo);
+            element.style.paddingTop = "1px";
+            const second = read(element, pseudo);
+            println(`${id}: ${first}${first === second ? "" : ` (recomputed to ${second})`}`);
+        }
+        // Every animation really was created, each exactly once, including the ones that compose
+        // nothing.
+        println(`animations: ${document.getAnimations().length}`);
+    });
+</script>

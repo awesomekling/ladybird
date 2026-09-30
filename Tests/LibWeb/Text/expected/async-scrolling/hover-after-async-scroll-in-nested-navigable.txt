@@ -1,0 +1,5 @@
+initial outer=[html,body,div#above] frame=[] outerTop=0 frameTop=0
+after outer scroll outer=[html,body,div#above] frame=[html,body,div#x] outerTop=400 frameTop=0
+after outer scroll over=frame/x
+after frame scroll outer=[html,body,div#above] frame=[html,body,div#y] outerTop=400 frameTop=200
+after frame scroll over=frame/y

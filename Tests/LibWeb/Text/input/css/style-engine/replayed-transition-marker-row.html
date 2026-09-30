@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .item { display: list-item; }
+    .fancy::marker { color: red; }
+</style>
+<div id="a"></div><div id="b" class="item"></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+        b.classList.remove("item");
+        internals.updateStyle();
+        a.classList.add("fancy");
+        b.classList.add("fancy");
+        internals.updateStyle();
+        b.classList.add("item");
+        println(`marker color: ${getComputedStyle(b, "::marker").color}`);
+    });
+</script>

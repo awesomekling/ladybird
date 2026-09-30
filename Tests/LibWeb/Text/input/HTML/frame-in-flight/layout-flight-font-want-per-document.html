@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<iframe id="a" srcdoc="<style>@font-face { font-family: FaceA; src: url(../../../../Assets/HashSans.woff); unicode-range: U+0041-005A; } body { font: 20px FaceA, monospace; }</style><body><div id=box style='height: 10px'></div></body>"></iframe>
+<iframe id="b" srcdoc="<style>@font-face { font-family: FaceB; src: url(../../../../Assets/Lato-Bold.ttf); unicode-range: U+0041-005A; } body { font: 20px FaceB, monospace; }</style><body><div id=box style='height: 10px'></div></body>"></iframe>
+<script>
+    // A face with a unicode-range loads once a layout pass reaches a code point it covers: the pass leaves the want
+    // behind, and its document's layout end requests it. Two documents' stages run side by side, so another
+    // document's layout end, beside the pass in flight, must not take the want: the face stays unloaded until its
+    // own document takes the pass back, and then each document's face loads.
+    asyncTest(async done => {
+        if (document.readyState !== "complete")
+            await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
+        const docA = a.contentDocument;
+        const docB = b.contentDocument;
+        const faceA = [...docA.fonts][0];
+        const faceB = [...docB.fonts][0];
+        await twoFrames();
+
+        const result = await whileLayoutInFlight("before-completion", () => {
+            docA.getElementById("box").style.height = "20px";
+            docA.body.insertAdjacentHTML("beforeend", "<span>ABC</span>");
+        }, frame => {
+            docB.body.insertAdjacentHTML("beforeend", "<span id=text>XYZ</span>");
+            docB.body.offsetWidth;
+            return { ...frame, statusA: faceA.status };
+        }, docA);
+        println(`held as armed: ${layoutHeldAsArmed(result, "before-run") || layoutHeldAsArmed(result, "before-completion")}`);
+        println(`another document's layout end requested the face: ${result.heldAt !== "" && result.statusA !== "unloaded"}`);
+
+        await faceA.loaded;
+        await faceB.loaded;
+        println(`face A: ${faceA.status}`);
+        println(`face B: ${faceB.status}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
+        done();
+    });
+</script>

@@ -1,0 +1,1 @@
+--size at 50% from its declared 50px, as the element is computed again: 75px 75px 75px 75px

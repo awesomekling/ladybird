@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<style>
+    @keyframes grow {
+        from,
+        to {
+            width: 50px;
+        }
+    }
+
+    #subject {
+        width: 10px;
+        animation: grow 0.001s;
+    }
+</style>
+<div id="subject"></div>
+<script src="../include.js"></script>
+<script>
+    asyncTest(done => {
+        setTimeout(() => {
+            // The animation has finished and fills nothing, so it is no longer relevant: it
+            // composes nothing over the element's own style and no longer answers for it.
+            println(getComputedStyle(subject).width);
+            println(subject.getAnimations().length);
+            done();
+        }, 100);
+    });
+</script>

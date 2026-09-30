@@ -1,0 +1,2 @@
+mouseup offset: 50,10
+click offset: 30,10

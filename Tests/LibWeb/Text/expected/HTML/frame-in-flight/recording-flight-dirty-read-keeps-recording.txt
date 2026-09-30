@@ -1,0 +1,6 @@
+held as armed: true
+read: 20
+presented nothing of it: true
+presented again: true
+hit test finds the grown box: true
+color: rgb(0, 0, 255)

@@ -1,0 +1,10 @@
+Harness status: OK
+
+Found 5 tests
+
+5 Pass
+Pass	Timeline time increases once per animation frame
+Pass	Timeline time increases once per animation frame in an iframe
+Pass	Timeline time should be the same for all RAF callbacks in an animation frame
+Pass	Performs a microtask checkpoint after updating timelines
+Pass	Runs finished promise before animation events

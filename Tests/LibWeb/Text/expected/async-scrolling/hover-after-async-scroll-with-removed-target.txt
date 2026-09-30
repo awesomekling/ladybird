@@ -1,0 +1,5 @@
+initial hovered=[html,body,div#scroller,div#p] top=0
+incoming target removed hovered=[html,body,div#scroller,div#r] top=200
+incoming target removed events=out:p,over:r q connected=false q hovered=false
+hovered target removed hovered=[html,body,div#scroller,div#s] top=200
+hovered target removed events=over:s r connected=false r hovered=false

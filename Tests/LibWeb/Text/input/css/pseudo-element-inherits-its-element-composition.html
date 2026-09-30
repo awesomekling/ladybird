@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<style>
+@keyframes c { from { color: rgb(0, 0, 0); } to { color: rgb(200, 100, 0); } }
+#t { animation: c 1s linear paused; animation-delay: -0.5s; transition: background-color 1s; }
+#t::before { content: "x"; }
+#t::marker { content: "y"; }
+#t.list { display: list-item; }
+#t.moved { background-color: green; }
+</style>
+<div id="t">hi</div>
+<script src="../include.js"></script>
+<script>
+test(() => {
+    println(`::before: ${getComputedStyle(t, "::before").color}`);
+    t.className = "list";
+    println(`::marker of a list item: ${getComputedStyle(t, "::marker").color}`);
+    t.className = "list moved";
+    println(`::before after a transition starts: ${getComputedStyle(t, "::before").color}`);
+    t.getAnimations()[0].currentTime = 250;
+    println(`::before after a seek: ${getComputedStyle(t, "::before").color}`);
+});
+</script>

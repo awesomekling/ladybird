@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<style>
+#target { width: 10px; height: 10px; transition: transform 1000s linear, opacity 1000s linear; }
+#target.open { transform: translateX(100px); opacity: 0.5; }
+</style>
+<div id="target"></div>
+<script src="../include.js"></script>
+<script>
+asyncTest(async done => {
+    const target = document.getElementById("target");
+    target.getBoundingClientRect();
+
+    // Every toggle cancels or replaces the two running transitions and starts two new ones. The dead ones stay
+    // associated with the element until the next animation frame.
+    const before = internals.getAnimationTimingRowCounters();
+    for (let i = 0; i < 21; ++i) {
+        target.classList.toggle("open");
+        target.getBoundingClientRect();
+    }
+    const after = internals.getAnimationTimingRowCounters();
+    println(`rows published by 21 toggles: ${after.rowsPublished - before.rowsPublished}`);
+    println(`relevant animations: ${target.getAnimations().length}`);
+
+    // A cancelled transition that script plays again is published again.
+    const [running] = target.getAnimations().filter(animation => animation.transitionProperty === "transform");
+    target.classList.toggle("open");
+    println(`transform after cancelling: ${getComputedStyle(target).transform}`);
+    running.play();
+    running.pause();
+    running.currentTime = 500 * 1000;
+    println(`revived play state: ${running.playState}`);
+    println(`transform after reviving: ${getComputedStyle(target).transform}`);
+    println(`relevant animations after reviving: ${target.getAnimations().length}`);
+    done();
+});
+</script>

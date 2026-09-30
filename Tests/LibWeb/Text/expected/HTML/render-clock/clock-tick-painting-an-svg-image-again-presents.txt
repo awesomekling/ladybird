@@ -1,0 +1,4 @@
+the lease was granted: true
+a lease took both ticks: true
+frames presented: 2
+ticks handed over to the main thread: 0

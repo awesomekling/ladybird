@@ -15,7 +15,7 @@
 </div>
 <script>
     test(() => {
-        // A computed style read under a display:none subtree recomputes the element's inheritance
+        // A computed style read under a display:none subtree resolves the element's inheritance
         // chain instead of running the document traversal, and what it leaves marked is what the
         // next flush has to recompute. The rule is the one the traversal applies: a change confined
         // to non-inherited properties has nothing a child can read, so it marks no child. `inherit`

@@ -1,0 +1,7 @@
+held as armed: true
+visibility: hidden
+still in flight once hidden: true
+finished while hidden: true
+taken back while hidden: true
+styled while hidden: 80px, 80
+rendering resumed: visible, 60

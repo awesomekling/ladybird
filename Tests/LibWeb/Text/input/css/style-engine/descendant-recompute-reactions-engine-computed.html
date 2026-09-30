@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    html.large { font-size: 20px; }
+    .rem { width: 2rem; }
+    .rtl { direction: rtl; }
+    .logical { margin-inline-start: 3px; }
+</style>
+<div id="rem-parent"><div class="rem" id="rem"></div></div>
+<div id="direction-parent"><div class="logical" id="logical"></div></div>
+<script>
+    // A reaction that recomputes an element's descendants is the engine's to settle like any other
+    // recompute.
+    test(() => {
+        internals.updateStyle();
+        const measure = (label, mutate, check) => {
+            const before = internals.getStyleInvalidationCounters().engineComputedStyleRecords;
+            mutate();
+            internals.updateStyle();
+            const computed = internals.getStyleInvalidationCounters().engineComputedStyleRecords - before;
+            println(`${label}: engine computed records: ${computed}, ${check()}`);
+        };
+        measure("root font size", () => document.documentElement.classList.add("large"),
+            () => `width: ${getComputedStyle(rem).width}`);
+        measure("ancestor direction", () => document.getElementById("direction-parent").classList.add("rtl"),
+            () => `margin-right: ${getComputedStyle(logical).marginRight}, margin-left: ${getComputedStyle(logical).marginLeft}`);
+    });
+</script>

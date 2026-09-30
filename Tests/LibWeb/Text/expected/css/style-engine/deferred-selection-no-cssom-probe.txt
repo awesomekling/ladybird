@@ -1,0 +1,6 @@
+range activation stays local: true
+range avoids element recomputation: true
+range publishes locally: true
+input typing stays local: true
+input typing recomputes locally: true
+input typing publishes locally: true

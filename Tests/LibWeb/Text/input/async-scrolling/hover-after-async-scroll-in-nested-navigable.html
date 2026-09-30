@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    body {
+        margin: 0;
+    }
+
+    #above {
+        height: 400px;
+    }
+
+    #above:hover {
+        outline: 2px solid green;
+    }
+
+    #frame {
+        display: block;
+        width: 300px;
+        height: 200px;
+        border: 0;
+    }
+
+    #below {
+        height: 2000px;
+    }
+</style>
+<div id="above">above</div>
+<iframe id="frame" srcdoc="
+    <style>
+        body { margin: 0; }
+        .item { height: 200px; }
+        .item:hover { outline: 2px solid green; }
+    </style>
+    <div class='item' id='x'>x</div>
+    <div class='item' id='y'>y</div>
+    <div class='item' id='z'>z</div>
+"></iframe>
+<div id="below">below</div>
+<script>
+    async function waitForHover(element) {
+        for (let i = 0; i < 60; ++i) {
+            if (element.matches(":hover"))
+                return;
+            await timeout(50);
+        }
+        println(`timed out waiting for ${element.id} to be hovered`);
+    }
+
+    function hoverStates() {
+        let hovered = [];
+        for (const element of document.querySelectorAll(":hover"))
+            hovered.push(element.localName + (element.id ? `#${element.id}` : ""));
+        let frameHovered = [];
+        for (const element of frame.contentDocument.querySelectorAll(":hover"))
+            frameHovered.push(element.localName + (element.id ? `#${element.id}` : ""));
+        return `outer=[${hovered.join(",")}] frame=[${frameHovered.join(",")}] outerTop=${window.scrollY} frameTop=${frame.contentWindow.scrollY}`;
+    }
+
+    promiseTest(async () => {
+        // The test starts at DOMContentLoaded, when the srcdoc iframe may still hold its initial
+        // about:blank document. The window's load event waits for the iframe's.
+        if (document.readyState !== "complete")
+            await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
+        await animationFrame();
+        await animationFrame();
+
+        const frameDocument = frame.contentDocument;
+        let overs = [];
+        frameDocument.addEventListener("mouseover", event => overs.push(`frame/${event.target.id}`));
+        document.addEventListener("mouseover", event => overs.push(event.target.id || event.target.localName));
+
+        internals.mouseMove(10, 10);
+        println(`initial ${hoverStates()}`);
+
+        // The outer document scrolls under a stationary pointer until the iframe is beneath it.
+        // The hover decision is retargeted into the nested navigable, which is a different document
+        // with a different style tree, so the target is named in the mirror that decided it. The
+        // outer document keeps whatever it was hovering: a retargeted hover update leaves the
+        // containing document's own hover target alone.
+        overs = [];
+        await internals.wheel(10, 10, 0, 400);
+        await waitForHover(frameDocument.getElementById("x"));
+        println(`after outer scroll ${hoverStates()}`);
+        println(`after outer scroll over=${overs.join(",")}`);
+
+        // A further wheel over the same point now belongs to the nested navigable's own scroller,
+        // once it starts a gesture of its own rather than continuing the one latched to the outer
+        // document.
+        await timeout(600);
+        overs = [];
+        await internals.wheel(10, 10, 0, 200);
+        await waitForHover(frameDocument.getElementById("y"));
+        println(`after frame scroll ${hoverStates()}`);
+        println(`after frame scroll over=${overs.join(",")}`);
+    });
+</script>

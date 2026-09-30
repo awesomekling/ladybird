@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<style>
+    body {
+        margin: 0;
+    }
+    div {
+        display: inline-block;
+        height: 20px;
+        vertical-align: top;
+    }
+    #box {
+        width: 100px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+    #clipper {
+        width: 50px;
+        overflow: hidden;
+    }
+    #clipped {
+        width: 100px;
+        background-color: blue;
+    }
+</style>
+<div id="box"></div><div id="clipper"><div id="clipped"></div></div>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    // A frame time past `time`, and not past now: the time a display tick at the next frame carries.
+    async function frameTimeAfter(time) {
+        while (performance.now() <= time + 1)
+            await nextTask();
+        return performance.now();
+    }
+
+    // A render clock tick whose layout moves a box that owns a clip moves what the
+    // visual contexts hold, but not their structure: the tick presents its frame, and takes the tree to the compositor
+    // with it.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const clipper = document.getElementById("clipper");
+        const animation = box.getAnimations()[0];
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        let frameTime = performance.now();
+        for (let i = 0; i < 3; ++i) {
+            frameTime = await frameTimeAfter(frameTime);
+            internals.injectRenderingOpportunity(frameTime);
+            await nextTask();
+        }
+        // The rendering updates end before the test goes on.
+        while (internals.frameSchedulerState() !== "idle")
+            await nextTask();
+
+        const before = internals.getRenderClockCounters();
+        frameTime = await frameTimeAfter(frameTime);
+        const taken = await internals.injectClockTick(frameTime);
+        const after = internals.getRenderClockCounters();
+        println(`the tick moved the clip and presented it: ${taken && after.ticksPresented === before.ticksPresented + 1 && after.ticksMovingVisualContexts === before.ticksMovingVisualContexts}`);
+        frameTime = await frameTimeAfter(frameTime);
+        internals.injectRenderingOpportunity(frameTime);
+        await nextTask();
+        const time = animation.currentTime;
+        println(`the clip is where the width at currentTime puts it: ${Math.abs(clipper.getBoundingClientRect().left - (100 + (2000 * time) / 20000)) <= 0.5}`);
+        internals.setManualRenderingOpportunities(false);
+        done();
+    });
+</script>

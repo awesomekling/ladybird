@@ -1,0 +1,4 @@
+before the animation: base
+in the first half: from
+in the second half: to
+not animated: kept

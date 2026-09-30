@@ -14,7 +14,6 @@
         internals.updateStyle();
         const after = internals.getStyleInvalidationCounters();
 
-        println(`materialized gaps: ${after.styleEngineMaterializedGaps - before.styleEngineMaterializedGaps}`);
         println(`record deltas applied: ${after.styleEngineRecordDeltasApplied - before.styleEngineRecordDeltasApplied}`);
         println(`color: ${getComputedStyle(target).color}`);
     });

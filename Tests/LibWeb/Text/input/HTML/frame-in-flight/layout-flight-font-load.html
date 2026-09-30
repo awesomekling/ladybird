@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    #text { font: 20px LayoutFlightFace, monospace; }
+</style>
+<div id="box" style="height: 10px"></div>
+<span id="text">flight</span>
+<script>
+    // A font face that becomes available or goes away beside a frame in flight: beside a layout pass the change waits
+    // for the pass to be taken back, and beside a recording, which reads nothing of the style engine, it goes on at
+    // once. Neither takes the frame in, and the next style update resolves the text against the faces as they are.
+    asyncTest(async done => {
+        const face = new FontFace("LayoutFlightFace", "url(../../../../Assets/HashSans.woff)");
+        await face.load();
+        const widthWithoutFace = text.offsetWidth;
+
+        const added = await whileLayoutInFlight("before-run", () => {
+            box.style.height = "20px";
+        }, frame => {
+            const joinsBefore = internals.forcedJoinCount("layout");
+            document.fonts.add(face);
+            return {
+                ...frame,
+                joins: internals.forcedJoinCount("layout") - joinsBefore,
+                stillInFlight: !frame.heldAt || internals.frameInFlightHoldsDocument(),
+            };
+        });
+        println(`beside a layout pass: held as armed: ${layoutHeldAsArmed(added, "before-run")}`);
+        println(`beside a layout pass: forced joins: ${added.joins}`);
+        println(`beside a layout pass: still in flight after the change: ${added.stillInFlight}`);
+        await twoFrames();
+        println(`beside a layout pass: the text width changed: ${text.offsetWidth !== widthWithoutFace}`);
+
+        const deleted = await whileFrameInFlight("before-run", () => {
+            box.style.height = "30px";
+        }, frame => {
+            const joinsBefore = internals.forcedJoinCount("recording");
+            document.fonts.delete(face);
+            return {
+                ...frame,
+                joins: internals.forcedJoinCount("recording") - joinsBefore,
+                stillInFlight: !frame.armed || internals.frameInFlightHoldsDocument(),
+            };
+        });
+        println(`beside a recording: held as armed: ${heldAsArmed(deleted, "before-run")}`);
+        println(`beside a recording: forced joins: ${deleted.joins}`);
+        println(`beside a recording: still in flight after the change: ${deleted.stillInFlight}`);
+        await twoFrames();
+        println(`beside a recording: the text width is back: ${text.offsetWidth === widthWithoutFace}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
+        done();
+    });
+</script>

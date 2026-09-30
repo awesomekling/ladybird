@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style id="base">
+    #box { width: 100px; height: 20px; color: rgb(255, 0, 0); }
+</style>
+<div id="box"></div>
+<div id="other" class="other"></div>
+<script>
+    // Style sheets inserted, edited, replaced and removed while the style pass is in flight: each change lands beside
+    // the pass, and a read (which takes the pass back) or the next style update sees them all, in cascade order.
+    function describe() {
+        const style = getComputedStyle(box);
+        return `${style.width} ${style.color} ${style.backgroundColor} ${getComputedStyle(other).height}`;
+    }
+
+    asyncTest(async done => {
+        // A <style> inserted and a rule added and edited beside the pass, then read.
+        const inserted = await whileStyleInFlight("before-run", () => {
+            box.style.height = "30px";
+        }, frame => {
+            const style = document.createElement("style");
+            style.id = "inserted";
+            style.textContent = "#box { width: 120px; }";
+            const joined = writeJoinedStylePass(() => {
+                document.head.appendChild(style);
+                base.sheet.insertRule(".other { height: 15px; }", base.sheet.cssRules.length);
+            });
+            base.sheet.cssRules[0].style.color = "rgb(0, 128, 0)";
+            return { ...frame, joined, read: describe() };
+        });
+        println(`insertion: held as armed: ${styleHeldAsArmed(inserted, "before-run")}`);
+        println(`insertion: inserting a sheet and a rule joined the pass: ${inserted.joined}`);
+        println(`insertion: read beside the pass: ${inserted.read}`);
+
+        // A constructed sheet adopted and replaced beside the finished pass, then the next style update.
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync("#box { background-color: rgb(0, 0, 255); }");
+        const replaced = await whileStyleInFlight("before-completion", () => {
+            box.style.height = "40px";
+        }, frame => {
+            const joined = writeJoinedStylePass(() => {
+                document.adoptedStyleSheets = [sheet];
+            });
+            sheet.replaceSync("#box { background-color: rgb(255, 255, 0); width: 140px; }");
+            return { ...frame, joined };
+        });
+        println(`replaceSync: held as armed: ${styleHeldAsArmed(replaced, "before-completion")}`);
+        println(`replaceSync: adopting joined the pass: ${replaced.joined}`);
+        await twoFrames();
+        println(`replaceSync: after: ${describe()}`);
+
+        // Sheets disabled, removed and given a media query that does not match, beside the pass.
+        const removed = await whileStyleInFlight("before-run", () => {
+            box.style.height = "50px";
+        }, frame => {
+            const joined = writeJoinedStylePass(() => {
+                sheet.disabled = true;
+            });
+            const removalJoined = writeJoinedStylePass(() => {
+                document.getElementById("inserted").remove();
+            });
+            base.media = "print";
+            return { ...frame, joined, removalJoined };
+        });
+        println(`removal: held as armed: ${styleHeldAsArmed(removed, "before-run")}`);
+        println(`removal: disabling joined the pass: ${removed.joined}`);
+        println(`removal: removing a sheet joined the pass: ${removed.removalJoined}`);
+        await twoFrames();
+        println(`removal: after: ${describe()}, ${box.offsetHeight}`);
+
+        base.media = "";
+        sheet.disabled = false;
+        println(`restored: ${describe()}`);
+        done();
+    });
+</script>

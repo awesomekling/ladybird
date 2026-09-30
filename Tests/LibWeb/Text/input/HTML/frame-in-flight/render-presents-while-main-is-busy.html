@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="box" style="width: 10px; height: 10px; background: green"></div>
+<script>
+    // A frame reaches the compositor at the end of its flight without the main thread: a task that never returns to the
+    // event loop sees the presented scene epoch move. The frame is submitted and held before its recording runs, so the
+    // epoch can only move for a frame already in flight.
+    asyncTest(async done => {
+        // A flight presents the keyboard scroll state of the last frame only while it is current: the main thread
+        // presents the frame after the previous test's document is unloaded, which invalidates it.
+        await twoFrames();
+        let before = 0;
+        const facts = await whileFrameInFlight("before-run", () => {
+            box.style.width = "20px";
+        }, async frame => {
+            before = internals.presentedSceneEpoch();
+            if (!frame.armed)
+                return frame;
+            internals.releaseHeldFrame();
+            // Nothing below takes the frame back: no layout, style or hit-test reads.
+            const deadline = performance.now() + 5000;
+            let whileBusy = before;
+            while (whileBusy === before && performance.now() < deadline)
+                whileBusy = internals.presentedSceneEpoch();
+            return { ...frame, whileBusy, stateWhileBusy: internals.frameSchedulerState() };
+        });
+        println(`held as armed: ${heldAsArmed(facts, "before-run")}`);
+        println(`presented while the task was busy: ${!facts.armed || facts.whileBusy > before}`);
+        println(`not taken in by then: ${!facts.armed || facts.stateWhileBusy === "in-flight"}`);
+        await twoFrames();
+        println(`hit test adopted the presented scene: ${document.elementFromPoint(18, 12) === box && internals.hitTestSceneEpoch() === internals.presentedSceneEpoch()}`);
+        println(`width: ${box.getBoundingClientRect().width}`);
+        done();
+    });
+</script>

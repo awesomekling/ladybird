@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 40px;
+        background-image: linear-gradient(red, red);
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    async function frameTimeAfter(time) {
+        while (performance.now() <= time + 1)
+            await nextTask();
+        return performance.now();
+    }
+
+    // A render clock tick that swaps an element's background image for one nothing
+    // has loaded yet presents no frame without the image: it hands over to the main thread, which starts loading it.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        let frameTime = performance.now();
+        const duration = 1000;
+        // The image swaps halfway through, well past the grant; a machine too slow for that tries again.
+        let animation;
+        let crossed = false;
+        let taken = false;
+        let countersBefore;
+        let countersAfter;
+        let swapped = false;
+        for (let attempt = 0; attempt < 5 && !crossed; ++attempt) {
+            animation?.cancel();
+            animation = box.animate([{ backgroundImage: "url(../../../Assets/120.png)" }, { backgroundImage: "url(../../../Assets/120.png?second)" }], { duration: duration * (attempt + 1) });
+            for (let i = 0; i < 3; ++i) {
+                frameTime = await frameTimeAfter(frameTime);
+                internals.injectRenderingOpportunity(frameTime);
+                await nextTask();
+            }
+            if (animation.currentTime >= (duration * (attempt + 1)) / 2)
+                continue;
+            countersBefore = internals.getRenderClockCounters();
+            while (animation.startTime !== null && performance.now() - document.timeline.currentTime + animation.currentTime < (duration * (attempt + 1)) / 2 + 20)
+                await nextTask();
+            frameTime = await frameTimeAfter(frameTime);
+            taken = await internals.injectClockTick(frameTime);
+            countersAfter = internals.getRenderClockCounters();
+            swapped = getComputedStyle(box).backgroundImage.includes("second");
+            crossed = true;
+        }
+        internals.setManualRenderingOpportunities(false);
+
+        println(`a lease took the tick: ${taken}`);
+        println(`the tick swapped the image: ${swapped}`);
+        println(`frames presented without the image: ${countersAfter.ticksPresented - countersBefore.ticksPresented}`);
+        println(`the tick handed over to the main thread: ${countersAfter.ticksNeedingMain - countersBefore.ticksNeedingMain === 1}`);
+        done();
+    });
+</script>

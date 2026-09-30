@@ -1,0 +1,177 @@
+// Deterministic holds on the frame in flight.
+//
+// whileFrameInFlight(point, mutate, during) runs `mutate` in a rAF callback, so the rendering update paints, and holds
+// the recording that update submits at `point` ("before-run", "mid-recording" or "before-completion"). `during`
+// then runs in a task while that frame is held there, and gets { armed, heldAt, state }. With `doc`, only that
+// document's recording is held (a main-thread wait for that recording, such as its document's layout update, lets it
+// go on; the layout update of a document painted after it runs beside it). A document without a layout arena arms
+// nothing, and `during` then runs after the rendering update.
+// It starts once the document has loaded: the load task lays the document out, which waits for the frame in flight.
+// Where the rendering update submits its layout pass first, the frame is in flight twice: the recording is submitted
+// only once the main thread has taken the layout pass back between tasks and gone on with the rendering update, so
+// `during` waits for that first. So it does where a flight that could have recorded ended before it did: the
+// rendering update records once it has taken that flight back.
+async function whileFrameInFlight(point, mutate, during, doc = null) {
+    if (document.readyState !== "complete")
+        await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
+    return new Promise((resolve, reject) => {
+        requestAnimationFrame(() => {
+            const armed = internals.holdNextRecordingFrame(point, doc);
+            // The next rendering task begins by taking the frame in flight back, which lets a held frame go. Under
+            // load it can run before the task below, so no rendering opportunity comes until the frame is released.
+            if (armed) internals.setManualRenderingOpportunities(true);
+            mutate();
+            setTimeout(async () => {
+                try {
+                    let heldAt = "";
+                    while (armed) {
+                        while (internals.renderingUpdateAwaitsPass() || internals.heldFrameAwaitsSubmission()) {
+                            internals.waitForFrameToFinish();
+                            await nextTask();
+                        }
+                        heldAt = internals.waitForHeldFrame();
+                        // A flight that could have recorded can end before it does while this waits.
+                        if (heldAt || !internals.heldFrameAwaitsSubmission()) break;
+                    }
+                    const frame = { armed, heldAt, state: internals.frameSchedulerState() };
+                    const result = await during(frame);
+                    internals.releaseHeldFrame();
+                    if (armed) internals.setManualRenderingOpportunities(false);
+                    resolve(result);
+                } catch (e) {
+                    internals.releaseHeldFrame();
+                    if (armed) internals.setManualRenderingOpportunities(false);
+                    reject(e);
+                }
+            }, 0);
+        });
+    });
+}
+
+let layoutHoldsHeld = 0;
+
+// Whether whileLayoutInFlight held as many layout passes as `count`, so that a test checks it is not vacuous.
+function layoutHoldsWereHeld(count) {
+    return layoutHoldsHeld === count;
+}
+
+// whileLayoutInFlight(point, mutate, during) is whileFrameInFlight for the full layout pass a rendering update submits,
+// held at `point` ("before-run" or "before-completion"): `mutate` runs in a rAF callback and has to leave layout to do,
+// and `during` runs in a task while that pass is held. With `doc`, only that document's pass is held. `during` gets
+// { heldAt, state }: heldAt is "" where no layout pass was submitted (a rendering update that lays out in place), and
+// `during` then runs after the rendering update. A test checks the in-flight facts only when heldAt is set.
+async function whileLayoutInFlight(point, mutate, during, doc = null) {
+    if (document.readyState !== "complete")
+        await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
+    return new Promise((resolve, reject) => {
+        requestAnimationFrame(() => {
+            const armed = internals.holdNextLayoutFrame(point, doc);
+            // The next rendering task begins by taking the frame in flight back, which lets a held frame go. Under
+            // load it can run before the task below, so no rendering opportunity comes until the frame is released.
+            if (armed) internals.setManualRenderingOpportunities(true);
+            mutate();
+            setTimeout(async () => {
+                try {
+                    // A rendering update that submits its style pass first submits the layout pass once the main
+                    // thread has taken the style pass back between tasks. So it does where a flight that could have
+                    // laid out ended after its style: the rendering update lays out once it has taken that flight back.
+                    let heldAt = "";
+                    while (armed) {
+                        while (internals.heldFrameAwaitsSubmission()) {
+                            internals.waitForFrameToFinish();
+                            await nextTask();
+                        }
+                        // Returns "" at once if no layout pass was submitted.
+                        heldAt = internals.waitForHeldFrame();
+                        // A flight that could have laid out can end before it does while this waits.
+                        if (heldAt || !internals.heldFrameAwaitsSubmission()) break;
+                    }
+                    if (heldAt) layoutHoldsHeld++;
+                    const frame = { heldAt, state: internals.frameSchedulerState() };
+                    const result = await during(frame);
+                    internals.releaseHeldFrame();
+                    if (armed) internals.setManualRenderingOpportunities(false);
+                    resolve(result);
+                } catch (e) {
+                    internals.releaseHeldFrame();
+                    if (armed) internals.setManualRenderingOpportunities(false);
+                    reject(e);
+                }
+            }, 0);
+        });
+    });
+}
+
+// whileStyleInFlight(point, mutate, during) is whileLayoutInFlight for the first style pass a rendering update submits,
+// held at `point` ("before-run" or "before-completion"): `mutate` runs in a rAF callback and has to leave style to do,
+// and `during` runs in a task while that pass is held. With `doc`, only that document's pass is held. `during` gets
+// { heldAt, state }: heldAt is "" where no style pass was submitted, and `during` then runs after the rendering update.
+// A test checks the in-flight facts only when heldAt is set (styleHeldAsArmed).
+async function whileStyleInFlight(point, mutate, during, doc = null) {
+    if (document.readyState !== "complete")
+        await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
+    return new Promise((resolve, reject) => {
+        requestAnimationFrame(() => {
+            const armed = internals.holdNextStyleFrame(point, doc);
+            // The next rendering task begins by taking the frame in flight back, which lets a held frame go. Under
+            // load it can run before the task below, so no rendering opportunity comes until the frame is released.
+            if (armed) internals.setManualRenderingOpportunities(true);
+            mutate();
+            setTimeout(async () => {
+                try {
+                    // Returns "" at once if no style pass was submitted.
+                    const heldAt = armed ? internals.waitForHeldFrame() : "";
+                    const frame = { heldAt, state: internals.frameSchedulerState() };
+                    const result = await during(frame);
+                    internals.releaseHeldFrame();
+                    if (armed) internals.setManualRenderingOpportunities(false);
+                    resolve(result);
+                } catch (e) {
+                    internals.releaseHeldFrame();
+                    if (armed) internals.setManualRenderingOpportunities(false);
+                    reject(e);
+                }
+            }, 0);
+        });
+    });
+}
+
+// Whether running `write` took a style pass in flight back (a forced join) instead of leaving its style input to wait
+// for the pass's drain. False wherever no style pass is in flight.
+function writeJoinedStylePass(write) {
+    const before = internals.stylePassForcedJoins();
+    write();
+    return internals.stylePassForcedJoins() !== before;
+}
+
+// Whether the style pass was held where it was armed and was in flight while it was (true wherever none was held).
+function styleHeldAsArmed(frame, point) {
+    return !frame.heldAt || (frame.heldAt === point && frame.state === "in-flight");
+}
+
+// Whether the layout pass was held where it was armed and was in flight while it was (true wherever none was held).
+function layoutHeldAsArmed(frame, point) {
+    return !frame.heldAt || (frame.heldAt === point && frame.state === "in-flight");
+}
+
+// Whether the frame was held where it was armed and was in flight while it was (true where nothing was armed).
+function heldAsArmed(frame, point) {
+    return !frame.armed || (frame.heldAt === point && frame.state === "in-flight");
+}
+
+function nextTask() {
+    const { promise, resolve } = Promise.withResolvers();
+    const channel = new MessageChannel();
+    channel.port1.onmessage = resolve;
+    channel.port2.postMessage(null);
+    return promise;
+}
+
+function nextFrame() {
+    return new Promise(resolve => requestAnimationFrame(() => resolve()));
+}
+
+async function twoFrames() {
+    await nextFrame();
+    await nextFrame();
+}

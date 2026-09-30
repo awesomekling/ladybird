@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div style="width: 100px; background: green"><span id="text">short</span></div>
+<script>
+    // A read of layout while the layout pass is held before it runs takes the pass back and sees the new width. A
+    // flight that would go on to record after its layout stops once its layout has run: the read waits for no
+    // recording, and the rendering update records afterwards. The text change leaves no style to do, so the layout pass
+    // is the first stage the rendering update submits.
+    asyncTest(async done => {
+        await twoFrames();
+        internals.resetRenderingSchedulerCounters();
+        const result = await whileLayoutInFlight("before-run", () => {
+            text.firstChild.data = "a much longer text";
+        }, frame => {
+            const width = text.offsetWidth;
+            return { ...frame, width };
+        });
+        println(`held as armed: ${layoutHeldAsArmed(result, "before-run")}`);
+        println(`read sees the new width: ${result.width > 50}`);
+        await twoFrames();
+        const ends = internals.getRenderingSchedulerCounters().flightEnds;
+        let flights = 0;
+        for (const byStage of Object.values(ends))
+            for (const count of Object.values(byStage))
+                flights += count;
+        println(`the held flight stopped after its layout: ${!result.heldAt || flights === 0 || ends.preempted.rounds === 1}`);
+        println(`width after: ${text.offsetWidth === result.width}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
+        done();
+    });
+</script>

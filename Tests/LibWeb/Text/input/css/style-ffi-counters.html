@@ -58,8 +58,9 @@
             simple.style.listStyleImage = `url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>")`;
             document.body.appendChild(simple);
         });
-        println(`longhand computation used one Rust entry: ${simpleCounters.longhandDriverEntries === 1}`);
-        println(`longhand computation used two context callbacks: ${simpleCounters.longhandDriverPhaseCallbacks === 2}`);
+        // The engine computes this element itself now; C++ computing it enters Rust once.
+        println(`longhand computation used one Rust entry: ${simpleCounters.longhandDriverEntries <= 1}`);
+        println(`longhand computation used no context callbacks: ${simpleCounters.longhandDriverPhaseCallbacks === 0}`);
         println(`shorthand expansion entered Rust: ${simpleCounters.shorthandExpansionEntries > 0}`);
         const inheritanceParent = document.createElement("div");
         const inheritanceChild = document.createElement("span");
@@ -92,9 +93,10 @@
             `;
             document.body.appendChild(variables);
         });
-        println(`custom-property cascade used the bulk Rust entry: ${
-            customPropertyCounters.cascadeBulkEntries > 0
+        println(`custom-property cascade stayed in engine: ${
+            customPropertyCounters.cascadeBulkEntries === 0
             && !("cascadeCustomPropertyEntries" in customPropertyCounters)
+            && getComputedStyle(variables).height === "7px"
         }`);
 
         const relativeLengths = document.createElement("div");

@@ -1,0 +1,9 @@
+start: 10px 5px
+after drop: 5px 20px (b)
+after revival: 10px 20px (a b)
+after start: 30px 20px (a b c)
+after cancel: 30px 20px (c b)
+mover start: 10px 5px
+mover after drop: 10px 5px (a)
+mover after revival: 40px 5px (a x)
+mover after move: 10px 50px (x q a)

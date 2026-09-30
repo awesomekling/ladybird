@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<style>
+    body {
+        margin: 0;
+    }
+    #clip {
+        height: 300px;
+        overflow: clip;
+    }
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear forwards;
+    }
+    @keyframes grow {
+        from {
+            height: 20px;
+        }
+        to {
+            height: 20020px;
+        }
+    }
+    #below {
+        width: 100px;
+        height: 20px;
+    }
+</style>
+<div id="clip">
+    <div id="box"></div>
+    <div id="below"></div>
+</div>
+<script src="../../include.js"></script>
+<script>
+    // An intersection observer sees what an animation moves as it runs: a render clock that ticks the animation runs no
+    // rendering update, which is where observers observe, so the main thread's rendering updates tick it instead.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const below = document.getElementById("below");
+        const animation = box.getAnimations()[0];
+        let pushedOut = false;
+        let pushedOutWhileRunning = false;
+        new IntersectionObserver(entries => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting) {
+                    pushedOut = true;
+                    pushedOutWhileRunning = animation.playState === "running" && animation.currentTime < 5000;
+                }
+            }
+        }).observe(below);
+
+        // Not a timing test: the animation pushes the element below out of its clip however long that takes.
+        const start = performance.now();
+        while (!pushedOut && performance.now() - start < 10000)
+            await new Promise(resolve => setTimeout(resolve, 10));
+        println(`the intersection observer saw the element pushed out as the box grew: ${pushedOutWhileRunning}`);
+        done();
+    });
+</script>

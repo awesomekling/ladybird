@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    /* Each rule holds one constant value for its whole run, so what an element computes says only
+       which rule it is sampling, never how far along it is. */
+    @keyframes plain { from { margin-left: 10px; } to { margin-left: 10px; } }
+    @keyframes other { from { margin-left: 20px; } to { margin-left: 20px; } }
+    /* A rule the host cannot describe for the style stage: it declares a custom property, so the
+       stage falls back to the host for the whole element rather than sampling it itself. The
+       declared name is read by a longhand of the same rule, so what it animates is observable. */
+    /* A custom property interpolates discretely, flipping at the halfway key, and the longhand
+       beside it reads the flipped value: a sample taken against anything but this update's own
+       environment shows up as the other side of the flip. */
+    @keyframes custom { from { --pad: 30px; margin-left: var(--pad); } 50% { --pad: 30px; margin-left: var(--pad); } to { --pad: 70px; margin-left: var(--pad); } }
+    @keyframes custom-other { from { --pad: 40px; margin-left: var(--pad); } 50% { --pad: 40px; margin-left: var(--pad); } to { --pad: 80px; margin-left: var(--pad); } }
+    div {
+        margin-left: 5px;
+        animation-duration: 1000s;
+        animation-delay: -500s;
+        animation-iteration-count: infinite;
+        animation-play-state: paused;
+        animation-timing-function: linear;
+    }
+</style>
+<div id="start"></div>
+<div id="start-beside-plain" style="animation-name: plain"></div>
+<div id="retime-name" style="animation-name: plain"></div>
+<div id="retime-name-beside-plain" style="animation-name: plain, plain"></div>
+<div id="retime-timing" style="animation-name: custom"></div>
+<div id="retime-away" style="animation-name: custom"></div>
+<script>
+    // A `@keyframes` rule the host could not describe is refused by the style stage whether the
+    // element is already sampling it or is about to be handed it by the plan this computation
+    // carries. Each value below is read on the mutating update and again after a recompute that
+    // has nothing to do with the animation, so a sample the stage settled from a description it
+    // should have refused would show up on one of the two.
+    test(() => {
+        let nudge = 0;
+        function recompute(element) {
+            element.style.wordSpacing = `${++nudge}px`;
+            getComputedStyle(element).wordSpacing;
+        }
+        function report(label, element) {
+            const style = getComputedStyle(element);
+            println(`${label}: ${style.marginLeft} ${style.getPropertyValue("--pad") || "-"}`);
+        }
+        function check(label, id) {
+            const element = document.getElementById(id);
+            report(label, element);
+            recompute(element);
+            report(`${label} after recompute`, element);
+            return element;
+        }
+
+        // The rules the elements start on.
+        for (const id of ["start", "start-beside-plain", "retime-name", "retime-name-beside-plain", "retime-timing", "retime-away"])
+            check(`${id} before`, id);
+
+        // Starting: a computation that starts an animation on the undescribable rule.
+        document.getElementById("start").style.animationName = "custom";
+        check("start", "start");
+        // Starting beside an animation the element already runs and the stage can sample.
+        document.getElementById("start-beside-plain").style.animationName = "plain, custom";
+        check("start-beside-plain", "start-beside-plain");
+
+        // Retimed: a running animation handed the undescribable rule by name.
+        document.getElementById("retime-name").style.animationName = "custom";
+        check("retime-name", "retime-name");
+        // The same, with a describable animation before it in the stack.
+        document.getElementById("retime-name-beside-plain").style.animationName = "plain, custom";
+        check("retime-name-beside-plain", "retime-name-beside-plain");
+
+        // Retimed: an animation already on the undescribable rule, given a timing that moves no
+        // time, so its row is restamped rather than restarted.
+        document.getElementById("retime-timing").style.animationDirection = "reverse";
+        check("retime-timing", "retime-timing");
+        // And handed a second undescribable rule.
+        document.getElementById("retime-timing").style.animationName = "custom-other";
+        check("retime-timing to another undescribable rule", "retime-timing");
+
+        // The undescribable rule is swapped away for one the stage can sample.
+        document.getElementById("retime-away").style.animationName = "other";
+        check("retime-away", "retime-away");
+
+        // The same animation, retimed across the halfway flip and back, so a sample settled from
+        // the environment the element held before this update reads the other side of it.
+        const flipping = document.getElementById("retime-timing");
+        flipping.style.animationName = "custom";
+        for (const delay of ["-100s", "-900s", "-200s", "-800s", "-300s", "-700s"]) {
+            flipping.style.animationDelay = delay;
+            check(`flip at ${delay}`, "retime-timing");
+        }
+    });
+</script>

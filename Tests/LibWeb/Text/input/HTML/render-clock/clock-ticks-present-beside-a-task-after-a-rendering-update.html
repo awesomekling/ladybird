@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            height: 20px;
+        }
+        to {
+            height: 2020px;
+        }
+    }
+</style>
+<div id="box"></div>
+<div id="meter"></div>
+<script src="../../include.js"></script>
+<script src="../frame-in-flight/frame-in-flight.js"></script>
+<script>
+    // A page animates a box's height and has animation frame callbacks that change what it shows at every frame. A long
+    // task that touches no DOM runs while a rendering update's frame is in flight: the frame presents on the render
+    // side while the task runs, and the main thread takes it in only after the task. The render side goes on ticking
+    // the animation after that frame, and presents it: the height it lays out grows, and frames are presented.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const meter = document.getElementById("meter");
+        const presentedHeight = () => internals.presentedBorderBox(box)?.height ?? 0;
+        const ticksPresented = () => internals.getRenderClockCounters().ticksPresented;
+
+        let looping = true;
+        let frames = 0;
+        function frame() {
+            meter.textContent = `frame ${++frames}`;
+            if (looping)
+                requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+        // Some frames of the loop first, until the page's animation has a clock.
+        for (let i = 0; i < 10 || (i < 600 && !internals.renderClockTicks(document)); ++i)
+            await new Promise(resolve => requestAnimationFrame(resolve));
+
+        // A rendering update's frame, held in flight until a task begins: the rendering update records it once it has
+        // taken its passes back between tasks. A rendering task that takes the frame in first lets the hold go, and
+        // the next frame is held instead.
+        let heldAt = "";
+        for (let attempt = 0; attempt < 10 && !heldAt; ++attempt) {
+            heldAt = await new Promise(resolve =>
+                requestAnimationFrame(() => {
+                    internals.holdNextRecordingFrame("before-completion", document);
+                    setTimeout(async () => {
+                        while (internals.renderingUpdateAwaitsPass() || internals.heldFrameAwaitsSubmission()) {
+                            internals.waitForFrameToFinish();
+                            await nextTask();
+                        }
+                        resolve(internals.waitForHeldFrame());
+                    }, 0);
+                })
+            );
+        }
+
+        // The task, once the frame goes on: plain JS, on until the render side has presented a taller box, however
+        // slowly the display ticks (at most 5 s).
+        internals.releaseHeldFrame();
+        const heightBefore = presentedHeight();
+        const presentedBefore = ticksPresented();
+        const start = performance.now();
+        let heightAfter = heightBefore;
+        let presented = 0;
+        let lastRead = start;
+        let sink = 0;
+        for (let now = start; now - start < 5000; now = performance.now()) {
+            for (let i = 0; i < 1000; ++i)
+                sink = (sink + Math.sqrt(i + sink)) % 1000;
+            if (now - lastRead < 20)
+                continue;
+            lastRead = now;
+            heightAfter = presentedHeight();
+            presented = ticksPresented() - presentedBefore;
+            if (heightAfter > heightBefore && presented > 0)
+                break;
+        }
+        looping = false;
+        println(`the frame was in flight as the task began: ${heldAt === "before-completion"}`);
+        println(`the height grows while the task runs: ${heightAfter > heightBefore}`);
+        println(`the render side presents while the task runs: ${presented > 0}`);
+        done();
+    });
+</script>

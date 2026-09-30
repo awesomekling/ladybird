@@ -1,0 +1,4 @@
+full drives for 10 toggles: 2
+open: rgb(0, 128, 0), rgb(0, 128, 0), rgb(0, 128, 0), rgb(0, 128, 0)
+closed: rgb(0, 0, 0), rgb(0, 0, 0), rgb(0, 0, 0), rgb(0, 0, 0)
+running transitions: 0

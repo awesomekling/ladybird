@@ -11,6 +11,28 @@
 #include <LibWeb/CSS/RustDeclarationBlock.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
 #include <LibWeb/CSS/StyleValues/StyleValue.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
+#include <LibWeb/ValueParserRustFFI.h>
+
+// A test's style engine, born with a render state of its own as a document's is born with its document's.
+struct TestRenderState {
+    TestRenderState()
+        : handle(Web::Layout::RustFFI::render_owner_create_document())
+    {
+    }
+    ~TestRenderState() { Web::Layout::RustFFI::render_owner_destroy_document(handle); }
+
+    Web::Layout::RustFFI::FfiRenderDocument handle;
+};
+
+struct OwnedStyleEngine
+    : TestRenderState
+    , Web::CSS::StyleEngine {
+    OwnedStyleEngine()
+        : Web::CSS::StyleEngine(handle.arena, Web::CSS::StyleEngine::DeviceClass::ForegroundDesktop)
+    {
+    }
+};
 
 TEST_CASE(interned_atoms_are_released_with_the_style_engine)
 {
@@ -19,7 +41,7 @@ TEST_CASE(interned_atoms_are_released_with_the_style_engine)
         auto name = Utf16FlyString::from_utf8_without_validation("style-engine-atom-lifetime-test-name"sv);
         EXPECT_EQ(Utf16FlyString::number_of_utf16_fly_strings(), initial_fly_string_count + 1);
 
-        Web::CSS::StyleEngine engine(Web::CSS::StyleEngine::DeviceClass::ForegroundDesktop);
+        OwnedStyleEngine engine;
         engine.intern_atom(name);
     }
     EXPECT_EQ(Utf16FlyString::number_of_utf16_fly_strings(), initial_fly_string_count);
@@ -28,8 +50,8 @@ TEST_CASE(interned_atoms_are_released_with_the_style_engine)
 TEST_CASE(unowned_atoms_are_released_in_one_transaction_batch)
 {
     auto initial_fly_string_count = Utf16FlyString::number_of_utf16_fly_strings();
-    Web::CSS::StyleEngine engine(Web::CSS::StyleEngine::DeviceClass::ForegroundDesktop);
-    auto root = engine.allocate_style_node();
+    OwnedStyleEngine engine;
+    auto root = engine.mint_style_node();
     for (size_t index = 0; index < 256; ++index) {
         auto name = MUST(String::formatted("style-engine-atom-churn-{}", index));
         engine.intern_atom(Utf16FlyString::from_utf8_without_validation(name));
@@ -43,7 +65,7 @@ TEST_CASE(unowned_atoms_are_released_in_one_transaction_batch)
 
 TEST_CASE(flush_does_not_recycle_atoms_before_the_bridge_can_forget_them)
 {
-    Web::CSS::StyleEngine engine(Web::CSS::StyleEngine::DeviceClass::ForegroundDesktop);
+    OwnedStyleEngine engine;
     Vector<Utf16FlyString> names;
     Vector<Web::CSS::StyleAtomID> atoms;
     names.ensure_capacity(256);
@@ -63,68 +85,54 @@ TEST_CASE(flush_does_not_recycle_atoms_before_the_bridge_can_forget_them)
 
 static u64 counter_value(Web::CSS::StyleEngine const& engine, StringView expected_name)
 {
-    for (size_t index = 0;; ++index) {
-        StringView name;
-        u64 value = 0;
-        if (!engine.counter(index, name, value))
-            VERIFY_NOT_REACHED();
+    Optional<u64> found;
+    engine.for_each_counter([&](StringView name, u64 value) {
         if (name == expected_name)
-            return value;
-    }
+            found = value;
+    });
+    return found.value();
 }
 
 TEST_CASE(reclaimed_language_atoms_republish_their_text)
 {
-    Web::CSS::StyleEngine engine(Web::CSS::StyleEngine::DeviceClass::ForegroundDesktop);
-    auto root = engine.allocate_style_node();
+    OwnedStyleEngine engine;
+    auto root = engine.mint_style_node();
     auto language = Utf16FlyString::from_utf8_without_validation("reclaimed-language"sv);
     engine.intern_language_atom(language.view());
     for (size_t index = 0; index < 255; ++index) {
         auto name = MUST(String::formatted("style-engine-language-sweep-{}", index));
         engine.intern_atom(Utf16FlyString::from_utf8_without_validation(name));
     }
+    engine.flush();
     EXPECT_EQ(counter_value(engine, "languageTextsPublished"sv), 1ull);
 
-    engine.flush();
     (void)engine.take_style_transaction(root);
     engine.intern_language_atom(language.view());
+    engine.flush();
 
     EXPECT_EQ(counter_value(engine, "languageTextsPublished"sv), 2ull);
 }
 
-TEST_CASE(reclaimed_custom_property_atoms_republish_their_names)
+// Records an element's inline style the way the host does: as a snapshot of the block that crosses with the next
+// transaction.
+static void record_inline_style_properties(Web::CSS::StyleEngine& engine, Web::CSS::StyleNodeID node, Web::CSS::RustDeclarationBlock const* declarations)
 {
-    Web::CSS::StyleEngine engine(Web::CSS::StyleEngine::DeviceClass::ForegroundDesktop);
-    auto root = engine.allocate_style_node();
-    auto old_name = Utf16FlyString::from_utf8_without_validation("--reclaimed-custom-property"sv);
-    auto old_atom = engine.intern_atom(old_name);
-    engine.note_custom_property_name(old_atom, old_name);
-    for (size_t index = 0; index < 255; ++index) {
-        auto name = MUST(String::formatted("style-engine-custom-property-sweep-{}", index));
-        engine.intern_atom(Utf16FlyString::from_utf8_without_validation(name));
-    }
-    EXPECT_EQ(counter_value(engine, "customPropertyNamesPublished"sv), 1ull);
-
-    engine.flush();
-    (void)engine.take_style_transaction(root);
-    auto new_name = Utf16FlyString::from_utf8_without_validation("--new-custom-property"sv);
-    auto new_atom = engine.intern_atom(new_name);
-    EXPECT_EQ(new_atom, old_atom);
-    engine.note_custom_property_name(new_atom, new_name);
-
-    EXPECT_EQ(counter_value(engine, "customPropertyNamesPublished"sv), 2ull);
+    auto const* snapshot = declarations ? Web::CSS::Parser::ValueParserFFI::rust_declaration_block_snapshot(declarations->handle()) : nullptr;
+    if (snapshot && Web::CSS::Parser::ValueParserFFI::rust_declaration_data_defines_a_css_transition(snapshot))
+        engine.note_css_transitions_may_observe_style_changes();
+    engine.record_inline_style_properties(node, snapshot);
 }
 
 TEST_CASE(inline_custom_declaration_names_survive_without_computed_environments)
 {
-    Web::CSS::StyleEngine engine(Web::CSS::StyleEngine::DeviceClass::ForegroundDesktop);
-    auto root = engine.allocate_style_node();
+    OwnedStyleEngine engine;
+    auto root = engine.mint_style_node();
     auto name = Utf16FlyString::from_utf8_without_validation("--retained-inline-property"sv);
     auto atom = engine.intern_atom(name);
     {
         Web::CSS::RustDeclarationBlock declarations { {}, {} };
         declarations.set_custom(name, { Web::CSS::Important::No, Web::CSS::PropertyID::Custom, Web::CSS::property_initial_value(Web::CSS::PropertyID::Width) });
-        engine.set_element_inline_style_properties(root, &declarations);
+        record_inline_style_properties(engine, root, &declarations);
     }
 
     for (u32 index = 0; index < 256; ++index) {

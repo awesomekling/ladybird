@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<script>
+    // A rendering task that has waited a frame interval behind other tasks runs ahead of them, but never twice without one of them in between.
+    function busy(milliseconds) {
+        const end = performance.now() + milliseconds;
+        while (performance.now() < end) { }
+    }
+
+    asyncTest(async done => {
+        await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+        internals.setManualRenderingOpportunities(true);
+        const before = internals.getRenderingSchedulerCounters();
+        const tasks = 20;
+        let tasksRun = 0;
+        let tasksBeforeAnimationFrame = -1;
+        const allRun = new Promise(resolve => window.onmessage = () => {
+            busy(5);
+            if (++tasksRun === tasks)
+                resolve();
+        });
+        for (let i = 0; i < tasks; ++i)
+            window.postMessage(null);
+        requestAnimationFrame(() => tasksBeforeAnimationFrame = tasksRun);
+        // The rendering task this queues goes behind the tasks posted above.
+        internals.injectRenderingOpportunity(performance.now());
+        await allRun;
+        const after = internals.getRenderingSchedulerCounters();
+        internals.setManualRenderingOpportunities(false);
+        println(`waited behind some tasks: ${tasksBeforeAnimationFrame > 0}`);
+        println(`ran ahead of the rest: ${tasksBeforeAnimationFrame > 0 && tasksBeforeAnimationFrame < tasks}`);
+        println(`counted as ahead of the queue: ${after.renderingTasksAheadOfQueue - before.renderingTasksAheadOfQueue === 1}`);
+        done();
+    });
+</script>

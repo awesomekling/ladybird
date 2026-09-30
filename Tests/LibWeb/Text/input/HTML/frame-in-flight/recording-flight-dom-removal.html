@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    #second::before { content: "before "; }
+    .item { height: 10px; }
+</style>
+<div id="container" style="width: 300px"><div id="first" class="item">first</div><div id="second">second <span>inner</span></div><p id="third">third</p><div id="moved" class="item">moved</div><div id="list"><div class="item">a</div><div class="item">b</div></div></div>
+<div id="target"></div>
+<script>
+    // DOM removals beside a recording in flight: the recording reads the boxes the removed nodes leave, so they stay
+    // in place until the frame has been taken in, and the removal goes on beside it instead of taking it in. The next
+    // rendering update lays out the tree without them, and a removed node inserted again elsewhere is laid out there.
+    asyncTest(async done => {
+        const movedElement = moved;
+        const result = await whileFrameInFlight("before-run", () => {
+            first.style.height = "20px";
+        }, frame => {
+            const joinsBefore = internals.forcedJoinCount("recording");
+            second.remove();
+            third.firstChild.remove();
+            list.replaceChildren();
+            movedElement.remove();
+            target.appendChild(movedElement);
+            return {
+                ...frame,
+                joins: internals.forcedJoinCount("recording") - joinsBefore,
+                stillInFlight: !frame.armed || internals.frameInFlightHoldsDocument(),
+            };
+        });
+        println(`held as armed: ${heldAsArmed(result, "before-run")}`);
+        println(`forced joins of the recording: ${result.joins}`);
+        println(`recording still in flight after the removals: ${result.stillInFlight}`);
+        await twoFrames();
+        println(`container height: ${container.offsetHeight}`);
+        println(`container text: ${container.innerText.replaceAll("\n", " ")}`);
+        println(`moved height: ${movedElement.offsetHeight}`);
+        println(`moved parent: ${movedElement.parentElement.id}`);
+        println(`list children: ${list.children.length}`);
+        done();
+    });
+</script>

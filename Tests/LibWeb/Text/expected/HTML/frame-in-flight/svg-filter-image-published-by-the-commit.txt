@@ -1,0 +1,3 @@
+held as armed: true
+width at join: 100
+width at the end: 100

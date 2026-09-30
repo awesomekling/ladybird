@@ -1,0 +1,4 @@
+held as armed: true
+observed: 90x50
+resized: 90x50,100x50
+layout passes held: true

@@ -1,0 +1,5 @@
+ticks a lease took: 5
+frames presented from the render side: 5
+frames laid out on the render side: 5
+rendering updates meanwhile: 0
+mismatches: 0

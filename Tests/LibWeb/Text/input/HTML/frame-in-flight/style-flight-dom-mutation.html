@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    .item { height: 10px; }
+    .tall { height: 25px; }
+    [data-size="big"] { height: 40px; }
+    #container { width: 300px; }
+    #container.narrow { width: 200px; }
+    #container.narrow > .item:last-child { color: rgb(0, 128, 0); }
+    .item:first-child + .item { color: rgb(0, 0, 255); }
+    [data-late="on"] { color: rgb(128, 0, 128); }
+</style>
+<div id="container"><div id="first" class="item">first</div><div id="second" class="item" data-size="small">second</div></div>
+<script>
+    // DOM mutations and attribute and class changes while the style pass that styles them is in flight: they change
+    // the tree beside the pass, and the next style update sees every change, whichever elements the pass still styles.
+    function describe(element) {
+        const style = getComputedStyle(element);
+        return `${element.id}: ${element.offsetWidth}x${element.offsetHeight} ${style.color}`;
+    }
+
+    asyncTest(async done => {
+        const inserted = await whileStyleInFlight("before-run", () => {
+            first.classList.add("tall");
+        }, frame => {
+            const joined = writeJoinedStylePass(() => {
+                container.classList.add("narrow");
+                second.setAttribute("data-size", "big");
+            });
+            // Names no element has carried yet, one a rule matches and one nothing does.
+            const firstUseJoined = writeJoinedStylePass(() => {
+                first.setAttribute("data-late", "on");
+                first.setAttribute("data-never-matched", "yes");
+            });
+            const third = document.createElement("div");
+            third.id = "third";
+            third.className = "item";
+            third.textContent = "third";
+            const insertionJoined = writeJoinedStylePass(() => container.appendChild(third));
+            return { ...frame, joined, firstUseJoined, insertionJoined };
+        });
+        println(`insertion: held as armed: ${styleHeldAsArmed(inserted, "before-run")}`);
+        println(`insertion: attribute changes joined the pass: ${inserted.joined}`);
+        println(`insertion: first-seen attribute names joined the pass: ${inserted.firstUseJoined}`);
+        println(`insertion: the insertion joined the pass: ${inserted.insertionJoined}`);
+        await twoFrames();
+        println(`insertion: container height: ${container.offsetHeight}`);
+        for (const element of container.children)
+            println(`insertion: ${describe(element)}`);
+
+        // The element the pass styles leaves the tree, a sibling combinator's subject changes, and a class goes away.
+        const secondElement = second;
+        const removed = await whileStyleInFlight("before-completion", () => {
+            secondElement.classList.add("tall");
+        }, frame => {
+            secondElement.remove();
+            first.classList.remove("tall");
+            first.firstChild.data = "first, changed";
+            third.removeAttribute("class");
+            return frame;
+        });
+        println(`removal: held as armed: ${styleHeldAsArmed(removed, "before-completion")}`);
+        await twoFrames();
+        println(`removal: container height: ${container.offsetHeight}`);
+        println(`removal: second connected: ${secondElement.isConnected}`);
+        for (const element of container.children)
+            println(`removal: ${describe(element)}`);
+
+        // The whole subtree is replaced beside the pass.
+        const replaced = await whileStyleInFlight("before-run", () => {
+            container.classList.remove("narrow");
+        }, frame => {
+            container.innerHTML = `<div id="fourth" class="item">fourth</div><div id="fifth" class="item" data-size="big">fifth</div>`;
+            container.classList.add("narrow");
+            return frame;
+        });
+        println(`replacement: held as armed: ${styleHeldAsArmed(replaced, "before-run")}`);
+        await twoFrames();
+        println(`replacement: children: ${container.children.length}`);
+        for (const element of container.children)
+            println(`replacement: ${describe(element)}`);
+        done();
+    });
+</script>

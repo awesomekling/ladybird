@@ -9,6 +9,13 @@
         return promise;
     }
 
+    // Where rendering opportunities are held, an opportunity injected while the previous rendering update's frame is
+    // still in flight runs its rendering update only once that frame has finished, so wait for the update itself.
+    async function renderingUpdatesRan(count) {
+        while (internals.getRenderingSchedulerCounters().updatesRun < count)
+            await nextTask();
+    }
+
     asyncTest(async done => {
         internals.setManualRenderingOpportunities(true);
         await nextTask();
@@ -21,13 +28,13 @@
         });
 
         internals.injectRenderingOpportunity(performance.now());
-        await nextTask();
+        await renderingUpdatesRan(1);
         const afterFirstOpportunity = callbackCount;
         await nextTask();
         const afterAnotherTask = callbackCount;
 
         internals.injectRenderingOpportunity(performance.now());
-        await nextTask();
+        await renderingUpdatesRan(2);
         const counters = internals.getRenderingSchedulerCounters();
         internals.setManualRenderingOpportunities(false);
 

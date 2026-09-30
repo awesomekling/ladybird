@@ -17,7 +17,8 @@
             internals.updateStyle();
         }
         const after = internals.styleEngineCounters();
-        println(`substitution memo hits: ${after.engineComputedRecordSubstitutionMemoHits - before.engineComputedRecordSubstitutionMemoHits}`);
+        // Every item after the first takes the first one's record, substituted under the same environment.
+        println(`shared record hits: ${after.engineComputedRecordSharedHits + after.engineComputedRecordCohortHits - before.engineComputedRecordSharedHits - before.engineComputedRecordCohortHits}`);
         println(`width: ${getComputedStyle(host.lastChild).width}`);
         host.style.setProperty("--width", "20px");
         internals.updateStyle();

@@ -30,7 +30,9 @@
             await animationFrame();
             internals.resetStyleInvalidationCounters();
             animation.currentTime = 500;
-            getComputedStyle(container).transform;
+            const parentTransform = getComputedStyle(container).transform;
+            if (container === transformContainer)
+                println(`transform matches parent: ${getComputedStyle(transformInheritor).transform === parentTransform}`);
             const counters = internals.getStyleInvalidationCounters();
             animation.cancel();
             return counters.elementStyleRecomputations > 0;

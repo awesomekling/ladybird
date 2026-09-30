@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    /* Each animation holds one constant value for its whole run, so what an element computes says
+       only which @keyframes rule its animation runs, never how far along it is. */
+    @keyframes a {
+        from { margin-left: 10px; }
+        to { margin-left: 10px; }
+    }
+    @keyframes b {
+        from { padding-left: 20px; }
+        to { padding-left: 20px; }
+    }
+    @keyframes gone {
+        from { margin-left: 30px; }
+        to { margin-left: 30px; }
+    }
+    div {
+        margin-left: 5px;
+        padding-left: 5px;
+        animation-duration: 10s;
+        animation-fill-mode: both;
+        animation-timing-function: linear;
+    }
+</style>
+<div id="one" style="animation-name: a"></div>
+<div id="two" style="animation-name: a, b"></div>
+<div id="dropped" style="animation-name: gone"></div>
+<script>
+    test(() => {
+        const read = element => {
+            const style = getComputedStyle(element);
+            return `${style.marginLeft} ${style.paddingLeft}`;
+        };
+        const ids = ["one", "two", "dropped"];
+        for (const id of ids)
+            println(`${id}: ${read(document.getElementById(id))}`);
+        // Recomputed once with the animations as they are, so that whatever each element's sampling
+        // is prepared from is prepared and held before the keyframes underneath it are replaced.
+        for (const id of ids) {
+            const element = document.getElementById(id);
+            element.style.borderRightWidth = "1px";
+            read(element);
+        }
+        println(`animations before: ${document.getAnimations().length}`);
+
+        const sheet = document.styleSheets[0];
+        // A second `@keyframes a` later in the sheet is the one the name resolves to, so every
+        // animation running `a` is given another keyframe set - and nothing else about it changes.
+        sheet.insertRule("@keyframes a { from { margin-left: 40px; } to { margin-left: 40px; } }", sheet.cssRules.length);
+        // ... and an animation whose `@keyframes` rule is taken away is given no keyframes at all,
+        // so it composes nothing while staying an animation the element holds.
+        for (let index = 0; index < sheet.cssRules.length; ++index) {
+            if (sheet.cssRules[index].name === "gone") {
+                sheet.deleteRule(index);
+                break;
+            }
+        }
+
+        // The update that follows the rule change gives each animation its new keyframes, and the
+        // value read here is the one the element has once that has happened. Recomputing afterwards
+        // - with the new keyframes now really on the effect - has to arrive at the same value.
+        for (const id of ids) {
+            const element = document.getElementById(id);
+            const first = read(element);
+            element.style.borderLeftWidth = "1px";
+            const second = read(element);
+            println(`${id}: ${first}${first === second ? "" : ` (recomputed to ${second})`}`);
+        }
+        // No animation was created, cancelled or reordered by any of it.
+        println(`animations after: ${document.getAnimations().length}`);
+        for (const id of ids) {
+            const names = document.getElementById(id).getAnimations().map(animation => animation.animationName);
+            println(`${id} holds: ${names.join(" ") || "nothing"}`);
+        }
+    });
+</script>

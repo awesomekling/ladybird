@@ -11,6 +11,7 @@
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/Font/PathFontProvider.h>
+#include <LibGfx/Font/SystemFallbackFonts.h>
 #include <LibGfx/Font/Typeface.h>
 #include <LibGfx/Font/TypefaceSkia.h>
 #include <LibGfx/FontCascadeList.h>
@@ -25,6 +26,12 @@
 #include <harfbuzz/hb.h>
 
 #define TEST_INPUT(x) ("test-inputs/" x)
+
+extern "C" {
+void const* ladybird_gfx_frozen_font_list_font_for_code_point(void const*, u32, bool, bool);
+size_t ladybird_gfx_request_wanted_pending_faces();
+size_t ladybird_gfx_process_wanted_pending_face_count();
+}
 
 namespace {
 
@@ -578,4 +585,165 @@ TEST_CASE(glyph_page_caches_keep_the_typefaces_in_use_once_full)
     thread->start();
     (void)thread->join();
     EXPECT(pages_populated_in_turns <= 8);
+}
+
+// The answer depends on the installed font set alone, so every thread must reach the same one and
+// the memo must match a code point once however many threads ask at the same moment.
+TEST_CASE(system_fallback_fonts_can_be_matched_on_several_threads)
+{
+    Gfx::clear_system_fallback_font_cache();
+    IGNORE_USE_IN_ESCAPING_LAMBDA Gfx::SystemFallbackFontKey key {
+        .code_point = 0x4e2d,
+        .weight = 400,
+        .width = Gfx::FontWidth::Normal,
+        .slope = 0,
+        .prefer_color_emoji = false,
+        .point_size = 12,
+    };
+    // NB: A machine without a font covering this code point answers null, and null is an answer the
+    //     memo keeps like any other, so this test does not depend on what is installed.
+    IGNORE_USE_IN_ESCAPING_LAMBDA Array<Gfx::Font const*, 8> matched {};
+    Vector<NonnullRefPtr<Threading::Thread>> threads;
+    for (size_t thread_index = 0; thread_index < matched.size(); ++thread_index) {
+        auto thread = Threading::Thread::construct("SystemFallbackFont"sv, [&key, &matched, thread_index]() {
+            matched[thread_index] = Gfx::system_fallback_font(key).ptr();
+            return 0;
+        });
+        thread->start();
+        threads.append(move(thread));
+    }
+    for (auto& thread : threads)
+        (void)thread->join();
+
+    // One key is matched once, so every thread names the same font object, not eight equivalent ones.
+    for (auto const* font : matched)
+        EXPECT_EQ(font, matched[0]);
+    EXPECT_EQ(Gfx::system_fallback_font_cache_size(), 1u);
+    EXPECT_EQ(Gfx::system_fallback_font(key).ptr(), matched[0]);
+
+    // A different style is a different question, not another answer to the same one.
+    auto bold_key = key;
+    bold_key.weight = 700;
+    (void)Gfx::system_fallback_font(bold_key);
+    EXPECT_EQ(Gfx::system_fallback_font_cache_size(), 2u);
+}
+
+// A frozen cascade answers the same question as the live one, without entering the document.
+TEST_CASE(frozen_cascade_matches_the_live_lookup)
+{
+    auto local_font = load_text_font(24);
+    auto fallback_font = load_text_font(16);
+    auto cascade = Gfx::FontCascadeList::create();
+    cascade->add(local_font, { { 'a', 'a' } });
+    cascade->add(fallback_font);
+    cascade->set_last_resort_font(fallback_font);
+
+    cascade->freeze();
+    auto const* frozen = cascade->frozen_list();
+    EXPECT(frozen);
+    for (u32 code_point : { 'a', 'b', 'z' }) {
+        auto const& live = cascade->font_for_code_point(code_point);
+        EXPECT_EQ(ladybird_gfx_frozen_font_list_font_for_code_point(frozen, code_point, false, false), &live);
+    }
+}
+
+// https://drafts.csswg.org/css-fonts-4/#font-display-timeline
+// A face in its block period renders invisibly and one in its swap period renders with the
+// fallback, and the frozen cascade decides that from the period it recorded, not by resolving.
+TEST_CASE(frozen_cascade_renders_a_pending_face_without_resolving_it)
+{
+    auto font = load_text_font(16);
+    u32 resolves = 0;
+    auto build = [&](Gfx::PendingFontState state) {
+        auto cascade = Gfx::FontCascadeList::create();
+        cascade->add_pending_face(
+            { { 'a', 'a' } }, [&resolves, state] { ++resolves; return state; }, {}, [state] { return state; });
+        cascade->add(font);
+        cascade->set_last_resort_font(font);
+        cascade->freeze();
+        return cascade;
+    };
+
+    // Drop anything an earlier case left waiting, so the count below is only this case's.
+    (void)ladybird_gfx_request_wanted_pending_faces();
+
+    auto blocking = build(Gfx::PendingFontState::Invisible);
+    auto const* blocking_frozen = blocking->frozen_list();
+    EXPECT(static_cast<Gfx::Font const*>(ladybird_gfx_frozen_font_list_font_for_code_point(blocking_frozen, 'a', false, false))->is_invisible());
+    EXPECT(!static_cast<Gfx::Font const*>(ladybird_gfx_frozen_font_list_font_for_code_point(blocking_frozen, 'b', false, false))->is_invisible());
+
+    auto swapping = build(Gfx::PendingFontState::Visible);
+    auto const* swapping_frozen = swapping->frozen_list();
+    EXPECT_EQ(ladybird_gfx_frozen_font_list_font_for_code_point(swapping_frozen, 'a', false, false), font.ptr());
+
+    // Not one of those lookups resolved a face: the periods came from the snapshot.
+    EXPECT_EQ(resolves, 0u);
+
+    // Both faces are waiting for the document to request their loads, which is what starts them.
+    EXPECT_EQ(ladybird_gfx_request_wanted_pending_faces(), 2u);
+    EXPECT_EQ(resolves, 2u);
+}
+
+// A frozen cascade wants a face once and never again, so a want the document could not act on
+// would be lost for good. It is offered a second time instead - and only a second, so that a face
+// that really is gone cannot make the drain spin.
+TEST_CASE(a_want_the_document_could_not_act_on_is_offered_exactly_twice)
+{
+    auto font = load_text_font(16);
+
+    // Drop anything an earlier case left waiting, so the counts below are only this case's.
+    (void)ladybird_gfx_request_wanted_pending_faces();
+    EXPECT_EQ(ladybird_gfx_process_wanted_pending_face_count(), 0u);
+
+    // A want for a face that is still there is acted on at the first offer and leaves nothing.
+    {
+        auto cascade = Gfx::FontCascadeList::create();
+        cascade->add_pending_face(
+            { { 'a', 'a' } }, [] { return Gfx::PendingFontState::Visible; }, {}, [] { return Gfx::PendingFontState::Visible; });
+        cascade->add(font);
+        cascade->set_last_resort_font(font);
+        cascade->freeze();
+        (void)ladybird_gfx_frozen_font_list_font_for_code_point(cascade->frozen_list(), 'a', false, false);
+        EXPECT_EQ(ladybird_gfx_process_wanted_pending_face_count(), 1u);
+        EXPECT_EQ(ladybird_gfx_request_wanted_pending_faces(), 1u);
+        EXPECT_EQ(ladybird_gfx_process_wanted_pending_face_count(), 0u);
+    }
+
+    // A want whose face went away with the cascade that made it cannot be acted on at all.
+    {
+        auto cascade = Gfx::FontCascadeList::create();
+        cascade->add_pending_face(
+            { { 'a', 'a' } }, [] { return Gfx::PendingFontState::Visible; }, {}, [] { return Gfx::PendingFontState::Visible; });
+        cascade->add(font);
+        cascade->set_last_resort_font(font);
+        cascade->freeze();
+        (void)ladybird_gfx_frozen_font_list_font_for_code_point(cascade->frozen_list(), 'a', false, false);
+        EXPECT_EQ(ladybird_gfx_process_wanted_pending_face_count(), 1u);
+    }
+
+    // Offered again, because a drain that could not reach a face may only have been this one.
+    EXPECT_EQ(ladybird_gfx_request_wanted_pending_faces(), 0u);
+    EXPECT_EQ(ladybird_gfx_process_wanted_pending_face_count(), 1u);
+
+    // And not a third time.
+    EXPECT_EQ(ladybird_gfx_request_wanted_pending_faces(), 0u);
+    EXPECT_EQ(ladybird_gfx_process_wanted_pending_face_count(), 0u);
+}
+
+// A face whose display period has already failed contributes nothing and does not block the
+// faces after it, so the frozen cascade does not carry it at all.
+TEST_CASE(frozen_cascade_leaves_out_a_failed_pending_face)
+{
+    auto local_font = load_text_font(24);
+    auto fallback_font = load_text_font(16);
+    auto cascade = Gfx::FontCascadeList::create();
+    cascade->add_pending_face(
+        { { 'a', 'a' } }, [] { return Gfx::PendingFontState::Failed; }, {}, [] { return Gfx::PendingFontState::Failed; });
+    cascade->add_pending_face(
+        { { 'a', 'a' } }, [] { return Gfx::PendingFontState::Visible; }, [local_font] { return local_font; }, [] { return Gfx::PendingFontState::Visible; });
+    cascade->add(fallback_font);
+    cascade->set_last_resort_font(fallback_font);
+    cascade->freeze();
+
+    EXPECT_EQ(ladybird_gfx_frozen_font_list_font_for_code_point(cascade->frozen_list(), 'a', false, false), local_font.ptr());
 }

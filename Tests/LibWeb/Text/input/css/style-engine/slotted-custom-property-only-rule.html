@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script>
+    function run(css, cls, label) {
+        const fixture = document.createElement("section");
+        document.body.appendChild(fixture);
+        const host = document.createElement("div");
+        fixture.appendChild(host);
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        shadowRoot.appendChild(document.createElement("slot"));
+        const style = document.createElement("style");
+        style.textContent = css;
+        shadowRoot.appendChild(style);
+        const input = document.createElement("input");
+        input.setAttribute("type", "checkbox");
+        input.className = cls;
+        input.checked = false;
+        host.appendChild(input);
+        println(`${label} initial p=[${getComputedStyle(input).getPropertyValue("--p")}] ${getComputedStyle(input).color}`);
+        document.body.offsetWidth;
+        input.checked = true;
+        println(`${label} after p=[${getComputedStyle(input).getPropertyValue("--p")}]`);
+        fixture.remove();
+    }
+    test(() => {
+        run("::slotted(:is(.foo, .bar):checked) { --p: match; }", "foo", "A");
+        run("::slotted(:is(.foo, .bar):checked) { --p: match; }", "baz", "B");
+        run("::slotted(:is(.foo, .bar):not(:checked)) { --p: match; }", "foo", "C");
+        run("::slotted(:is(.foo, .bar):not(:checked)) { --p: match; }", "foo", "D");
+        run("::slotted(:is(.foo, .bar):not(:checked)) { --p: match; color: green; }", "foo", "E");
+    });
+</script>

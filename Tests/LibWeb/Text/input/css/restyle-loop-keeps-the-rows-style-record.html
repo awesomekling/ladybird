@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<style>
+    .marked {
+        background-color: var(--shade);
+    }
+    .marked > span {
+        outline-color: var(--shade);
+    }
+</style>
+<div id="other"><span>text</span></div>
+<script src="../include.js"></script>
+<script>
+    // A task restyles an element thousands of times with no layout in between: the engine sweeps the records the
+    // element moved on from while its layout row still names the first one, and the row then moves on too.
+    test(() => {
+        const other = document.getElementById("other");
+        other.offsetHeight;
+        let readsSeeChanges = true;
+        for (let step = 1; step <= 4000; ++step) {
+            other.classList.toggle("marked", step % 2 === 0);
+            other.style.setProperty("--shade", `rgb(${step % 97}, 0, 0)`);
+            other.style.color = step % 3 ? "red" : "blue";
+            const style = getComputedStyle(other);
+            readsSeeChanges &&= style.color === (step % 3 ? "rgb(255, 0, 0)" : "rgb(0, 0, 255)");
+        }
+        println(`the task reads its own changes: ${readsSeeChanges}`);
+        println(`the row lays out: ${other.offsetHeight > 0}`);
+        println(`the final background: ${getComputedStyle(other).backgroundColor}`);
+    });
+</script>

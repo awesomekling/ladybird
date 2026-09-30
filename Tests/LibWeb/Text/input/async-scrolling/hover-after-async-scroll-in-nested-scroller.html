@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    body {
+        margin: 0;
+    }
+
+    #outer {
+        overflow: scroll;
+        height: 200px;
+        width: 300px;
+    }
+
+    #inner {
+        overflow: scroll;
+        height: 150px;
+        width: 250px;
+    }
+
+    .item {
+        height: 150px;
+    }
+
+    .item:hover {
+        outline: 2px solid green;
+    }
+</style>
+<div id="outer">
+    <div id="outer-tall">
+        <div id="inner">
+            <div class="item" id="a">a</div>
+            <div class="item" id="b">b</div>
+            <div class="item" id="c">c</div>
+        </div>
+        <div class="item" id="d">d</div>
+        <div class="item" id="e">e</div>
+    </div>
+</div>
+<script>
+    async function waitForHover(element) {
+        for (let i = 0; i < 60; ++i) {
+            if (element.matches(":hover"))
+                return;
+            await timeout(50);
+        }
+        println(`timed out waiting for ${element.id} to be hovered`);
+    }
+
+    function hoverStates() {
+        let hovered = [];
+        for (const id of ["a", "b", "c", "d", "e", "inner", "outer"]) {
+            if (document.getElementById(id).matches(":hover"))
+                hovered.push(id);
+        }
+        return `hovered=${hovered.join(",")} outerTop=${outer.scrollTop} innerTop=${inner.scrollTop}`;
+    }
+
+    promiseTest(async () => {
+        await animationFrame();
+        await animationFrame();
+
+        let overs = [];
+        let outs = [];
+        document.addEventListener("mouseover", event => overs.push(event.target.id));
+        document.addEventListener("mouseout", event => outs.push(event.target.id));
+
+        internals.mouseMove(10, 10);
+        println(`initial ${hoverStates()}`);
+
+        // The innermost scroller under the pointer takes the wheel, so the pointer ends up over a
+        // different item of the same scroller without the pointer having moved.
+        overs = [];
+        outs = [];
+        await internals.wheel(10, 10, 0, 150);
+        await waitForHover(b);
+        println(`after inner scroll ${hoverStates()}`);
+        println(`after inner scroll over=${overs.join(",")} out=${outs.join(",")}`);
+
+        // Running the inner scroller to its end keeps the wheel inside it.
+        overs = [];
+        outs = [];
+        await internals.wheel(10, 10, 0, 500);
+        await waitForHover(c);
+        println(`after inner scroll to end ${hoverStates()}`);
+        println(`after inner scroll to end over=${overs.join(",")} out=${outs.join(",")}`);
+
+        // Once it cannot scroll any further the wheel chains to the outer scroller, and a box from
+        // another scroll container comes under the same stationary pointer. A wheel gesture stays
+        // latched to the scroller it started on, so this starts a new one once the last settled.
+        await timeout(600);
+        overs = [];
+        outs = [];
+        await internals.wheel(10, 10, 0, 500);
+        await waitForHover(d);
+        println(`after outer scroll ${hoverStates()}`);
+        println(`after outer scroll over=${overs.join(",")} out=${outs.join(",")}`);
+    });
+</script>

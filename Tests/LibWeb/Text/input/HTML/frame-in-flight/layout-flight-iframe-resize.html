@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="box" style="width: 50px; height: 20px"></div>
+<iframe id="frame" style="width: 200px; height: 100px; border: none" srcdoc="<body style='margin: 0'><div id=inner>child</div>"></iframe>
+<script>
+    // An iframe resized while a layout pass is in flight: the child document sees the viewport size its parent's
+    // layout gives it, whichever document's pass is in flight and whichever document reads first.
+    asyncTest(async done => {
+        if (!frame.contentDocument?.getElementById("inner"))
+            await new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
+        const child = frame.contentDocument;
+        await twoFrames();
+
+        // The parent's pass is in flight, and the parent reads first.
+        const parentFirst = await whileLayoutInFlight("before-run", () => {
+            box.style.width = "60px";
+        }, frame => {
+            frameElement().style.width = "300px";
+            const offsetWidth = frameElement().offsetWidth;
+            return { ...frame, offsetWidth, innerWidth: child.defaultView.innerWidth, childWidth: inner(child).offsetWidth };
+        }, document);
+        println(`parent in flight, parent reads: held as armed: ${layoutHeldAsArmed(parentFirst, "before-run")}`);
+        println(`parent in flight, parent reads: iframe width: ${parentFirst.offsetWidth}`);
+        println(`parent in flight, parent reads: child viewport width: ${parentFirst.innerWidth}`);
+        println(`parent in flight, parent reads: child box width: ${parentFirst.childWidth}`);
+
+        // The parent's pass is in flight, and the child reads first: its layout lays its parent out first.
+        const childFirst = await whileLayoutInFlight("before-completion", () => {
+            box.style.width = "70px";
+        }, frame => {
+            frameElement().style.width = "250px";
+            return { ...frame, childWidth: inner(child).offsetWidth, innerWidth: child.defaultView.innerWidth };
+        }, document);
+        println(`parent in flight, child reads: held as armed: ${layoutHeldAsArmed(childFirst, "before-completion")}`);
+        println(`parent in flight, child reads: child box width: ${childFirst.childWidth}`);
+        println(`parent in flight, child reads: child viewport width: ${childFirst.innerWidth}`);
+
+        // The child's pass is in flight, and the parent resizes it without reading.
+        const childInFlight = await whileLayoutInFlight("before-run", () => {
+            inner(child).style.height = "30px";
+        }, frame => {
+            frameElement().style.width = "220px";
+            return frame;
+        }, child);
+        println(`child in flight: held as armed: ${layoutHeldAsArmed(childInFlight, "before-run")}`);
+        await twoFrames();
+        println(`child in flight: child viewport width: ${child.defaultView.innerWidth}`);
+        println(`child in flight: child box: ${inner(child).offsetWidth}x${inner(child).offsetHeight}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(3)}`);
+        done();
+    });
+
+    function frameElement() {
+        return document.getElementById("frame");
+    }
+
+    function inner(doc) {
+        return doc.getElementById("inner");
+    }
+</script>

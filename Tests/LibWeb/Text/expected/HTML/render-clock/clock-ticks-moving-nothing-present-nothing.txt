@@ -1,0 +1,3 @@
+ticks a lease took: 3
+ticks that ran to the end: 3
+frames presented: 0

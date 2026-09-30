@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<div id="box" style="width: 50px; height: 50px; background-color: red"></div>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    function nextFrame() {
+        return new Promise(resolve => requestAnimationFrame(resolve));
+    }
+
+    asyncTest(async done => {
+        // The load task lays the document out, which would wait for the frame in flight.
+        if (document.readyState !== "complete")
+            await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
+        await nextFrame();
+
+        // The recording this style change needs is submitted to the render side and
+        // held there, and the task below runs beside it, with the frame in flight. In the other modes, the task runs
+        // after the rendering update.
+        const held = internals.holdNextRecordingFrame();
+        box.style.backgroundColor = "green";
+        await nextTask();
+        const heldWhileInFlight = !held || internals.frameInFlightHoldsDocument();
+        internals.gc();
+        const aliveAfterCollection = internals.frameInFlightReferencesAreAlive();
+        internals.releaseHeldFrame();
+
+        await nextFrame();
+        await nextFrame();
+        println(`frame in flight holds the document: ${heldWhileInFlight}`);
+        println(`what the frame references survives a collection: ${aliveAfterCollection}`);
+        println(`box after the frame: ${getComputedStyle(box).backgroundColor}`);
+        println(`hit test after the frame: ${document.elementFromPoint(20, 20) === box}`);
+        done();
+    });
+</script>

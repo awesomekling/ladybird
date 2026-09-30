@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="container"></div>
+<script>
+    // A garbage collection while the frame records: the elements the recording paints lose their last script
+    // reference and leave the tree, and the collection must not free what the frame in flight still holds.
+    asyncTest(async done => {
+        let doomed = [];
+        const frame = await whileFrameInFlight("mid-recording", () => {
+            for (let i = 0; i < 50; ++i) {
+                const div = document.createElement("div");
+                div.textContent = `item ${i}`;
+                div.style.backgroundColor = i % 2 ? "green" : "blue";
+                container.appendChild(div);
+                doomed.push(div);
+            }
+        }, frame => {
+            // Removing the nodes is a DOM tree mutation, which waits for the frame first; the collection before it
+            // runs with the frame still held.
+            internals.gc();
+            doomed = null;
+            internals.gc();
+            container.innerHTML = "";
+            internals.gc();
+            return frame;
+        });
+        println(`held as armed: ${heldAsArmed(frame, "mid-recording")}`);
+        await twoFrames();
+        internals.gc();
+        container.textContent = "after";
+        println(`container height after: ${container.offsetHeight > 0}`);
+        done();
+    });
+</script>

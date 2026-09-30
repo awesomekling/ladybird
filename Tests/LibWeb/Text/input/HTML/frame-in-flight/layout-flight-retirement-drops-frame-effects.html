@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<iframe id="frame" style="width: 200px; height: 100px" srcdoc="<body><div id=inner>first</div>"></iframe>
+<script>
+    // An iframe is removed while the layout pass of its document is in flight, after that pass built boxes it owes
+    // style resources: removing the iframe retires the document's render state, which takes the pass back first. The
+    // boxes go away with the render state, so the document drops what the pass left for them instead of attaching it.
+    const iframe = document.getElementById("frame");
+    const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+    function loaded() {
+        return new Promise(resolve => iframe.addEventListener("load", resolve, { once: true }));
+    }
+
+    function buildBoxesOwingResources() {
+        const doc = iframe.contentDocument;
+        const inner = doc.getElementById("inner");
+        inner.style.width = "120px";
+        for (let i = 0; i < 8; ++i) {
+            const plain = doc.createElement("div");
+            plain.textContent = `plain ${i}`;
+            doc.body.appendChild(plain);
+            const background = doc.createElement("div");
+            background.style.cssText = `width: 10px; height: 10px; background-image: url(${image})`;
+            doc.body.appendChild(background);
+            const img = doc.createElement("img");
+            img.src = image;
+            doc.body.appendChild(img);
+            const replaced = doc.createElement("div");
+            replaced.style.content = `url(${image})`;
+            doc.body.appendChild(replaced);
+            const generated = doc.createElement("span");
+            generated.className = "generated";
+            doc.body.appendChild(generated);
+        }
+        const style = doc.createElement("style");
+        style.textContent = `.generated::before { content: url(${image}); } .generated::after { content: "after"; }`;
+        doc.head.appendChild(style);
+    }
+
+    asyncTest(async done => {
+        if (!iframe.contentDocument?.getElementById("inner"))
+            await loaded();
+        // What the load left this document to lay out goes first, so that the next layout pass is the iframe's.
+        await twoFrames();
+
+        for (const point of ["before-run", "before-completion"]) {
+            const held = await whileLayoutInFlight(point, buildBoxesOwingResources, frameInFlight => {
+                iframe.remove();
+                internals.gc();
+                return frameInFlight;
+            }, iframe.contentDocument);
+            println(`${point}: held as armed: ${layoutHeldAsArmed(held, point)}`);
+            await twoFrames();
+            internals.gc();
+            println(`${point}: iframes left: ${document.querySelectorAll("iframe").length}`);
+
+            document.body.appendChild(iframe);
+            if (!iframe.contentDocument?.getElementById("inner"))
+                await loaded();
+            await twoFrames();
+        }
+
+        document.body.style.width = "300px";
+        println(`container laid out: ${document.body.offsetWidth}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(2)}`);
+        done();
+    });
+</script>

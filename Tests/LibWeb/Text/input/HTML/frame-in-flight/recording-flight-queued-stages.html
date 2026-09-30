@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    iframe { width: 200px; height: 100px; }
+</style>
+<script>
+    // The iframe's recording is held while the rendering update goes on with the parent document: the stages it runs
+    // for the parent would queue behind the held recording on the render side, so they run on the main thread instead,
+    // and the recording stays held until the test releases it.
+    asyncTest(async done => {
+        const frame = document.createElement("iframe");
+        frame.srcdoc = "<body style='background: blue'>inner";
+        const loaded = new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
+        document.body.appendChild(frame);
+        await loaded;
+        const inner = frame.contentDocument;
+
+        const held = await whileFrameInFlight("mid-recording", () => {
+            inner.body.style.backgroundColor = "green";
+        }, frameInFlight => {
+            const heldAgain = internals.waitForHeldFrame();
+            return { ...frameInFlight, heldAgain };
+        }, inner);
+        println(`held as armed: ${heldAsArmed(held, "mid-recording")}`);
+        println(`still held in the task: ${!held.armed || held.heldAgain === "mid-recording"}`);
+        await twoFrames();
+        println(`after: ${getComputedStyle(inner.body).backgroundColor}`);
+        done();
+    });
+</script>

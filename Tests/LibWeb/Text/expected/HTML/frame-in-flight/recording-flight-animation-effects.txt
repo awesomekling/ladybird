@@ -1,0 +1,5 @@
+held as armed: true
+forced joins of the recording: 0
+recording still in flight after the changes: true
+second width: 60
+animations: 1

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    :root { --root-distance: 70px; }
+    div { width: 10px; height: 10px; --own: 0.25; }
+    @keyframes own { from { opacity: var(--own); } to { opacity: var(--own); } }
+    @keyframes inherited { from { opacity: var(--root-opacity); } to { opacity: var(--root-opacity); } }
+    @keyframes fallback { from { opacity: var(--nowhere, 0.75); } to { opacity: var(--nowhere, 0.75); } }
+    @keyframes missing { from { opacity: var(--nowhere); } to { opacity: var(--nowhere); } }
+    @keyframes calced { from { margin-left: calc(var(--root-distance) / 2); } to { margin-left: calc(var(--root-distance) / 2); } }
+    @keyframes shorthand { from { padding: var(--paddings); } to { padding: var(--paddings); } }
+    @keyframes between { from { opacity: 0; } to { opacity: var(--own); } }
+    @keyframes important { from { opacity: var(--bang); } to { opacity: var(--bang); } }
+    @keyframes registered { from { opacity: var(--registered); } to { opacity: var(--registered); } }
+    @keyframes dashed { from { opacity: --pick(0.4); } to { opacity: --pick(0.4); } }
+    @function --pick(--value) { result: var(--value); }
+    :root { --root-opacity: 0.5; --paddings: 3px 4px; --bang: 0.1; }
+    #important { --bang: 0.9 !important; }
+    #pseudo::before { content: ""; --own: 0.35; animation: own 1000s linear -500s infinite paused; }
+</style>
+<div id="own"></div>
+<div id="inherited"></div>
+<div id="fallback"></div>
+<div id="missing"></div>
+<div id="calced"></div>
+<div id="shorthand"></div>
+<div id="between"></div>
+<div id="important"></div>
+<div id="registered"></div>
+<div id="dashed"></div>
+<div id="pseudo"></div>
+<div id="changing"></div>
+<div id="two"></div>
+<script>
+    CSS.registerProperty({ name: "--registered", syntax: "<number>", inherits: true, initialValue: "0.6" });
+    test(() => {
+        let nudge = 0;
+        // A style recomputation that has nothing to do with the animation, on a property no
+        // keyframe below writes.
+        function recompute(element) {
+            element.style.wordSpacing = `${++nudge}px`;
+            getComputedStyle(element).wordSpacing;
+        }
+        function report(label, element, properties, pseudo) {
+            const style = getComputedStyle(element, pseudo ?? null);
+            println(`${label}: ${properties.map(property => style[property]).join(" ")}`);
+        }
+        function check(label, element, properties, pseudo) {
+            report(label, element, properties, pseudo);
+            recompute(element);
+            report(`${label} after recompute`, element, properties, pseudo);
+        }
+        // A paused animation with a negative delay samples at a fixed point of its own timeline, so
+        // every value below is decided by the keyframes alone.
+        function animate(id, name, properties, pseudo) {
+            const element = document.getElementById(id);
+            element.style.animation = `${name} 1000s linear -500s infinite paused`;
+            check(id, element, properties, pseudo);
+            return element;
+        }
+
+        // A name the element declares itself.
+        animate("own", "own", ["opacity"]);
+        // A name the element inherits from the root.
+        animate("inherited", "inherited", ["opacity"]);
+        // A name nothing declares, with a fallback.
+        animate("fallback", "fallback", ["opacity"]);
+        // A name nothing declares and no fallback: invalid at computed-value time, which the host
+        // drops from the keyframe entirely rather than treating as `unset`.
+        animate("missing", "missing", ["opacity"]);
+        // A reference inside a `calc()`, which substitutes before the calculation is parsed.
+        animate("calced", "calced", ["marginLeft"]);
+        // A shorthand written as one reference: the parser pends its longhands on the substitution
+        // rather than keeping the shorthand, and a pending longhand animates nothing at all. Pinned
+        // so that whoever resolves those longhands sees this line move.
+        animate("shorthand", "shorthand", ["paddingTop", "paddingRight", "paddingBottom", "paddingLeft"]);
+        // Only one of the two keyframes carries a reference.
+        animate("between", "between", ["opacity"]);
+        // An important declaration of the custom property still decides what the reference reads.
+        animate("important", "important", ["opacity"]);
+        // A registered name, whose environment the engine holds no resolved store for.
+        animate("registered", "registered", ["opacity"]);
+        // A dashed function is not a reference the engine resolves; the host still does.
+        animate("dashed", "dashed", ["opacity"]);
+        // A pseudo-element's own declaration of the name. Its animation is declared in the sheet,
+        // since `element.style` would put one on the originating element instead.
+        check("pseudo", document.getElementById("pseudo"), ["opacity"], "::before");
+
+        // The custom property the running animation reads changes under it.
+        const changing = document.getElementById("changing");
+        changing.style.animation = "own 1000s linear -500s infinite paused";
+        check("changing", changing, ["opacity"]);
+        changing.style.setProperty("--own", "0.8");
+        check("changing after the name moves", changing, ["opacity"]);
+        changing.style.removeProperty("--own");
+        check("changing after the name is dropped", changing, ["opacity"]);
+        // A custom property the element reads *only* through its keyframes, moved on the root.
+        // See animation-keyframe-var-invalidation.html for that invalidation in full.
+        document.documentElement.style.setProperty("--root-opacity", "0.15");
+        check("inherited after the root moves", document.getElementById("inherited"), ["opacity"]);
+
+        // Two animations on one element, the second of which carries the reference, so the second
+        // description's declarations do not start at the first one's.
+        const two = document.getElementById("two");
+        two.style.animation = "between 1000s linear -500s infinite paused, own 1000s linear -500s infinite paused";
+        check("two", two, ["opacity"]);
+
+        // A rule that gains and loses its reference while the animation runs.
+        const sheet = document.styleSheets[0];
+        const index = sheet.insertRule("@keyframes own { from { opacity: var(--own); } to { opacity: 1; } }", sheet.cssRules.length);
+        check("own after the rule is replaced", document.getElementById("own"), ["opacity"]);
+        sheet.deleteRule(index);
+        check("own after the replacement is dropped", document.getElementById("own"), ["opacity"]);
+    });
+</script>

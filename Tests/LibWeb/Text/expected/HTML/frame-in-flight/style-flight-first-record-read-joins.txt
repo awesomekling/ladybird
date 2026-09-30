@@ -1,0 +1,5 @@
+held as armed: true
+width: 150px
+contents children: 2
+list height: 20
+box width: 150

@@ -1,0 +1,4 @@
+style pass guard reached: 0
+reaction batches settled in few waves: true
+transition running: true
+overflow: hidden

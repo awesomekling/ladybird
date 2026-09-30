@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 100ms linear infinite alternate;
+    }
+    @keyframes grow {
+        from {
+            height: 20px;
+        }
+        to {
+            height: 220px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // An animation with short iterations goes on moving in what the render side presents while a task runs, past the
+    // boundaries of its iterations: the events of a new iteration wait for the next rendering update anyway.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const presentedHeight = () => internals.presentedBorderBox(box)?.height ?? 0;
+
+        // Until the page's animation has a clock (it never gets one without clock frames).
+        for (let frames = 0; frames < 600 && !internals.renderClockTicks(document); ++frames)
+            await new Promise(resolve => requestAnimationFrame(resolve));
+
+        // The task: plain JS, on until the presented height has moved twice after several iterations have ended, however
+        // slowly the display ticks (at most 5 s).
+        const start = performance.now();
+        const heights = new Set();
+        let lastRead = start;
+        let sink = 0;
+        for (let now = start; now - start < 5000 && heights.size < 3; now = performance.now()) {
+            for (let i = 0; i < 1000; ++i)
+                sink = (sink + Math.sqrt(i + sink)) % 1000;
+            if (now - lastRead < 20)
+                continue;
+            lastRead = now;
+            if (now - start >= 400)
+                heights.add(presentedHeight());
+        }
+        println(`the presented height moves past the first iterations: ${heights.size >= 3}`);
+        done();
+    });
+</script>

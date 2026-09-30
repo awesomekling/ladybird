@@ -1,0 +1,4 @@
+engine answered: true
+animation names: tint
+target color: rgb(100, 50, 0)
+child color: rgb(100, 50, 0)

@@ -1,0 +1,36 @@
+own: 0.25
+own after recompute: 0.25
+inherited: 0.5
+inherited after recompute: 0.5
+fallback: 0.75
+fallback after recompute: 0.75
+missing: 1
+missing after recompute: 1
+calced: 35px
+calced after recompute: 35px
+shorthand: 0px 0px 0px 0px
+shorthand after recompute: 0px 0px 0px 0px
+between: 0.125
+between after recompute: 0.125
+important: 0.9
+important after recompute: 0.9
+registered: 0.6
+registered after recompute: 0.6
+dashed: 0.4
+dashed after recompute: 0.4
+pseudo: 0.35
+pseudo after recompute: 0.35
+changing: 0.25
+changing after recompute: 0.25
+changing after the name moves: 0.8
+changing after the name moves after recompute: 0.8
+changing after the name is dropped: 0.25
+changing after the name is dropped after recompute: 0.25
+inherited after the root moves: 0.15
+inherited after the root moves after recompute: 0.15
+two: 0.25
+two after recompute: 0.25
+own after the rule is replaced: 0.625
+own after the rule is replaced after recompute: 0.625
+own after the replacement is dropped: 0.25
+own after the replacement is dropped after recompute: 0.25

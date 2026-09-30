@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    @keyframes slide {
+        from { margin-left: 100px; }
+        to { margin-left: 200px; }
+    }
+    .animated {
+        animation: slide 100s linear;
+    }
+</style>
+<script>
+    async function frames(count) {
+        for (let i = 0; i < count; ++i)
+            await new Promise(requestAnimationFrame);
+    }
+
+    // An element's CSS animation is revived and cancelled again, and the element leaves; the next element added gets
+    // its own animation, which its style update hands the main thread while the render owner takes in what the main
+    // thread sends beside it.
+    asyncTest(async done => {
+        let animated = 0;
+        const elements = 30;
+        for (let i = 0; i < elements; ++i) {
+            const element = document.createElement("div");
+            element.className = "animated";
+            document.body.append(element);
+            await frames(2);
+            const animation = element.getAnimations()[0];
+            if (!animation) {
+                element.remove();
+                continue;
+            }
+            ++animated;
+            animation.cancel();
+            await frames(2);
+            animation.startTime = document.timeline.currentTime - 50000;
+            await frames(2);
+            animation.cancel();
+            element.remove();
+        }
+        println(`elements that got their animation: ${animated} of ${elements}`);
+        done();
+    });
+</script>

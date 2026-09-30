@@ -17,7 +17,12 @@
         resetStyleCounters();
         const second = addStyle(document.head, `.leaf { color: rgb(1, 2, 3); }`);
         internals.updateStyle();
-        const shared = styleCounters().elementStyleSharedComputations;
+        // A record the style engine settles is shared by the engine's own cold-record cache rather
+        // than by the host's style sharing, so the bound counts both.
+        const counters = Object.assign({}, internals.styleEngineCounters(), styleCounters());
+        const shared = counters.elementStyleSharedComputations
+            + (counters.engineComputedRecordSharedHits ?? 0)
+            + (counters.engineComputedRecordCohortHits ?? 0);
         println(`PASS: alike siblings share a recomputed style too: ${shared >= 9}`);
         assertEqual("the shared style is the matched one", readProbe(box.firstChild), MATCH);
 

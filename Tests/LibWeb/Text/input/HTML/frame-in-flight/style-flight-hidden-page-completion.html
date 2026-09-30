@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    #box { width: 50px; height: 50px; }
+    #box.wide { width: 80px; }
+</style>
+<div id="box"></div>
+<script>
+    // The page is hidden while its style pass is in flight, so no rendering opportunity comes: the finished pass must
+    // still be taken back and the rendering update finished, and rendering goes on once the page is visible again.
+    asyncTest(async done => {
+        const frame = await whileStyleInFlight("before-completion", () => {
+            box.classList.add("wide");
+        }, async frame => {
+            // The pass stays held while the page is hidden, unless something joins it.
+            await setSystemVisibilityState("hidden");
+            const visibility = document.visibilityState;
+            const stateWhenHidden = internals.frameSchedulerState();
+            internals.releaseHeldFrame();
+            return { ...frame, visibility, stateWhenHidden, finished: frame.heldAt ? internals.waitForFrameToFinish() : true };
+        });
+        println(`held as armed: ${styleHeldAsArmed(frame, "before-completion")}`);
+        println(`visibility: ${frame.visibility}`);
+        println(`still in flight once hidden: ${!frame.heldAt || frame.stateWhenHidden === "in-flight"}`);
+        println(`finished while hidden: ${frame.finished}`);
+        // The rendering update goes on with the stages that follow the pass, and the main thread takes each back once
+        // the render side has finished it.
+        let tasks = 0;
+        while (internals.frameSchedulerState() !== "idle" && tasks < 100) {
+            internals.waitForFrameToFinish();
+            await nextTask();
+            ++tasks;
+        }
+        println(`taken back while hidden: ${internals.frameSchedulerState() === "idle"}`);
+        println(`styled while hidden: ${getComputedStyle(box).width}, ${box.offsetWidth}`);
+        await setSystemVisibilityState("visible");
+        box.style.height = "60px";
+        await twoFrames();
+        println(`rendering resumed: ${document.visibilityState}, ${box.offsetHeight}`);
+        done();
+    });
+</script>

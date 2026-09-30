@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<style>
+    body { margin: 0; }
+    .box { position: absolute; width: 50px; height: 50px; }
+    @keyframes slide { to { transform: translateX(200px); } }
+    #mover { top: 300px; left: 0; animation: slide 1000s steps(1, start); }
+    #under { top: 400px; left: 0; }
+</style>
+<div class="box" id="mover"></div>
+<div class="box" id="under"></div>
+<script>
+    // A hit test reads the rows the render owner published last, with the hit-test list of the last recording it took
+    // in: it hits a box where a running animation moved it, and after a DOM change, what the change left there.
+    function hitAt(x, y) {
+        const element = document.elementFromPoint(x, y);
+        println(`(${x}, ${y}): ${element.id || element.nodeName}`);
+    }
+
+    promiseTest(async () => {
+        await document.getAnimations()[0].ready;
+        await animationFrame();
+        await animationFrame();
+
+        println("During the animation:");
+        hitAt(225, 325);
+        hitAt(25, 325);
+        hitAt(25, 425);
+
+        const over = document.createElement("div");
+        over.className = "box";
+        over.id = "over";
+        over.style.top = "400px";
+        document.body.appendChild(over);
+        document.getElementById("mover").remove();
+
+        println("After the DOM change:");
+        hitAt(225, 325);
+        hitAt(25, 425);
+    });
+</script>

@@ -1,0 +1,2 @@
+the tick moved the clip and presented it: true
+the clip is where the width at currentTime puts it: true

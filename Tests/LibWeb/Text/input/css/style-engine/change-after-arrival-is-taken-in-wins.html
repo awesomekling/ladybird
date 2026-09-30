@@ -1,0 +1,40 @@
+<!doctype html>
+<script src="../../include.js"></script>
+<style>
+    body { margin: 0; }
+    #target { width: 100px; height: 50px; background: green; }
+    td { padding: 0; height: 20px; }
+    #first { width: 30px; }
+    #second { width: 70px; }
+</style>
+<div inert></div>
+<div id="container"></div>
+<div id="mover"></div>
+<div id="spot"></div>
+<table id="table" cellspacing="0" cellpadding="0"><tr><td id="first"></td><td id="second"></td></tr><tr id="row"></tr></table>
+<script>
+    promiseTest(async () => {
+        const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+        await nextFrame();
+        await nextFrame();
+
+        // The new nodes arrive: a move takes their arrivals in, with the facts they have now.
+        const target = document.createElement("div");
+        target.id = "target";
+        container.appendChild(target);
+        const cell = document.createElement("td");
+        row.appendChild(cell);
+        document.body.moveBefore(mover, spot);
+
+        // Then the facts change before a style update, and the change is what holds.
+        container.inert = true;
+        cell.colSpan = 2;
+
+        await nextFrame();
+        await nextFrame();
+        const rect = target.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.left + 10, rect.top + 10);
+        println(`inert target is hit: ${hit === target}`);
+        println(`cell spanning two columns: ${cell.getBoundingClientRect().width}px`);
+    });
+</script>

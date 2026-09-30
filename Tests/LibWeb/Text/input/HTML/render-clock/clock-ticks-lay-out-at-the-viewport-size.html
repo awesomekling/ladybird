@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<style>
+    body {
+        margin: 0;
+    }
+    #box {
+        width: 10%;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 10%;
+        }
+        to {
+            width: 90%;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    // A frame time past `time`, and not past now: the time a display tick at the next frame carries.
+    async function frameTimeAfter(time) {
+        while (performance.now() <= time + 1)
+            await nextTask();
+        return performance.now();
+    }
+
+    // The render clock's ticks lay out with the document as it stands when the main
+    // thread goes idle: a zoom that changes the viewport, laid out by a read right away, is what the next tick lays out
+    // against, with no rendering update in between.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const animation = box.getAnimations()[0];
+        const matches = () => {
+            const expected = (window.innerWidth * (10 + (80 * animation.currentTime) / 20000)) / 100;
+            return Math.abs(box.getBoundingClientRect().width - expected) <= 0.5;
+        };
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        let frameTime = performance.now();
+        for (let i = 0; i < 3; ++i) {
+            frameTime = await frameTimeAfter(frameTime);
+            internals.injectRenderingOpportunity(frameTime);
+            await nextTask();
+        }
+        // The rendering updates end before the test goes on.
+        while (internals.frameSchedulerState() !== "idle")
+            await nextTask();
+
+        frameTime = await frameTimeAfter(frameTime);
+        const tickedBefore = await internals.injectClockTick(frameTime);
+        println(`before the zoom: ${matches()}`);
+        internals.setBrowserZoom(2);
+        box.getBoundingClientRect();
+        const updatesBefore = internals.getRenderingSchedulerCounters().updatesRun;
+        frameTime = await frameTimeAfter(frameTime);
+        const tickedAfter = await internals.injectClockTick(frameTime);
+        println(`after the zoom: ${matches()}`);
+        println(`ticks a lease took: ${tickedBefore && tickedAfter}`);
+        println(`rendering updates meanwhile: ${internals.getRenderingSchedulerCounters().updatesRun - updatesBefore}`);
+        internals.resetZoom();
+        internals.setManualRenderingOpportunities(false);
+        done();
+    });
+</script>

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="container" style="width: 300px"><div id="first" style="height: 10px">first</div><div id="second">second</div></div>
+<script>
+    // Inline style edits beside a recording in flight: the recording reads nothing of the style engine, so the
+    // declarations are recorded beside it instead of taking it in, and the next rendering update lays them out.
+    asyncTest(async done => {
+        const result = await whileFrameInFlight("before-run", () => {
+            first.style.height = "20px";
+        }, frame => {
+            const joinsBefore = internals.forcedJoinCount("recording");
+            second.style.height = "30px";
+            second.style.setProperty("width", "100px");
+            container.style.width = "200px";
+            return {
+                ...frame,
+                joins: internals.forcedJoinCount("recording") - joinsBefore,
+                stillInFlight: !frame.armed || internals.frameInFlightHoldsDocument(),
+            };
+        });
+        println(`held as armed: ${heldAsArmed(result, "before-run")}`);
+        println(`forced joins of the recording: ${result.joins}`);
+        println(`recording still in flight after the edits: ${result.stillInFlight}`);
+        await twoFrames();
+        println(`container width: ${container.offsetWidth}`);
+        println(`second height: ${second.offsetHeight}`);
+        println(`second width: ${second.offsetWidth}`);
+        done();
+    });
+</script>

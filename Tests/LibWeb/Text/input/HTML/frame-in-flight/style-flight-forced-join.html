@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    .red { color: rgb(255, 0, 0); }
+    .green { color: rgb(0, 128, 0); }
+    #box { width: 100px; height: 20px; }
+    #box.wide { width: 150px; }
+    .tagged::before { content: "before"; }
+    #box[data-state="on"] { background-color: rgb(0, 0, 255); }
+    #list > li:nth-child(odd) { font-weight: 700; }
+</style>
+<div id="box" class="red"></div>
+<ul id="list"><li id="one">one</li><li id="two">two</li><li id="three">three</li></ul>
+<script>
+    // Style reads while the style pass is in flight: each read takes the pass back first and sees its result, and a
+    // read after a mutation beside the pass sees that mutation too.
+    asyncTest(async done => {
+        const reads = await whileStyleInFlight("before-run", () => {
+            box.className = "green";
+        }, frame => {
+            const color = getComputedStyle(box).color;
+            box.classList.add("wide");
+            const width = getComputedStyle(box).width;
+            box.dataset.state = "on";
+            const background = getComputedStyle(box).backgroundColor;
+            const matches = box.matches(".green.wide[data-state=on]");
+            box.classList.add("tagged");
+            const before = getComputedStyle(box, "::before").content;
+            const offsetWidth = box.offsetWidth;
+            return { ...frame, color, width, background, matches, before, offsetWidth };
+        });
+        println(`reads: held as armed: ${styleHeldAsArmed(reads, "before-run")}`);
+        println(`reads: color: ${reads.color}`);
+        println(`reads: width after a class change: ${reads.width}`);
+        println(`reads: background after an attribute change: ${reads.background}`);
+        println(`reads: matches: ${reads.matches}`);
+        println(`reads: ::before content after a class change: ${reads.before}`);
+        println(`reads: offsetWidth: ${reads.offsetWidth}`);
+
+        // The pass has styled, and the main thread has not heard of it yet.
+        const finished = await whileStyleInFlight("before-completion", () => {
+            box.className = "red";
+            one.remove();
+        }, frame => {
+            const color = getComputedStyle(box).color;
+            const weights = [...list.children].map(li => getComputedStyle(li).fontWeight).join(", ");
+            const declared = getComputedStyle(box).getPropertyValue("width");
+            const selected = document.querySelectorAll("#list > li:nth-child(odd)").length;
+            const closest = two.closest("ul#list") === list;
+            return { ...frame, color, weights, declared, selected, closest };
+        });
+        println(`finished pass: held as armed: ${styleHeldAsArmed(finished, "before-completion")}`);
+        println(`finished pass: color: ${finished.color}`);
+        println(`finished pass: font weights after a removal: ${finished.weights}`);
+        println(`finished pass: width: ${finished.declared}`);
+        println(`finished pass: querySelectorAll: ${finished.selected}`);
+        println(`finished pass: closest: ${finished.closest}`);
+
+        await twoFrames();
+        println(`after: ${getComputedStyle(box).color}, ${box.offsetWidth}, ${getComputedStyle(two).fontWeight}`);
+        done();
+    });
+</script>

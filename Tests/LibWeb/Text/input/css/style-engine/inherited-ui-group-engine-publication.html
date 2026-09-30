@@ -24,7 +24,6 @@
         const counters = internals.getStyleInvalidationCounters();
         println(`child color scheme: ${getComputedStyle(child).colorScheme}`);
         println(`dependent background changed: ${getComputedStyle(dependent).backgroundColor !== oldDependentBackground}`);
-        println(`materialized gaps: ${counters.styleEngineMaterializedGaps}`);
         println(`engine record publications: ${counters.styleEngineRecordDeltasApplied}`);
     });
 </script>

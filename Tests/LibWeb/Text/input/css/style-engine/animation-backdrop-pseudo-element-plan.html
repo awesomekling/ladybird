@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    @keyframes dim {
+        from { opacity: 0.25; }
+        to { opacity: 0.25; }
+    }
+    dialog::backdrop { background-color: rgb(0, 0, 0); }
+    dialog.dim::backdrop { animation: dim 100s linear; }
+</style>
+<dialog id="dialog">dialog</dialog>
+<script>
+    test(() => {
+        const dialog = document.getElementById("dialog");
+        dialog.showModal();
+        println(`before: ${getComputedStyle(dialog, "::backdrop").opacity}`);
+
+        // A ::backdrop naming an animation leaves its plan beside its record.
+        dialog.classList.add("dim");
+        println(`animated: ${getComputedStyle(dialog, "::backdrop").opacity}`);
+        println(`animations: ${dialog.getAnimations({ subtree: true }).map(a => `${a.constructor.name}(${a.animationName})`).join(", ")}`);
+
+        // Removing the name cancels it.
+        dialog.classList.remove("dim");
+        println(`after removal: ${getComputedStyle(dialog, "::backdrop").opacity}`);
+        println(`animations left: ${dialog.getAnimations({ subtree: true }).length}`);
+    });
+</script>

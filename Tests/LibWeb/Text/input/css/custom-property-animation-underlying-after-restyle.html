@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    @property --size {
+        syntax: "<length>";
+        inherits: false;
+        initial-value: 0px;
+    }
+    @keyframes grow { to { --size: 100px; } }
+    #target { --size: 50px; animation: grow 10s linear -5s paused; }
+</style>
+<div id="target"></div>
+<script>
+    const target = document.getElementById("target");
+    const values = [getComputedStyle(target).getPropertyValue("--size")];
+    for (let i = 0; i < 3; ++i) {
+        target.style.color = i % 2 ? "red" : "blue";
+        values.push(getComputedStyle(target).getPropertyValue("--size"));
+    }
+    test(() => {
+        println(`--size at 50% from its declared 50px, as the element is computed again: ${values.join(" ")}`);
+    });
+</script>

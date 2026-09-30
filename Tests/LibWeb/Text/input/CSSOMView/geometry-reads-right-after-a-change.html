@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+body {
+    margin: 0;
+}
+#container {
+    position: relative;
+    margin: 10px;
+    padding: 5px;
+}
+#box {
+    width: 100px;
+    height: 50px;
+    border: 2px solid black;
+}
+#box.tall {
+    height: 70px;
+}
+#box[data-wide] {
+    width: 160px;
+}
+#moved {
+    width: 20px;
+    height: 10px;
+}
+#scroller {
+    height: 40px;
+    overflow: scroll;
+}
+#scrolled {
+    height: 200px;
+}
+</style>
+<div id="container">
+    <div id="box"><span id="inline">hello</span></div>
+    <div id="moved"></div>
+    <table id="table"><caption>caption</caption><tr><td>cell</td></tr></table>
+    <div id="scroller"><div id="spacer" style="height: 30px"></div><div id="scrolled"></div></div>
+</div>
+<script>
+function rect(r) {
+    return `${r.x},${r.y} ${r.width}x${r.height}`;
+}
+
+test(() => {
+    // Printing changes the document, so what is printed is collected until the reads are over.
+    const lines = [];
+    const box = document.getElementById("box");
+    const inline = document.getElementById("inline");
+    const moved = document.getElementById("moved");
+    const table = document.getElementById("table");
+    const scroller = document.getElementById("scroller");
+    const scrolled = document.getElementById("scrolled");
+
+    // Every read below follows a read that left style and layout up to date, and then a change: it has to see the
+    // change, and a read after it has to see the same.
+    const readTwice = (what, read) => {
+        const first = read();
+        const second = read();
+        lines.push(`${what}: ${first}${first === second ? "" : ` (then ${second})`}`);
+    };
+
+    readTwice("initial box", () => `${rect(box.getBoundingClientRect())} offset ${box.offsetLeft},${box.offsetTop} ${box.offsetWidth}x${box.offsetHeight}`);
+
+    box.style.width = "120px";
+    readTwice("inline style width", () => `${box.getBoundingClientRect().width} ${box.offsetWidth}`);
+
+    box.className = "tall";
+    readTwice("class", () => `${box.getBoundingClientRect().height} ${box.offsetHeight}`);
+
+    box.setAttribute("data-wide", "");
+    box.style.width = "";
+    readTwice("attribute selector", () => `${box.getBoundingClientRect().width} ${box.offsetWidth}`);
+
+    const inlineWidth = inline.offsetWidth;
+    inline.firstChild.data = "hello hello";
+    readTwice("text data grew the inline", () => `${inline.offsetWidth > inlineWidth} ${inline.getClientRects().length} rect(s)`);
+
+    const insertedBefore = document.createElement("div");
+    insertedBefore.style.height = "13px";
+    box.before(insertedBefore);
+    readTwice("insertion before", () => `${box.offsetTop} ${box.getBoundingClientRect().y}`);
+
+    insertedBefore.remove();
+    readTwice("removal", () => `${box.offsetTop} ${box.getBoundingClientRect().y}`);
+
+    moved.style.transform = "translate(7px, 3px)";
+    readTwice("transform", () => `${rect(moved.getBoundingClientRect())} offset ${moved.offsetLeft},${moved.offsetTop}`);
+
+    moved.style.position = "absolute";
+    moved.style.left = "50px";
+    moved.style.top = "0px";
+    readTwice("positioned", () => `${rect(moved.getBoundingClientRect())} offset ${moved.offsetLeft},${moved.offsetTop} parent #${moved.offsetParent.id}`);
+
+    readTwice("scrolled before", () => `${scrolled.getBoundingClientRect().y}`);
+    scroller.scrollTop = 25;
+    readTwice("scroll offset", () => `${scrolled.getBoundingClientRect().y}`);
+
+    table.querySelector("caption").textContent = "a caption that is longer";
+    readTwice("table", () => `${table.getBoundingClientRect().height === table.offsetHeight}`);
+
+    document.body.style.marginTop = "20px";
+    readTwice("body margin", () => `${box.getBoundingClientRect().y} ${box.offsetTop}`);
+
+    box.style.display = "none";
+    readTwice("display none", () => `${rect(box.getBoundingClientRect())} ${box.getClientRects().length} rect(s) ${box.offsetWidth} ${box.offsetParent}`);
+
+    box.style.display = "";
+    readTwice("display back", () => `${box.offsetWidth} ${box.getClientRects().length} rect(s)`);
+
+    for (const line of lines)
+        println(line);
+});
+</script>

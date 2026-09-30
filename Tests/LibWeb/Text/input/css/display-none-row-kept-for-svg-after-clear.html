@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+</style>
+<div id="hidden"><span id="span" style="color: red">x</span></div>
+<svg width="20" height="20"><rect width="20" height="20" fill="url(#gradient)"/></svg>
+<script>
+    // A span loses its style as its parent becomes display:none. It then takes animations and an SVG gradient, which
+    // waits for a later wave of the style pass than the span's: the span has animations the host samples as it
+    // installs it. The span keeps its style for the gradient, and its style is computed once, in the first wave.
+    asyncTest(async done => {
+        const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        await settle();
+        const hidden = document.getElementById("hidden");
+        const span = document.getElementById("span");
+        hidden.style.display = "none";
+        await settle();
+        println(`span has a style record once hidden: ${internals.styleRecordIdentity(span) !== 0}`);
+        const before = internals.styleEngineCounters().engineFullDrivesStarted;
+        span.style.animation = "fade 1s";
+        span.style.color = "green";
+        span.innerHTML = `<svg><linearGradient id="gradient"><stop id="stop" stop-color="currentColor"/></linearGradient></svg>`;
+        await settle();
+        println(`style drives for the span and its arriving elements: ${internals.styleEngineCounters().engineFullDrivesStarted - before}`);
+        println(`span has a style record: ${internals.styleRecordIdentity(span) !== 0}`);
+        println(`stop color: ${getComputedStyle(document.getElementById("stop")).stopColor}`);
+        done();
+    });
+</script>

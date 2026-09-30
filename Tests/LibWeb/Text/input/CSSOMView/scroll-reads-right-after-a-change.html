@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+body {
+    margin: 0;
+}
+#scroller {
+    width: 100px;
+    height: 50px;
+    overflow: scroll;
+    border: 3px solid black;
+}
+#content {
+    width: 80px;
+    height: 200px;
+}
+</style>
+<div id="scroller"><div id="content"></div></div>
+<script>
+test(() => {
+    // Printing changes the document, so what is printed is collected until the reads are over.
+    const lines = [];
+    const scroller = document.getElementById("scroller");
+    const content = document.getElementById("content");
+
+    // Every read below follows a read that left style and layout up to date, and then a change: it has to see the
+    // change, and a read after it has to see the same.
+    const readTwice = (what, read) => {
+        const first = read();
+        const second = read();
+        lines.push(`${what}: ${first}${first === second ? "" : ` (then ${second})`}`);
+    };
+    const metrics = () => `scroll ${scroller.scrollWidth}x${scroller.scrollHeight} at ${scroller.scrollLeft},${scroller.scrollTop} client ${scroller.clientWidth}x${scroller.clientHeight}`;
+
+    readTwice("initial", metrics);
+
+    content.style.height = "300px";
+    readTwice("taller content", metrics);
+
+    content.style.width = "250px";
+    readTwice("wider content", metrics);
+
+    scroller.scrollTop = 40;
+    readTwice("scrolled down", metrics);
+
+    scroller.scrollLeft = 30;
+    readTwice("scrolled right", metrics);
+
+    content.style.height = "60px";
+    readTwice("shorter content clamps the offset", metrics);
+
+    scroller.style.width = "150px";
+    readTwice("wider scroller", metrics);
+
+    scroller.style.borderWidth = "10px";
+    readTwice("thicker border", metrics);
+
+    for (const line of lines)
+        println(line);
+});
+</script>

@@ -1,0 +1,9 @@
+plain document: none
+resize observation: ResizeObservation
+resize observer disconnected: none
+view transition: ViewTransition
+view transition finished: none
+content-visibility: auto, first determination pending: ContentVisibilityAutoFirstDetermination
+content-visibility: auto, determined: none
+scroll timeline: ScrollTimeline
+scroll-state container: ScrollStateContainer

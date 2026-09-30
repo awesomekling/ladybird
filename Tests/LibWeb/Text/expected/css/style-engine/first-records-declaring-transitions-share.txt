@@ -1,0 +1,5 @@
+alike items in one update share: true
+an alike item in a later update shares: true
+it was not driven in full: true
+a changed item transitions: true
+its alike siblings do not: true

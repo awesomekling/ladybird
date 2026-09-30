@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="box" style="width: 10px; height: 10px"></div>
+<iframe id="frame" style="width: 100px; height: 50px; border: 0" srcdoc="<body style='margin: 0'><div id=inner style='width: 20px; height: 20px'></div></body>"></iframe>
+<script>
+    // A rendering update in which both the parent and its iframe changed runs each document's style and layout beside
+    // the main thread: the iframe's document submits its own passes once the parent's are taken back, rather than
+    // running them on the main thread. Nothing is printed until the end, as printing changes the parent.
+    asyncTest(async done => {
+        if (!frame.contentDocument?.getElementById("inner"))
+            await new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
+        const child = frame.contentDocument;
+        const inner = child.getElementById("inner");
+        for (let i = 0; i < 3; ++i)
+            await twoFrames();
+        internals.resetRenderingSchedulerCounters();
+        let updates = 0;
+        for (const width of [30, 40, 50]) {
+            box.style.width = `${width}px`;
+            inner.style.width = `${width}px`;
+            await twoFrames();
+            ++updates;
+        }
+        const counters = internals.getRenderingSchedulerCounters();
+        let flights = 0;
+        for (const byStage of Object.values(counters.flightEnds))
+            for (const count of Object.values(byStage))
+                flights += count;
+        // Each document's style pass and layout pass fly apart: four flights for each update, where the parent's two
+        // alone were before.
+        println(`both documents flew: ${flights === 0 || flights >= 4 * updates}`);
+        println(`width: ${box.getBoundingClientRect().width}`);
+        println(`inner width: ${inner.getBoundingClientRect().width}`);
+        done();
+    });
+</script>

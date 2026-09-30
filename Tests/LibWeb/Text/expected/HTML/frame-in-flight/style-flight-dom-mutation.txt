@@ -1,0 +1,17 @@
+insertion: held as armed: true
+insertion: attribute changes joined the pass: false
+insertion: first-seen attribute names joined the pass: false
+insertion: the insertion joined the pass: false
+insertion: container height: 75
+insertion: first: 200x25 rgb(128, 0, 128)
+insertion: second: 200x40 rgb(0, 0, 255)
+insertion: third: 200x10 rgb(0, 128, 0)
+removal: held as armed: true
+removal: container height: 26
+removal: second connected: false
+removal: first: 200x10 rgb(128, 0, 128)
+removal: third: 200x16 rgb(0, 0, 0)
+replacement: held as armed: true
+replacement: children: 2
+replacement: fourth: 200x10 rgb(0, 0, 0)
+replacement: fifth: 200x40 rgb(0, 128, 0)

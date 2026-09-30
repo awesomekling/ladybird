@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<div id="theme"></div>
+<script>
+    test(() => {
+        // A theme that declares many custom properties hands the same names to every element under it.
+        let declarations = "";
+        for (let i = 0; i < 300; i++)
+            declarations += `--theme-${i}: ${i}px;`;
+        theme.setAttribute("style", declarations);
+        internals.updateStyle();
+
+        const before = internals.styleEngineCounters();
+        let html = "";
+        for (let i = 0; i < 100; i++)
+            html += `<div class="item"><span>${i}</span></div>`;
+        theme.innerHTML = html;
+        internals.updateStyle();
+        const after = internals.styleEngineCounters();
+
+        println(`width: ${getComputedStyle(theme.lastElementChild.firstChild).getPropertyValue("--theme-299")}`);
+        println(`customPropertyNameSetsLookedUp: ${after.customPropertyNameSetsLookedUp - before.customPropertyNameSetsLookedUp}`);
+    });
+</script>

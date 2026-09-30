@@ -1,0 +1,40 @@
+own before the flip: 10px 10px
+own before the flip after recompute: 10px 10px
+own after the flip: 40px 40px
+own after the flip after recompute: 40px 40px
+child before the flip: 10px 10px
+child before the flip after recompute: 10px 10px
+child after the flip: 40px 40px
+child after the flip after recompute: 40px 40px
+over: 40px
+over after recompute: 40px
+under: 6px 6px
+under after recompute: 6px 6px
+two: 400px
+two after recompute: 400px
+fills both after the end: 40px
+fills both after the end after recompute: 40px
+drops none after the end: (none)
+drops none after the end after recompute: (none)
+important: 7px
+important after recompute: 7px
+synthesized before the flip: 3px
+synthesized before the flip after recompute: 3px
+synthesized after the flip: 99px
+synthesized after the flip after recompute: 99px
+sheet pseudo: 40px
+sheet pseudo after recompute: 40px
+mixed: 40px 0.55 40px
+mixed after recompute: 40px 0.55 40px
+beside a registration: 40px
+beside a registration after recompute: 40px
+registered at 30%: 19px
+registered at 30% after recompute: 19px
+registered at 60%: 28.000001px
+registered at 60% after recompute: 28.000001px
+cancels while running: 40px
+cancels while running after recompute: 40px
+cancels after the animation is removed: (none)
+cancels after the animation is removed after recompute: (none)
+cancels after cancelling: (none)
+cancels after cancelling after recompute: (none)

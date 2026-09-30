@@ -60,6 +60,19 @@
         return promise;
     }
 
+    // Where rendering opportunities are held, a rendering task that finds the previous rendering update's frame still
+    // in flight holds its opportunity until that frame has finished. Each injected frame waits for that frame first,
+    // so its rendering update runs before the next task.
+    async function renderFrame(frameTime) {
+        while (internals.renderingUpdateAwaitsPass()) {
+            internals.waitForFrameToFinish();
+            await nextTask();
+        }
+        internals.waitForFrameToFinish();
+        internals.injectRenderingOpportunity(frameTime);
+        await nextTask();
+    }
+
     asyncTest(async done => {
         const currentTimeTarget = document.getElementById("current-time");
         const startTimeTarget = document.getElementById("start-time");
@@ -71,16 +84,14 @@
         await nextTask();
 
         const firstFrameTime = performance.now();
-        internals.injectRenderingOpportunity(firstFrameTime);
-        await nextTask();
+        await renderFrame(firstFrameTime);
 
         const events = [];
         target.addEventListener("transitionrun", () => events.push("transitionrun"));
         target.addEventListener("transitionstart", () => events.push("transitionstart"));
         document.body.classList.add("changed");
         internals.resetStyleInvalidationCounters();
-        internals.injectRenderingOpportunity(firstFrameTime + 60);
-        await nextTask();
+        await renderFrame(firstFrameTime + 60);
 
         const animation = target.getAnimations()[0];
         internals.updateCompositorAnimations();
@@ -96,8 +107,7 @@
         println(`new transition starts on compositor: ${firstUpdateCounters.compositorVisualAnimations === 1}`);
 
         internals.resetStyleInvalidationCounters();
-        internals.injectRenderingOpportunity(firstFrameTime + 120);
-        await nextTask();
+        await renderFrame(firstFrameTime + 120);
         await Promise.resolve();
         internals.updateCompositorAnimations();
         const secondUpdateCounters = internals.getStyleInvalidationCounters();
@@ -165,8 +175,7 @@
         const pairedNeedsEffectsFrameBefore = internals.visualContextNodeIndices(pairedTarget).needsCompositorEffectsLayer;
         pairedTarget.classList.add("changed");
         internals.resetStyleInvalidationCounters();
-        internals.injectRenderingOpportunity(firstFrameTime + 180);
-        await nextTask();
+        await renderFrame(firstFrameTime + 180);
         internals.updateCompositorAnimations();
         const pairedAnimations = pairedTarget.getAnimations();
         const pairedCounters = internals.getStyleInvalidationCounters();
@@ -184,8 +193,7 @@
         println(`withdrawn fade-out removes its forced effects frame: ${!internals.visualContextNodeIndices(pairedTarget).needsCompositorEffectsLayer}`);
 
         const mixedAnimation = pairedTarget.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 400, fill: "backwards" });
-        internals.injectRenderingOpportunity(firstFrameTime + 200);
-        await nextTask();
+        await renderFrame(firstFrameTime + 200);
         internals.updateCompositorAnimations();
         const mixedOpacityNeedsEffectsFrame = internals.visualContextNodeIndices(pairedTarget).needsCompositorEffectsLayer;
         mixedAnimation.effect.setKeyframes([
@@ -202,15 +210,12 @@
         mixedAnimation.cancel();
 
         pairedRetargetTarget.classList.add("first");
-        internals.injectRenderingOpportunity(firstFrameTime + 240);
-        await nextTask();
-        internals.injectRenderingOpportunity(firstFrameTime + 300);
-        await nextTask();
+        await renderFrame(firstFrameTime + 240);
+        await renderFrame(firstFrameTime + 300);
         const originalPairedRetargetAnimation = pairedRetargetTarget.getAnimations()[0];
         pairedRetargetTarget.classList.replace("first", "second");
         internals.resetStyleInvalidationCounters();
-        internals.injectRenderingOpportunity(firstFrameTime + 360);
-        await nextTask();
+        await renderFrame(firstFrameTime + 360);
         internals.updateCompositorAnimations();
         const pairedRetargetAnimations = pairedRetargetTarget.getAnimations();
         const pairedRetargetCounters = internals.getStyleInvalidationCounters();

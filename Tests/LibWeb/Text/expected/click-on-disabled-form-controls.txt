@@ -1,0 +1,25 @@
+plain: plain
+off: no click
+in-legend: no click
+in-fieldset: no click
+in-nested-legend: no click
+in-enabled-legend: in-enabled-legend
+live-select: live-select
+off-select: off-select
+in-custom: in-custom
+area: area
+shadow-child: shadow-host
+shadow-host: no click
+--- after toggling ---
+off: off
+in-legend: in-legend
+in-fieldset: in-fieldset
+in-nested-legend: no click
+in-custom: no click
+area: no click
+--- late arrival ---
+late: no click
+late: late
+--- upgrade ---
+upgraded: upgraded
+upgraded: no click

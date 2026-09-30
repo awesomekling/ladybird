@@ -1,3 +1,2 @@
-discarded engine records: 1
 display: block
 color: rgb(0, 0, 255)

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="container"></div>
+<script>
+    // Garbage collections while a layout pass is in flight: the elements the pass lays out lose their last script
+    // reference and leave the tree, and no collection may free what the pass in flight still reaches.
+    function fill(count) {
+        const elements = [];
+        for (let i = 0; i < count; ++i) {
+            const div = document.createElement("div");
+            div.textContent = `item ${i}`;
+            div.style.height = `${10 + (i % 3)}px`;
+            container.appendChild(div);
+            elements.push(div);
+        }
+        return elements;
+    }
+
+    asyncTest(async done => {
+        // Collected with the pass held first, then removed (which may wait for the pass), then collected again.
+        let doomed = [];
+        const collectedFirst = await whileLayoutInFlight("before-run", () => {
+            doomed = fill(50);
+        }, frame => {
+            internals.gc();
+            doomed = null;
+            internals.gc();
+            container.innerHTML = "";
+            internals.gc();
+            return frame;
+        });
+        println(`collected, then removed: held as armed: ${layoutHeldAsArmed(collectedFirst, "before-run")}`);
+        await twoFrames();
+        println(`collected, then removed: container height: ${container.offsetHeight}`);
+
+        // Removed first, then collected with nothing referencing the elements but the layout the pass computed.
+        doomed = [];
+        const removedFirst = await whileLayoutInFlight("before-completion", () => {
+            doomed = fill(50);
+        }, frame => {
+            for (const element of doomed)
+                element.remove();
+            doomed = null;
+            internals.gc();
+            internals.gc();
+            return frame;
+        });
+        println(`removed, then collected: held as armed: ${layoutHeldAsArmed(removedFirst, "before-completion")}`);
+        await twoFrames();
+        internals.gc();
+        container.textContent = "after";
+        println(`removed, then collected: container laid out: ${container.offsetHeight > 0}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(2)}`);
+        done();
+    });
+</script>

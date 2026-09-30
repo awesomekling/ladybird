@@ -1,0 +1,8 @@
+alone: margin-left: 40px, width: 744px
+two-of-them: margin-left: 40px, width: 70px
+first-composes-nothing: margin-left: 40px, width: 10px
+second-composes-nothing: margin-left: 40px, width: 10px
+later-composes-nothing: margin-left: 100px, width: 684px
+later-fills-backwards: margin-left: 0px, width: 784px
+on-a-pseudo-element: margin-left: 40px, width: 744px
+animations: 12

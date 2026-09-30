@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>*::selection { color: red; }</style>
+<div id="container"></div>
+<input id="input" value="abc">
+<script>
+    test(() => {
+        for (let index = 0; index < 64; ++index) {
+            const child = container.appendChild(document.createElement("div"));
+            child.textContent = "selectable text";
+        }
+        internals.updateStyle();
+
+        const range = document.createRange();
+        range.selectNodeContents(container.firstElementChild);
+        const beforeRangeNodes = internals.styleEngineCounters().invalidatedStyleNodes;
+        const beforeRangeRecomputations = internals.getStyleInvalidationCounters().elementStyleRecomputations;
+        const beforeRangePublished = internals.styleEngineCounters().computedPseudoAssignmentsPublished;
+        document.getSelection().addRange(range);
+        internals.updateStyle();
+        println(`range activation stays local: ${internals.styleEngineCounters().invalidatedStyleNodes - beforeRangeNodes < 16}`);
+        println(`range avoids element recomputation: ${internals.getStyleInvalidationCounters().elementStyleRecomputations === beforeRangeRecomputations}`);
+        const rangePublications = internals.styleEngineCounters().computedPseudoAssignmentsPublished - beforeRangePublished;
+        println(`range publishes locally: ${rangePublications > 0 && rangePublications < 16}`);
+
+        document.getSelection().removeAllRanges();
+        input.focus();
+        input.addEventListener("input", () => {
+            input.setSelectionRange(0, input.value.length);
+            internals.updateStyle();
+        }, { once: true });
+        const beforeTypingNodes = internals.styleEngineCounters().invalidatedStyleNodes;
+        const beforeTypingRecomputations = internals.getStyleInvalidationCounters().elementStyleRecomputations;
+        const beforeTypingPublished = internals.styleEngineCounters().computedPseudoAssignmentsPublished;
+        internals.sendText(input, "d");
+        println(`input typing stays local: ${internals.styleEngineCounters().invalidatedStyleNodes - beforeTypingNodes < 16}`);
+        println(`input typing recomputes locally: ${internals.getStyleInvalidationCounters().elementStyleRecomputations - beforeTypingRecomputations < 16}`);
+        const typingPublications = internals.styleEngineCounters().computedPseudoAssignmentsPublished - beforeTypingPublished;
+        println(`input typing publishes locally: ${typingPublications > 0 && typingPublications < 16}`);
+    });
+</script>

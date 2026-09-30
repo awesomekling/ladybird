@@ -1,0 +1,4 @@
+animated margin survives: 25px
+warm parent stayed in the engine: true
+new environment reaches child: rgb(0, 128, 0)
+updated environment reaches child: rgb(0, 0, 255)

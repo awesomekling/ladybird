@@ -1,0 +1,3 @@
+background-color: needsRepaint=true
+outline-color: needsRepaint=true
+opacity: needsRepaint=true

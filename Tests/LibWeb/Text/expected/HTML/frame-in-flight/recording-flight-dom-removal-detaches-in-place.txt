@@ -1,0 +1,4 @@
+held as armed: true
+layout tree builds for the removal: 0
+parent width: 25
+layout tree matches a full rebuild: true

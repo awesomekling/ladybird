@@ -1,0 +1,24 @@
+<!doctype html>
+<script src="../../include.js"></script>
+<style>
+    @keyframes tint { from { color: rgb(0, 0, 0); } to { color: rgb(200, 100, 0); } }
+    @keyframes picture { from, to { background-image: url("../../../Assets/120.png"); } }
+    .target { animation: tint 1000s linear -500s paused both; }
+</style>
+<script>
+    test(() => {
+        internals.updateStyle();
+        const before = internals.styleEngineCounters();
+        const target = document.createElement("div");
+        target.className = "target";
+        const child = document.createElement("span");
+        target.append(child);
+        document.body.append(target);
+        internals.updateStyle();
+        const after = internals.styleEngineCounters();
+        println(`engine answered: ${after.engineComputedRecordDeltas > before.engineComputedRecordDeltas}`);
+        println(`animation names: ${target.getAnimations().map(animation => animation.animationName).join(",")}`);
+        println(`target color: ${getComputedStyle(target).color}`);
+        println(`child color: ${getComputedStyle(child).color}`);
+    });
+</script>

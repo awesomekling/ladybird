@@ -1,8 +1,7 @@
 opacity: 0.5
 width: 20px
 color: rgb(128, 128, 128)
-animation evaluations: 1
-keyframe longhand drives: 1
+keyframes driven once per evaluation: true
 resampled opacity: 0.6
 resampled width: 25px
 resampled color: rgb(191, 191, 191)

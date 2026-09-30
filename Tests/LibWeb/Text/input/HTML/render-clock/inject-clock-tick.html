@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    // A frame time past `time`, and not past now: the time a display tick at the next frame carries.
+    async function frameTimeAfter(time) {
+        while (performance.now() <= time + 1)
+            await nextTask();
+        return performance.now();
+    }
+
+    // With manual rendering opportunities and clock ticks, the display ticks the leases
+    // see come from the test alone: each injected tick lays out and presents one frame from the render side, with no
+    // rendering update, and a read after it sees the width composed at the time of the tick.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const animation = box.getAnimations()[0];
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        let frameTime = performance.now();
+        for (let i = 0; i < 3; ++i) {
+            frameTime = await frameTimeAfter(frameTime);
+            internals.injectRenderingOpportunity(frameTime);
+            await nextTask();
+        }
+        // The rendering updates end before the test goes on.
+        while (internals.frameSchedulerState() !== "idle")
+            await nextTask();
+
+        const countersBefore = internals.getRenderClockCounters();
+        const updatesBefore = internals.getRenderingSchedulerCounters().updatesRun;
+        let taken = 0;
+        let mismatches = 0;
+        for (let i = 1; i <= 5; ++i) {
+            frameTime = await frameTimeAfter(frameTime);
+            if (await internals.injectClockTick(frameTime))
+                ++taken;
+            const time = animation.currentTime;
+            if (Math.abs(box.getBoundingClientRect().width - (100 + (2000 * time) / 20000)) > 0.5)
+                ++mismatches;
+        }
+        const countersAfter = internals.getRenderClockCounters();
+        const presented = countersAfter.ticksPresented - countersBefore.ticksPresented;
+        const laidOut = countersAfter.ticksLaidOut - countersBefore.ticksLaidOut;
+        const updates = internals.getRenderingSchedulerCounters().updatesRun - updatesBefore;
+        internals.setManualRenderingOpportunities(false);
+
+        println(`ticks a lease took: ${taken}`);
+        println(`frames presented from the render side: ${presented}`);
+        println(`frames laid out on the render side: ${laidOut}`);
+        println(`rendering updates meanwhile: ${updates}`);
+        println(`mismatches: ${mismatches}`);
+        done();
+    });
+</script>

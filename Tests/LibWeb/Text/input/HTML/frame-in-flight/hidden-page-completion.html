@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="box" style="width: 50px; height: 50px; background: blue"></div>
+<script>
+    // The page is hidden while its frame is in flight, so no rendering opportunity comes: the finished frame must still
+    // be taken in and its tail run, and rendering goes on once the page is visible again.
+    asyncTest(async done => {
+        const frame = await whileFrameInFlight("before-completion", () => {
+            box.style.backgroundColor = "green";
+        }, async frame => {
+            // The frame stays held while the page is hidden, unless something joins it.
+            // Wait for the visibilitychange event: under load, the UI process's round trip can take any number of tasks.
+            await setSystemVisibilityState("hidden");
+            const visibility = document.visibilityState;
+            const stateWhenHidden = internals.frameSchedulerState();
+            internals.releaseHeldFrame();
+            return { ...frame, visibility, stateWhenHidden, finished: frame.armed ? internals.waitForFrameToFinish() : true };
+        });
+        println(`held as armed: ${heldAsArmed(frame, "before-completion")}`);
+        println(`visibility: ${frame.visibility}`);
+        println(`still in flight once hidden: ${!frame.armed || frame.stateWhenHidden === "in-flight"}`);
+        println(`finished while hidden: ${frame.finished}`);
+        // The main thread takes the frame in once the render side has finished it.
+        let tasks = 0;
+        while (internals.frameSchedulerState() !== "idle" && tasks < 100) {
+            internals.waitForFrameToFinish();
+            await nextTask();
+            ++tasks;
+        }
+        println(`taken in while hidden: ${internals.frameSchedulerState() === "idle"}`);
+        await setSystemVisibilityState("visible");
+        await twoFrames();
+        println(`rendering resumed: ${document.visibilityState}`);
+        done();
+    });
+</script>

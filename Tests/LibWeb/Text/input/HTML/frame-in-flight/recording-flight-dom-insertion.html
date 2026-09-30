@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="container" style="width: 300px"><div id="first" style="height: 10px">first</div><div id="moved" style="height: 20px"><span>moved</span></div></div>
+<script>
+    // Insertions beside a recording in flight: the recording reads nothing of the style engine, and the arena takes the
+    // inserted nodes' new style identities in once the recording has been taken in, so an insertion goes on beside it.
+    // The next rendering update lays out every inserted node, including one that was removed and comes back.
+    function insertBeside(mutate, insert) {
+        return whileFrameInFlight("before-run", mutate, frame => {
+            const joinsBefore = internals.forcedJoinCount("recording");
+            insert();
+            return {
+                ...frame,
+                joins: internals.forcedJoinCount("recording") - joinsBefore,
+                stillInFlight: !frame.armed || internals.frameInFlightHoldsDocument(),
+            };
+        });
+    }
+
+    function report(name, result) {
+        println(`${name}: held as armed: ${heldAsArmed(result, "before-run")}`);
+        println(`${name}: forced joins of the recording: ${result.joins}`);
+        println(`${name}: recording still in flight: ${result.stillInFlight}`);
+    }
+
+    asyncTest(async done => {
+        const fresh = await insertBeside(() => {
+            first.style.height = "20px";
+        }, () => {
+            const inserted = document.createElement("div");
+            inserted.id = "inserted";
+            inserted.style.height = "30px";
+            inserted.innerHTML = "<b>bold</b> text";
+            container.appendChild(inserted);
+        });
+        report("fresh subtree", fresh);
+        await twoFrames();
+        println(`fresh subtree: container height: ${container.offsetHeight}`);
+        println(`fresh subtree: inserted width: ${inserted.offsetWidth}`);
+
+        const movedElement = moved;
+        movedElement.remove();
+        await twoFrames();
+        println(`removed: container height: ${container.offsetHeight}`);
+
+        const back = await insertBeside(() => {
+            first.style.height = "15px";
+        }, () => {
+            container.insertBefore(movedElement, first);
+        });
+        report("reinserted", back);
+        await twoFrames();
+        println(`reinserted: container height: ${container.offsetHeight}`);
+        println(`reinserted: moved top: ${movedElement.offsetTop - container.offsetTop}`);
+        println(`reinserted: span laid out: ${movedElement.firstChild.getClientRects().length > 0}`);
+        done();
+    });
+</script>

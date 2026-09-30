@@ -1,0 +1,5 @@
+initial hovered=[html,body,div#scroller,div#enabled-box] top=0
+onto disabled control hovered=[] top=200
+onto disabled control events=out:enabled-box
+past disabled control hovered=[html,body,div#scroller,div#last-box] top=400
+past disabled control events=over:last-box

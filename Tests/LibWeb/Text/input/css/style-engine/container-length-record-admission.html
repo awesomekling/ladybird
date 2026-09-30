@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .container { container-type: size; height: 20px; }
+    #first { width: 200px; }
+    #second { width: 300px; }
+    .target { width: 1px; }
+    .target.wide { width: 20cqw; }
+</style>
+<div class="container" id="first"><div class="target" id="first-target"></div></div>
+<div class="container" id="second"><div class="target" id="second-target"></div></div>
+<script>
+    test(() => {
+        const width = element => getComputedStyle(element).width;
+        const firstTarget = document.getElementById("first-target");
+        const secondTarget = document.getElementById("second-target");
+        first.getBoundingClientRect();
+        second.getBoundingClientRect();
+        println(`initial: ${width(firstTarget)}, ${width(secondTarget)}`);
+        const before = internals.styleEngineCounters();
+        firstTarget.classList.add("wide");
+        secondTarget.classList.add("wide");
+        internals.updateStyle();
+        const after = internals.styleEngineCounters();
+        println(`wide: ${width(firstTarget)}, ${width(secondTarget)}`);
+        println(`engine answered: ${after.engineComputedRecordDeltas > before.engineComputedRecordDeltas}`);
+        first.style.width = "250px";
+        println(`resized: ${width(firstTarget)}, ${width(secondTarget)}`);
+    });
+</script>

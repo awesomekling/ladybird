@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<div id="root"></div>
+<script>
+    // The element that acquires a transition in a later stabilization pass comes BEFORE the one
+    // that starts a transition in the first pass, so nothing has provisionally started a
+    // transition yet when its row runs. Its before-change style still has to be pinned then.
+    test(() => {
+        const depth = 12;
+        const rules = [
+            ".container { container-type: inline-size; width: 100px }",
+            "#target { color: rgb(0, 0, 0); transition: color 1s linear }",
+            "#late { color: rgb(0, 0, 0) }",
+            "@container (min-width: 200px) { .container { width: 300px } }",
+        ];
+
+        let parent = root;
+        for (let i = 0; i < depth; ++i) {
+            const container = document.createElement("div");
+            container.id = `c${i}`;
+            container.className = "container";
+            parent.appendChild(container);
+            parent = container;
+
+            rules.push(`#c${i} { container-name: c${i} }`);
+            rules.push(`@container c${i} (min-width: 200px) { #target { color: rgb(${i + 1}, 0, 0) } }`);
+        }
+        rules.push("@container c0 (min-width: 200px) { #late { color: rgb(1, 0, 0) } }");
+        rules.push("@container c1 (min-width: 200px) { #late { transition: color 1s linear } }");
+
+        // #late is first: its row runs before any transition has provisionally started.
+        const late = document.createElement("div");
+        late.id = "late";
+        parent.appendChild(late);
+        const target = document.createElement("div");
+        target.id = "target";
+        parent.appendChild(target);
+
+        const style = document.createElement("style");
+        style.textContent = rules.join("\n");
+        document.head.appendChild(style);
+        target.getBoundingClientRect();
+
+        document.getElementById("c0").style.width = "300px";
+        target.getBoundingClientRect();
+
+        println(`the first-pass transition started: ${target.getAnimations().length === 1}`);
+        println(`late transition used the committed baseline: ${late.getAnimations().length === 1}`);
+    });
+</script>

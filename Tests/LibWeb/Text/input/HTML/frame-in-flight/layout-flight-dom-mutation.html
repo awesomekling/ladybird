@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="container" style="width: 300px"><div id="first" style="height: 10px">first</div><div id="second" style="height: 10px">second</div></div>
+<script>
+    // DOM mutations while the layout pass that lays them out is in flight: the tree changes beside the pass, and the
+    // next layout sees every change, whichever boxes the pass in flight still holds.
+    asyncTest(async done => {
+        const inserted = await whileLayoutInFlight("before-run", () => {
+            first.style.height = "20px";
+        }, frame => {
+            const third = document.createElement("div");
+            third.id = "third";
+            third.style.height = "30px";
+            third.textContent = "third";
+            container.appendChild(third);
+            container.style.width = "200px";
+            return frame;
+        });
+        println(`insertion: held as armed: ${layoutHeldAsArmed(inserted, "before-run")}`);
+        await twoFrames();
+        println(`insertion: container height: ${container.offsetHeight}`);
+        println(`insertion: third width: ${third.offsetWidth}`);
+
+        // The node whose box the pass lays out leaves the tree, and the text of another changes.
+        const secondElement = second;
+        const removed = await whileLayoutInFlight("before-completion", () => {
+            secondElement.style.height = "40px";
+        }, frame => {
+            secondElement.remove();
+            first.firstChild.data = "first, changed";
+            first.style.height = "5px";
+            return frame;
+        });
+        println(`removal: held as armed: ${layoutHeldAsArmed(removed, "before-completion")}`);
+        await twoFrames();
+        println(`removal: container height: ${container.offsetHeight}`);
+        println(`removal: second connected: ${secondElement.isConnected}`);
+        println(`removal: first text: ${first.textContent}`);
+
+        // The whole subtree is replaced beside the pass.
+        const replaced = await whileLayoutInFlight("before-run", () => {
+            container.style.width = "250px";
+        }, frame => {
+            container.innerHTML = `<div id="fourth" style="height: 15px">fourth</div><span>inline</span>`;
+            return frame;
+        });
+        println(`replacement: held as armed: ${layoutHeldAsArmed(replaced, "before-run")}`);
+        await twoFrames();
+        println(`replacement: fourth width: ${document.getElementById("fourth").offsetWidth}`);
+        println(`replacement: children: ${container.children.length}`);
+        println(`replacement: span laid out: ${container.querySelector("span").getClientRects().length > 0}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(3)}`);
+        done();
+    });
+</script>

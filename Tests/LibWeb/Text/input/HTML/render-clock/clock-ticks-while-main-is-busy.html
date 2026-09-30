@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            height: 20px;
+        }
+        to {
+            height: 2020px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // A page animates a box's height and has animation frame callbacks at every frame, then runs a long task that
+    // touches no DOM. The render side goes on ticking the animation while the task runs: the height it presents grows.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const presentedHeight = () => internals.presentedBorderBox(box)?.height ?? 0;
+
+        let looping = true;
+        function frame() {
+            if (looping)
+                requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+        // Some frames of the loop first, until the page's animations have a clock (they never get one without clock
+        // frames).
+        for (let frames = 0; frames < 10 || (frames < 600 && !internals.renderClockTicks(document)); ++frames)
+            await new Promise(resolve => requestAnimationFrame(resolve));
+
+        // The task: at least 500 ms of plain JS, and on until the presented height has grown, however slowly the
+        // display ticks (at most 5 s).
+        const start = performance.now();
+        const heightBefore = presentedHeight();
+        let heightAfter = heightBefore;
+        let lastRead = start;
+        let sink = 0;
+        for (let now = start; now - start < 5000; now = performance.now()) {
+            for (let i = 0; i < 1000; ++i)
+                sink = (sink + Math.sqrt(i + sink)) % 1000;
+            if (now - lastRead < 20)
+                continue;
+            lastRead = now;
+            heightAfter = presentedHeight();
+            if (now - start >= 500 && heightAfter > heightBefore)
+                break;
+        }
+        looping = false;
+        println(`presented a box before the task: ${heightBefore >= 20}`);
+        println(`the presented height grows while the task runs: ${heightAfter > heightBefore}`);
+        done();
+    });
+</script>

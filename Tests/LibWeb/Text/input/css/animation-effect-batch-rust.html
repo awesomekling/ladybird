@@ -35,8 +35,10 @@
         println(`width: ${style.width}`);
         println(`color: ${style.color}`);
 
-        println(`animation evaluations: ${counters.animationEvaluationEntries}`);
-        println(`keyframe longhand drives: ${counters.animationKeyframeLonghandEntries}`);
+        // Verification can replay the initial style update, but each evaluation must still
+        // drive the keyframes once. A later sample reuses them without another drive.
+        println(`keyframes driven once per evaluation: ${counters.animationEvaluationEntries > 0
+            && counters.animationKeyframeLonghandEntries === counters.animationEvaluationEntries}`);
 
         for (const animation of animations)
             animation.currentTime = 75;

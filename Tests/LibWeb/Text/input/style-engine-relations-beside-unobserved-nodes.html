@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<style>
+    div { color: black; }
+    .a + .c { color: green; }
+    .a ~ .late { color: blue; }
+    #list > div:nth-child(2) { background-color: yellow; }
+    #list:has(> .gone) { border-top: 5px solid red; }
+    span:last-child { color: purple; }
+</style>
+<div id="list"><div class="a">A</div><div class="d">D</div><div class="c">C</div></div>
+<div id="spans"><span>one</span><span>two</span></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+        const d = list.querySelector(".d");
+        const c = list.querySelector(".c");
+
+        // A node inserted beside D that nothing observes, then D and it removed again.
+        const p = document.createElement("div");
+        p.className = "gone";
+        list.insertBefore(p, c);
+        d.remove();
+        p.remove();
+        println(`c after a: ${getComputedStyle(c).color}`);
+        println(`c is second child: ${getComputedStyle(c).backgroundColor}`);
+        println(`list has .gone: ${getComputedStyle(list).borderTopStyle}`);
+
+        // An unobserved node that stays, inserted beside a node that leaves.
+        const late = document.createElement("div");
+        late.className = "late";
+        list.appendChild(late);
+        c.remove();
+        println(`late after a: ${getComputedStyle(late).color}`);
+        println(`late is second child: ${getComputedStyle(late).backgroundColor}`);
+
+        // An unobserved node moved while unobserved, then observed.
+        const s = document.createElement("span");
+        s.textContent = "three";
+        spans.appendChild(s);
+        spans.insertBefore(s, spans.firstChild);
+        println(`last span: ${getComputedStyle(spans.lastElementChild).color}, first span: ${getComputedStyle(spans.firstElementChild).color}`);
+
+        // An unobserved subtree that gets its own unobserved child before anything reads it.
+        const outer = document.createElement("div");
+        outer.className = "a";
+        list.appendChild(outer);
+        const inner = document.createElement("div");
+        inner.className = "c";
+        list.appendChild(inner);
+        const deep = document.createElement("span");
+        inner.appendChild(deep);
+        println(`inner after a: ${getComputedStyle(inner).color}, deep: ${getComputedStyle(deep).color}`);
+    });
+</script>

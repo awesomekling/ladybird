@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+@keyframes pulse { from { opacity: 0.5; } to { opacity: 1; } }
+.item::before { content: "x"; animation: pulse 1s infinite; }
+</style>
+<div id="host"></div>
+<div id="list"></div>
+<script>
+asyncTest(async done => {
+    // A shadow tree defining keyframes of its own means not every @keyframes rule is in the
+    // document scope. A new element whose ::before names a document animation still gets a style.
+    host.attachShadow({ mode: "open" }).innerHTML = "<style>@keyframes other { to { color: red; } }</style><span>shadow</span>";
+    document.body.offsetWidth;
+    for (let i = 0; i < 3; ++i) {
+        const item = document.createElement("div");
+        item.className = "item";
+        item.textContent = `item ${i}`;
+        list.appendChild(item);
+    }
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    for (const item of list.children)
+        println(`${item.textContent}: ${getComputedStyle(item).display}, ${item.getBoundingClientRect().height > 0}, ${getComputedStyle(item, "::before").animationName}`);
+    done();
+});
+</script>

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="container"></div>
+<script>
+    // Video elements collected while a layout pass is in flight: finalizing one releases its video sink, and the
+    // collection may not wait for the pass there, since taking it back runs its effects, which allocate.
+    asyncTest(async done => {
+        let videos = [];
+        const frame = await whileLayoutInFlight("before-run", () => {
+            for (let i = 0; i < 10; ++i) {
+                const div = document.createElement("div");
+                div.textContent = `item ${i}`;
+                container.appendChild(div);
+                videos.push(document.createElement("video"));
+            }
+            const video = document.createElement("video");
+            container.appendChild(video);
+            videos.push(video);
+        }, frame => {
+            const joinsBefore = internals.forcedJoinCount("layout");
+            videos = null;
+            internals.gc();
+            return {
+                ...frame,
+                stillInFlight: internals.frameSchedulerState() === "in-flight",
+                reachedPass: internals.forcedJoinCount("layout") !== joinsBefore,
+            };
+        });
+        println(`held as armed: ${layoutHeldAsArmed(frame, "before-run")}`);
+        println(`the collection left the pass in flight: ${!frame.heldAt || frame.stillInFlight}`);
+        println(`the collection did not reach the pass: ${!frame.reachedPass}`);
+        await twoFrames();
+        println(`container laid out: ${container.offsetHeight > 0}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
+        done();
+    });
+</script>

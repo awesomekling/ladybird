@@ -1,0 +1,50 @@
+length at 25%: 17.5px
+length at 25% after recompute: 17.5px
+length at 60%: 28.000001px
+length at 60% after recompute: 28.000001px
+inheriting child: 25px 25px
+non-inherited parent: 25px
+non-inherited parent after recompute: 25px
+non-inherited child: 7px 7px
+color at 50%: rgb(50, 100, 20)
+color at 50% after recompute: rgb(50, 100, 20)
+number at 50%: 3
+number at 50% after recompute: 3
+percentage at 50%: 30%
+percentage at 50% after recompute: 30%
+length-percentage at 50%: calc(25% + 15px)
+length-percentage at 50% after recompute: calc(25% + 15px)
+list at 50%: 20px 40px
+list at 50% after recompute: 20px 40px
+no initial value at 50%: 40px
+no initial value at 50% after recompute: 40px
+universal syntax at 25%: alpha
+universal syntax at 25% after recompute: alpha
+universal syntax at 75%: omega
+universal syntax at 75% after recompute: omega
+invalid keyframe at 25%: 8.75px
+invalid keyframe at 25% after recompute: 8.75px
+invalid keyframe at 75%: 6.25px
+invalid keyframe at 75% after recompute: 6.25px
+wide keywords at 25%: 61.25px
+wide keywords at 25% after recompute: 61.25px
+wide keywords at 75%: 23.75px
+wide keywords at 75% after recompute: 23.75px
+unset on a non-inherited name: 17px
+unset on a non-inherited name after recompute: 17px
+unset on an inherited name: 71.75px
+unset on an inherited name after recompute: 71.75px
+mixed: 25px 25px
+mixed after recompute: 25px 25px
+important: 7px
+important after recompute: 7px
+synthesized: 46.5px
+synthesized after recompute: 46.5px
+late registration before: 10px
+late registration before after recompute: 10px
+late registration after: 20px
+late registration after after recompute: 20px
+drops while running: 25px
+drops while running after recompute: 25px
+drops after the animation is removed: 5px
+drops after the animation is removed after recompute: 5px

@@ -1,0 +1,21 @@
+<!doctype html>
+<script src="../../include.js"></script>
+<style>
+    @keyframes safe { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes unrelated { from { color: red; } to { color: blue; } }
+    .target { animation: safe 1000s linear -500s paused both; }
+</style>
+<script>
+    test(() => {
+        internals.updateStyle();
+        const before = internals.styleEngineCounters();
+        const target = document.createElement("div");
+        target.className = "target";
+        document.body.append(target);
+        internals.updateStyle();
+        const after = internals.styleEngineCounters();
+        println(`engine answered: ${after.engineComputedRecordDeltas > before.engineComputedRecordDeltas}`);
+        println(`animation names: ${target.getAnimations().map(animation => animation.animationName).join(",")}`);
+        println(`opacity: ${getComputedStyle(target).opacity}`);
+    });
+</script>

@@ -1,0 +1,3 @@
+the task reads its own changes: true
+the final background: rgb(42, 0, 0)
+the presented height moves while the task runs: true

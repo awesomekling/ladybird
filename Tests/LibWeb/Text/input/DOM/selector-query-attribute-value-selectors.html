@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<div id="root" data-exact="alpha">
+    <span id="exact" data-exact="alpha"></span>
+    <span id="includes" data-includes="zero needle one"></span>
+    <span id="dash" data-dash="en-US"></span>
+    <span id="prefix" data-prefix="prefix-rest"></span>
+    <span id="suffix" data-suffix="rest-suffix"></span>
+    <span id="substring" data-substring="around-middle-around"></span>
+    <span id="insensitive" data-insensitive="MiXeD"></span>
+</div>
+<script>
+    test(() => {
+        const root = document.getElementById("root");
+        for (let i = 0; i < 1000; ++i) {
+            const distractor = document.createElement("i");
+            distractor.setAttribute("data-noise", `unrelated-${i}`);
+            root.appendChild(distractor);
+        }
+        internals.updateStyle();
+
+        const check = (description, selector, expectedId) => {
+            const results = root.querySelectorAll(selector);
+            println(`${description}: ${results.length === 1 && results[0].id === expectedId}`);
+        };
+
+        check("exact", '[data-exact="alpha"]', "exact");
+        check("includes", '[data-includes~="needle"]', "includes");
+        check("dash match", '[data-dash|="en"]', "dash");
+        check("prefix", '[data-prefix^="prefix"]', "prefix");
+        check("suffix", '[data-suffix$="suffix"]', "suffix");
+        check("substring", '[data-substring*="middle"]', "substring");
+        check("ASCII insensitive", '[data-insensitive="mixed" i]', "insensitive");
+
+        const freshValue = document.createElement("span");
+        freshValue.setAttribute("data-includes", "fresh needle");
+        root.appendChild(freshValue);
+        const refreshedResults = root.querySelectorAll('[data-includes~="needle"]');
+        println(`new value is found: ${refreshedResults.length === 2}`);
+
+        const documentResults = document.querySelectorAll('[data-exact="alpha"]');
+        println(`document includes query root: ${documentResults.length === 2 && documentResults[0] === root && documentResults[1].id === "exact"}`);
+
+        const ordered = root.querySelectorAll('[data-suffix$="suffix"], [data-exact="alpha"]');
+        println(`selector-list results use tree order: ${ordered.length === 2 && ordered[0].id === "exact" && ordered[1].id === "suffix"}`);
+
+        const reorderedNodes = [];
+        for (let i = 0; i < 64; ++i) {
+            const node = document.createElement("b");
+            node.dataset.queryOrder = i;
+            root.prepend(node);
+            reorderedNodes.unshift(node);
+        }
+        const reorderedResults = root.querySelectorAll('[data-query-order]');
+        println(`moved results use tree order: ${reorderedResults.length === reorderedNodes.length && Array.from(reorderedResults).every((node, index) => node === reorderedNodes[index])}`);
+
+        const mutation = document.getElementById("exact");
+        mutation.setAttribute("data-exact", "beta");
+        println(`old value no longer matches: ${root.querySelectorAll('[data-exact="alpha"]').length === 0}`);
+        println(`new value matches: ${root.querySelectorAll('[data-exact="beta"]')[0] === mutation}`);
+
+        const staleCandidates = [];
+        for (let i = 0; i < 64; ++i) {
+            const candidate = document.createElement("span");
+            candidate.setAttribute("data-stale-value", "old");
+            root.appendChild(candidate);
+            staleCandidates.push(candidate);
+        }
+        internals.updateStyle();
+        for (const candidate of staleCandidates)
+            candidate.setAttribute("data-stale-value", "new");
+        const staleResults = root.querySelectorAll('[data-stale-value="old"]');
+        println(`value changed beside a style update no longer matches: ${staleResults.length === 0}`);
+
+        const restored = document.createElement("span");
+        restored.setAttribute("data-restored-value", "same");
+        root.appendChild(restored);
+        internals.updateStyle();
+        restored.removeAttribute("data-restored-value");
+        restored.setAttribute("data-restored-value", "same");
+        println(`value restored before a style update matches: ${root.querySelectorAll('[data-restored-value="same"]')[0] === restored}`);
+
+        const shared = document.createElement("span");
+        shared.setAttribute("data-first", "shared");
+        shared.setAttribute("data-second", "shared");
+        root.appendChild(shared);
+        shared.removeAttribute("data-first");
+        println(`value shared with a removed attribute matches: ${root.querySelectorAll('[data-second="shared"]')[0] === shared}`);
+
+        const host = document.createElement("div");
+        document.body.appendChild(host);
+        const outside = document.createElement("span");
+        outside.setAttribute("data-shadow", "outside");
+        document.body.appendChild(outside);
+        const shadowRoot = host.attachShadow({ mode: "open" });
+        shadowRoot.innerHTML = '<span id="shadow-outside" data-shadow="outside"></span><span id="shadow" data-shadow="inside"></span>';
+        const shadowResults = shadowRoot.querySelectorAll('[data-shadow$="side"]');
+        println(`shadow-root query stays scoped: ${shadowResults.length === 2 && shadowResults[0].id === "shadow-outside" && shadowResults[1].id === "shadow"}`);
+    });
+</script>

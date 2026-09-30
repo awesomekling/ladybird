@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    @keyframes first { to { color: green; } }
+    @keyframes second { to { color: blue; } }
+    #target { animation: first 1s -1s paused both; }
+    #target.changed { animation-name: second; }
+</style>
+<div id="target"></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+        println(`initial color: ${getComputedStyle(target).color}`);
+        const before = internals.getStyleInvalidationCounters();
+        target.className = "changed";
+        internals.updateStyle();
+        const after = internals.getStyleInvalidationCounters();
+        println(`warm plan stayed in the engine: ${after.elementStyleRecomputations === before.elementStyleRecomputations}`);
+        println(`updated color: ${getComputedStyle(target).color}`);
+    });
+</script>

@@ -1,0 +1,5 @@
+removed, before-run: held as armed: true, container laid out: true, children left: 0
+removed, before-completion: held as armed: true, container laid out: true, children left: 0
+adopted, before-run: held as armed: true, container laid out: true, children left: 0
+adopted, before-completion: held as armed: true, container laid out: true, children left: 0
+layout passes held: true

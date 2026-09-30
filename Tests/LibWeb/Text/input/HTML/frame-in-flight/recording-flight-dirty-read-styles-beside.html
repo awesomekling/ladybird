@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    body { margin: 0; }
+    #box { height: 10px; padding: 2px; border: 1px solid red; transition: width 100s; width: 100px; }
+    .tall #box { height: 40px; }
+    #box::before { content: "a"; }
+    .tall #box::before { content: "b"; }
+    #hidden { display: none; }
+    #hidden.other span { color: green; }
+</style>
+<div id="container"><div id="box"></div></div>
+<div id="hidden"><span id="hiddenSpan">hidden</span></div>
+<script>
+    // A read of layout geometry that finds the document dirty beside a recording of it in flight runs its style update
+    // and its layout as it would with no frame in flight: the recording reaches no style engine and no arena (it records
+    // a frame the document published), so the read neither takes it in nor needs a style update of its own beside it.
+    // The rendering update records a change that lays nothing out: where a flight runs layout and recording in one, a
+    // change that lays out goes into the flight, and a read has to wait for its layout.
+    let repaints = 0;
+    async function readBesideRecording(mutate, read) {
+        box.style.height = `${box.offsetHeight + 1}px`;
+        await twoFrames();
+        return whileFrameInFlight("mid-recording", () => {
+            box.style.backgroundColor = ++repaints % 2 ? "green" : "blue";
+        }, frame => {
+            mutate();
+            const joinsBefore = internals.forcedJoinCount("recording");
+            const value = read();
+            return {
+                ...frame,
+                value,
+                joins: internals.forcedJoinCount("recording") - joinsBefore,
+            };
+        });
+    }
+
+    function report(name, result) {
+        println(`${name}: held as armed: ${heldAsArmed(result, "mid-recording")}`);
+        println(`${name}: took the recording in once: ${!result.armed || result.joins === 1}`);
+        println(`${name}: read: ${result.value}`);
+    }
+
+    asyncTest(async done => {
+        // The update restyles a box, beside the recording.
+        const restyled = await readBesideRecording(() => {
+            container.className = "tall";
+            box.style.width = "200px";
+        }, () => box.offsetHeight);
+        report("restyled box", restyled);
+        println(`restyled box: transitions started: ${box.getAnimations().length}`);
+        println(`restyled box: ::before: ${getComputedStyle(box, "::before").content}`);
+
+        // The update reaches no box.
+        const boxless = await readBesideRecording(() => {
+            hidden.className = "other";
+        }, () => box.offsetHeight);
+        report("no box restyled", boxless);
+        println(`no box restyled: color: ${getComputedStyle(hiddenSpan).color}`);
+        done();
+    });
+</script>

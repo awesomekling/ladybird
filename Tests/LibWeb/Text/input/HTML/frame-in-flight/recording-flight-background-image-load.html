@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="first" style="height: 10px">first</div>
+<div id="painted" style="width: 100px; height: 100px"></div>
+<script>
+    // A background image that finishes loading beside a recording in flight: the recording reads the box's layer image
+    // facts, so they change once the frame has been taken in instead of taking the recording in.
+    const green = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAAAkElEQVR42u3QMQ0AAAjAsElHOhb4eJpUQWviSoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFnfFhDniR6UCYQPAAAAAElFTkSuQmCC";
+    asyncTest(async done => {
+        await twoFrames();
+        const result = await whileFrameInFlight("before-run", () => {
+            first.style.height = "20px";
+            painted.style.backgroundImage = `url(${green})`;
+            // The box's image observer starts the load when the rendering update builds it.
+            painted.offsetWidth;
+        }, async frame => {
+            const joinsBefore = internals.forcedJoinCount("recording");
+            // The image element shares the background image's resource request, and loads once that request has
+            // told the observer.
+            const picture = new Image();
+            await new Promise(resolve => {
+                picture.onload = resolve;
+                picture.src = green;
+            });
+            return {
+                ...frame,
+                joins: internals.forcedJoinCount("recording") - joinsBefore,
+                stillInFlight: !frame.armed || internals.frameInFlightHoldsDocument(),
+            };
+        });
+        println(`held as armed: ${heldAsArmed(result, "before-run")}`);
+        println(`forced joins of the recording: ${result.joins}`);
+        println(`recording still in flight after the load: ${result.stillInFlight}`);
+        await twoFrames();
+        println(`background image: ${getComputedStyle(painted).backgroundImage.startsWith("url(")}`);
+        done();
+    });
+</script>

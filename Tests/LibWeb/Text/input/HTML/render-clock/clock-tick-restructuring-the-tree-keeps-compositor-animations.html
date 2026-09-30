@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<style>
+    body {
+        margin: 0;
+    }
+    #clipper {
+        width: 100px;
+        height: 20px;
+        overflow: hidden;
+    }
+    #shrinker {
+        width: 2000px;
+        height: 20px;
+        background-color: blue;
+        animation: shrink 200s linear;
+    }
+    #spinner {
+        width: 20px;
+        height: 20px;
+        background-color: green;
+        animation: slide 200s linear infinite;
+    }
+    @keyframes slide {
+        from {
+            transform: translateX(0);
+        }
+        to {
+            transform: translateX(400px);
+        }
+    }
+    @keyframes shrink {
+        from {
+            width: 2000px;
+        }
+        to {
+            width: 0;
+        }
+    }
+</style>
+<div id="clipper"><div id="shrinker"></div></div>
+<div id="spinner"></div>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    // The rendering update runs, and its frame is presented.
+    async function renderAt(frameTime) {
+        internals.injectRenderingOpportunity(frameTime);
+        do
+            await nextTask();
+        while (internals.frameSchedulerState() !== "idle");
+    }
+    // A frame time past `time`, and not past now: the time a display tick at the next frame carries.
+    async function frameTimeAfter(time) {
+        while (performance.now() <= time + 1)
+            await nextTask();
+        return performance.now();
+    }
+
+    // A render clock tick whose layout ends the overflow of a box with overflow: hidden
+    // changes the structure of the visual context tree, which drops the compositor's animations. The tree the tick takes
+    // to the compositor carries the transform animation of the spinner still, whose node the tick kept: without it, the
+    // compositor would show the spinner where the main thread last laid it down, until the main thread's next frame.
+    asyncTest(async done => {
+        const clipper = document.getElementById("clipper");
+        const shrinker = document.getElementById("shrinker");
+        const animation = shrinker.getAnimations()[0];
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        // 10 px per second: the shrinker overflows the clipper at 105px, and fits it a second later.
+        animation.currentTime = 189500;
+        let frameTime = performance.now();
+        for (let i = 0; i < 3; ++i) {
+            frameTime = await frameTimeAfter(frameTime);
+            await renderAt(frameTime);
+        }
+        const overflowedBefore = clipper.scrollWidth > clipper.clientWidth;
+        const animationsBefore = internals.presentedCompositorAnimationCount();
+
+        const before = internals.getRenderClockCounters();
+        const epochBefore = internals.visualContextTreeStructuralEpoch();
+        frameTime = await frameTimeAfter(frameTime + 1000);
+        const taken = await internals.injectClockTick(frameTime);
+        const after = internals.getRenderClockCounters();
+        const epochChanged = internals.visualContextTreeStructuralEpoch() !== epochBefore;
+        const animationsAfterTick = internals.presentedCompositorAnimationCount();
+        println(`the compositor ran the spinner's animation before the tick: ${animationsBefore === 1}`);
+        println(`the tick ended the clipper's overflow and presented it: ${taken && epochChanged && after.ticksPresented === before.ticksPresented + 1}`);
+        println(`the tree the tick presented carries the spinner's animation: ${animationsAfterTick === 1}`);
+        frameTime = await frameTimeAfter(frameTime);
+        await renderAt(frameTime);
+        println(`the clipper fits after the tick: ${clipper.scrollWidth <= clipper.clientWidth}`);
+        println(`the next frame presents the spinner's animation: ${internals.presentedCompositorAnimationCount() === 1}`);
+        internals.setManualRenderingOpportunities(false);
+        done();
+    });
+</script>

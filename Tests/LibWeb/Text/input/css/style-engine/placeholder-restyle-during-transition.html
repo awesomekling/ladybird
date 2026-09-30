@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    #target::placeholder {
+        transition: opacity 100s linear;
+        opacity: 1;
+        font-size: 10px;
+    }
+    #target.fade::placeholder {
+        opacity: 0;
+    }
+    #target.big::placeholder {
+        font-size: 20px;
+    }
+</style>
+<input id="target" placeholder="Placeholder Text">
+<script>
+    test(() => {
+        const target = document.getElementById("target");
+        const placeholderStyle = () => getComputedStyle(target, "::placeholder");
+
+        println(`initial: opacity ${placeholderStyle().opacity}, font-size ${placeholderStyle().fontSize}`);
+        target.classList.add("fade");
+        println(`fading: opacity is above 0.9? ${parseFloat(placeholderStyle().opacity) > 0.9}`);
+
+        // Restyle the placeholder while its transition runs.
+        target.classList.add("big");
+        println(`restyled: font-size ${placeholderStyle().fontSize}`);
+        println(`restyled: opacity is above 0.9? ${parseFloat(placeholderStyle().opacity) > 0.9}`);
+    });
+</script>

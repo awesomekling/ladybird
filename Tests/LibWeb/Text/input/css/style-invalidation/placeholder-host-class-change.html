@@ -15,8 +15,11 @@
         for (const host of [input, textarea]) {
             internals.updateStyle();
             println(`${host.localName} before: ${getComputedStyle(host, "::placeholder").color}`);
+            const before = internals.getStyleInvalidationCounters();
             host.classList.add("on");
             internals.updateStyle();
+            const after = internals.getStyleInvalidationCounters();
+            println(`${host.localName} C++ recomputations: ${after.elementStyleRecomputations - before.elementStyleRecomputations}`);
             println(`${host.localName} after adding: ${getComputedStyle(host, "::placeholder").color}`);
             host.classList.remove("on");
             internals.updateStyle();

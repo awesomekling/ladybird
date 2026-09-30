@@ -1,0 +1,4 @@
+frames presented from the render side: true
+rendering updates meanwhile: at most one
+width is the one composed at currentTime: true
+color is the one composed at currentTime: true

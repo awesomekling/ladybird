@@ -1,0 +1,7 @@
+c after a: rgb(0, 128, 0)
+c is second child: rgb(255, 255, 0)
+list has .gone: none
+late after a: rgb(0, 0, 255)
+late is second child: rgb(255, 255, 0)
+last span: rgb(128, 0, 128), first span: rgb(0, 0, 0)
+inner after a: rgb(0, 128, 0), deep: rgb(128, 0, 128)

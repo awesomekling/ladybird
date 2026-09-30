@@ -1,0 +1,8 @@
+over a link: Hand
+over editable text: IBeam
+over an image map's area: Crosshair
+over the image beside the area: Arrow
+over an area inside editable content: IBeam
+over a disabled button: Arrow
+over a nested navigable: Wait
+over unselectable text: Arrow
