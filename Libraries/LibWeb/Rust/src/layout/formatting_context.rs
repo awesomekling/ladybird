@@ -811,7 +811,7 @@ pub(crate) struct ChildLayoutResult {
 pub(crate) struct RunRootOutcome {
     pub(super) cells: used_values::UsedValuesCellState,
     pub(super) own_metrics_sealed: bool,
-    pub(super) line_data: Option<std::rc::Rc<inline_content::InlineContent>>,
+    pub(super) line_data: Option<std::sync::Arc<inline_content::InlineContent>>,
     pub(super) rare: Option<used_values::UsedValuesRareData>,
 }
 
@@ -876,7 +876,8 @@ pub(crate) enum FlexLayoutGrowthState {
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct FlexLayoutItem {
-    pub(crate) node_id: Option<i64>,
+    /// The style node naming the item's DOM node; the devtools reader resolves it to a node id.
+    pub(crate) style_node: Option<u32>,
     pub(crate) rect: CssPixelRect,
     pub(crate) main_base_size: CssPixels,
     pub(crate) main_delta_size: CssPixels,
@@ -919,26 +920,72 @@ pub(crate) struct FlexLayoutData {
 #[repr(C)]
 pub struct FfiLayoutHostCallbacks {
     pub context: *mut c_void,
-    pub report_unexpected_fragmented_inline: unsafe extern "C" fn(*mut c_void, *mut c_void),
-    pub build_svg_facts: unsafe extern "C" fn(*mut c_void, *mut c_void) -> svg_formatting_context::FfiSvgElementFacts,
-    pub compute_svg_path: unsafe extern "C" fn(
-        *mut c_void,
-        *mut c_void,
-        svg_formatting_context::FfiSvgPathRequest,
-    ) -> svg_formatting_context::FfiSvgPathResult,
-    pub svg_image_bounding_box:
-        unsafe extern "C" fn(*mut c_void, *mut c_void, CssPixels, CssPixels) -> svg_formatting_context::FfiFloatRect,
-    pub anchor_lookup: unsafe extern "C" fn(*mut c_void, *mut c_void, usize, *const *mut c_void, usize) -> NodeSlotId,
-    pub node_unique_id: unsafe extern "C" fn(*mut c_void) -> i64,
-    /// Commit notifications: a box whose content size changed for container queries, and the
-    /// viewport shells whose committed size their content navigables must learn about.
-    pub content_size_changed_for_container_queries: unsafe extern "C" fn(*mut c_void, *mut c_void),
-    pub finish_commit: unsafe extern "C" fn(*mut c_void, *const *mut c_void, usize),
-    /// Fills the replaced-content facts of a live box shell ahead of a pass.
-    pub build_replaced_content_facts: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut FfiReplacedContentFacts),
-    /// The document element and body facts the viewport propagation decides from.
-    pub viewport_propagation_facts:
-        unsafe extern "C" fn(*mut c_void) -> viewport_propagation::FfiViewportPropagationFacts,
+    /// The commit messages a finished commit leaves for the document, in the order it produced
+    /// them.
+    pub deliver_commit_messages: unsafe extern "C" fn(*mut c_void, *const commit::FfiCommitMessage, usize),
+    /// The scroll containers finished layout tree builds gave a style, each with whether it is a
+    /// scroll snap container.
+    pub take_built_scroll_containers: unsafe extern "C" fn(*mut c_void, *const FfiBuiltScrollContainer, usize),
+}
+
+/// A scroll container a layout tree build gave a style, with whether it was a scroll snap
+/// container as the build finished.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiBuiltScrollContainer {
+    pub slot: NodeSlotId,
+    pub is_scroll_snap_container: bool,
+}
+
+#[derive(Clone, Copy)]
+/// The layout host is callable only from code that holds the main-thread capability.
+///
+/// ```compile_fail
+/// fn layout_stage(host: &libweb_rust::layout::formatting_context::LayoutHost) {
+///     unsafe { host.deliver_commit_messages(&[]) };
+/// }
+/// ```
+pub(crate) struct LayoutHost {
+    context: *mut c_void,
+    deliver_commit_messages: unsafe extern "C" fn(*mut c_void, *const commit::FfiCommitMessage, usize),
+    take_built_scroll_containers: unsafe extern "C" fn(*mut c_void, *const FfiBuiltScrollContainer, usize),
+}
+
+impl From<FfiLayoutHostCallbacks> for LayoutHost {
+    fn from(host: FfiLayoutHostCallbacks) -> Self {
+        Self {
+            context: host.context,
+            deliver_commit_messages: host.deliver_commit_messages,
+            take_built_scroll_containers: host.take_built_scroll_containers,
+        }
+    }
+}
+
+impl LayoutHost {
+    /// The layout host the arena the entry was called for answers to.
+    pub(crate) fn of(main_thread: &crate::stage::MainThread) -> Self {
+        main_thread
+            .host_tables()
+            .and_then(|host_tables| host_tables.layout_host.get())
+            .expect("layout node arena has no layout host")
+            .into()
+    }
+
+    pub(crate) unsafe fn deliver_commit_messages(
+        &self,
+        _: &crate::stage::MainThread,
+        messages: &[commit::FfiCommitMessage],
+    ) {
+        unsafe { (self.deliver_commit_messages)(self.context, messages.as_ptr(), messages.len()) };
+    }
+
+    pub(crate) unsafe fn take_built_scroll_containers(
+        &self,
+        _: &crate::stage::MainThread,
+        built: &[FfiBuiltScrollContainer],
+    ) {
+        unsafe { (self.take_built_scroll_containers)(self.context, built.as_ptr(), built.len()) };
+    }
 }
 
 /// # Safety
@@ -949,7 +996,26 @@ pub struct FfiLayoutHostCallbacks {
 pub unsafe extern "C" fn layout_arena_set_layout_host_callbacks(arena: *mut c_void, callbacks: FfiLayoutHostCallbacks) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_layout_host(Some(callbacks));
+    unsafe { crate::layout::HostTables::from_handle(arena) }
+        .layout_host
+        .set(Some(callbacks));
+}
+
+/// Records whether the document is an SVG file decoded as an image. It is fixed for the
+/// document's lifetime, so the layout stage holds it rather than asking at each SVG root.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_document_is_decoded_svg(arena: *mut c_void, is_decoded_svg: bool) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The caller keeps the arena alive for this synchronous call.
+    let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
+    crate::render_owner::send_arena_change(
+        document,
+        crate::render_owner::ArenaChange::DocumentIsDecodedSvg(is_decoded_svg),
+    );
 }
 
 /// # Safety
@@ -959,7 +1025,9 @@ pub unsafe extern "C" fn layout_arena_set_layout_host_callbacks(arena: *mut c_vo
 pub unsafe extern "C" fn layout_arena_clear_layout_host_callbacks(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_layout_host(None);
+    unsafe { crate::layout::HostTables::from_handle(arena) }
+        .layout_host
+        .set(None);
 }
 
 pub(crate) struct FormattingContextRun<'pass> {
@@ -971,7 +1039,7 @@ pub(crate) struct FormattingContextRun<'pass> {
     pub(crate) should_collect_devtools_layout_data: bool,
     pub(crate) treat_block_axis_percentage_insets_as_auto_beyond_root: bool,
     pub(crate) fragments: Option<std::rc::Rc<fragment_tree::RunFragmentBuilder>>,
-    pub(crate) previous_line_data: Option<std::rc::Rc<inline_content::InlineContent>>,
+    pub(crate) previous_line_data: Option<std::sync::Arc<inline_content::InlineContent>>,
 }
 
 impl<'pass> FormattingContextRun<'pass> {
@@ -1013,14 +1081,14 @@ enum FormattingContextImplementation<'pass> {
 }
 
 pub(crate) fn formatting_context_type_created_by_node_data(
-    data: &NodeData,
+    data: &impl node_facts::NodeShape,
     style: Option<ComputedValuesView<'_>>,
     parent_is_flex_or_grid_container: bool,
 ) -> Option<FormattingContextType> {
-    if data.kind.get() == crate::layout::node_data::NodeKind::SVGSVGBox {
+    if data.kind() == crate::layout::node_data::NodeKind::SVGSVGBox {
         return Some(FormattingContextType::Svg);
     }
-    let is_replaced_box = node_facts::kind_is_replaced_box(data.kind.get());
+    let is_replaced_box = node_facts::kind_is_replaced_box(data.kind());
     let can_have_children = node_facts::node_can_have_children(data);
     if is_replaced_box && can_have_children {
         return Some(FormattingContextType::ReplacedWithChildren);
@@ -1037,7 +1105,7 @@ pub(crate) fn formatting_context_type_created_by_node_data(
             display.is_table_inside() || display.is_internal_table() || display.is_table_caption()
         })
     {
-        return Some(if node_facts::kind_is_block_container(data.kind.get()) {
+        return Some(if node_facts::kind_is_block_container(data.kind()) {
             FormattingContextType::Block
         } else {
             FormattingContextType::InternalReplaced
@@ -1046,7 +1114,7 @@ pub(crate) fn formatting_context_type_created_by_node_data(
     let display = style.map(|style| style.display());
     // NB: A flex fieldset lays out its legend and anonymous content box in a block formatting context.
     //     Flex layout applies only to the anonymous content box.
-    if data.kind.get() == crate::layout::node_data::NodeKind::FieldSetBox
+    if data.kind() == crate::layout::node_data::NodeKind::FieldSetBox
         && display.is_some_and(|display| display.is_flex_inside())
     {
         return Some(FormattingContextType::Block);
@@ -1559,17 +1627,13 @@ pub(super) fn run_formatting_context(
         Ok(attempt) => attempt,
         Err(entry) => {
             let reuses_committed_subtree = entry.can_reuse_committed_subtree();
-            let _trace =
-                callbacks
-                    .arena()
-                    .layout_trace
-                    .run(callbacks.arena(), box_, fc_type, purpose, layout_mode, || {
-                        if reuses_committed_subtree {
-                            "REUSE SUBTREE"
-                        } else {
-                            "REPLAY FRAGMENTS"
-                        }
-                    });
+            let _trace = callbacks.arena().trace_run(box_, fc_type, purpose, layout_mode, || {
+                if reuses_committed_subtree {
+                    "REUSE SUBTREE"
+                } else {
+                    "REPLAY FRAGMENTS"
+                }
+            });
             let outputs = entry.outputs_to_replay(&cache_key);
             if entry.is_uncommitted() {
                 fc_run_cache::store_replayed_uncommitted_entry(&callbacks, box_, cache_key, &entry, &outputs);
@@ -1583,10 +1647,7 @@ pub(super) fn run_formatting_context(
     }
     let _trace = callbacks
         .arena()
-        .layout_trace
-        .run(callbacks.arena(), box_, fc_type, purpose, layout_mode, || {
-            cache_attempt.trace_action()
-        });
+        .trace_run(box_, fc_type, purpose, layout_mode, || cache_attempt.trace_action());
     let previous_line_data = cache_attempt.previous_line_data();
     let outputs = execute_formatting_context_run(
         purpose,
@@ -1620,284 +1681,292 @@ fn execute_formatting_context_run(
     callbacks: LayoutPass<'_>,
     input: LayoutInput,
     parent_block: Option<&block_formatting_context::BlockFormattingContext>,
-    previous_line_data: Option<std::rc::Rc<inline_content::InlineContent>>,
+    previous_line_data: Option<std::sync::Arc<inline_content::InlineContent>>,
     table_inline_layout: Option<table_formatting_context::TableInlineLayout>,
 ) -> RunOutputs {
     assert!(!box_.is_invalid());
     let root_used = root_cells.materialize_record();
-    RunRecords::with_root(callbacks.arena(), box_, root_containing_block, &root_used, |records| {
-        let run = FormattingContextRun {
-            purpose,
-            records,
-            box_,
-            layout_mode,
-            callbacks,
-            should_collect_devtools_layout_data,
-            treat_block_axis_percentage_insets_as_auto_beyond_root: input
-                .sizing
-                .treat_block_axis_percentage_insets_as_auto_beyond_root,
-            fragments: (layout_mode == LayoutMode::Normal && !purpose.is_measurement()).then(|| {
-                std::rc::Rc::new(fragment_tree::RunFragmentBuilder::new(
-                    box_,
-                    (!root_containing_block.is_invalid()).then_some(root_containing_block),
-                ))
-            }),
-            previous_line_data,
-        };
-        let run = &run;
-        if let Some(table_inline_layout) = table_inline_layout {
-            run.records
-                .store_table_inline_layout(table_inline_layout.table_box(), table_inline_layout);
-        }
-        let RootSizingOutcome {
-            body_input,
-            atomic_root_sizing_repeats_for_available_inline_sizes_at_or_above,
-        } = apply_root_sizing_directives(run, &input, fc_type);
-
-        let cached_atomic_block_size = if matches!(
-            input.participation,
-            ParticipationInParentFormattingContext::AtomicInline
-        ) {
-            run.sizing().apply_cached_intrinsic_inline_measurement(
-                run.box_,
-                input.available_space.inline_size,
-                body_input.available_space.block_size,
-                input.containing_block_constraints,
-            )
-        } else {
-            None
-        };
-        let mut implementation = None;
-        let mut result = if let Some((cached_block_size, cached_baselines)) = cached_atomic_block_size {
-            ChildLayoutResult {
-                automatic_content_block_size: cached_block_size,
-                baselines: cached_baselines,
-                ..ChildLayoutResult::default()
+    RunRecords::with_root(
+        callbacks.layout_scratch(),
+        callbacks.arena(),
+        box_,
+        root_containing_block,
+        &root_used,
+        |records| {
+            let run = FormattingContextRun {
+                purpose,
+                records,
+                box_,
+                layout_mode,
+                callbacks,
+                should_collect_devtools_layout_data,
+                treat_block_axis_percentage_insets_as_auto_beyond_root: input
+                    .sizing
+                    .treat_block_axis_percentage_insets_as_auto_beyond_root,
+                fragments: (layout_mode == LayoutMode::Normal && !purpose.is_measurement()).then(|| {
+                    std::rc::Rc::new(fragment_tree::RunFragmentBuilder::new(
+                        box_,
+                        (!root_containing_block.is_invalid()).then_some(root_containing_block),
+                    ))
+                }),
+                previous_line_data,
+            };
+            let run = &run;
+            if let Some(table_inline_layout) = table_inline_layout {
+                run.records
+                    .store_table_inline_layout(table_inline_layout.table_box(), table_inline_layout);
             }
-        } else if layout_mode == LayoutMode::Normal
-            && !purpose.is_measurement()
-            && matches!(
+            let RootSizingOutcome {
+                body_input,
+                atomic_root_sizing_repeats_for_available_inline_sizes_at_or_above,
+            } = apply_root_sizing_directives(run, &input, fc_type);
+
+            let cached_atomic_block_size = if matches!(
                 input.participation,
                 ParticipationInParentFormattingContext::AtomicInline
-            )
-            && fc_type == FormattingContextType::Block
-            && callbacks.first_child(box_).is_invalid()
-        {
-            // An empty atomic block context has no body output. Root sizing and finalization still
-            // run through the shared paths around this branch.
-            ChildLayoutResult::default()
-        } else {
-            let mut context_implementation = create_formatting_context_implementation(run, parent_grid, fc_type);
-            let result = match &mut context_implementation {
-                FormattingContextImplementation::Block(context) => {
-                    context.run(run, body_input);
-                    let baselines = context.derived_baselines_of_root_box();
-                    store_derived_baselines(run.records.used_values(run.box_), baselines);
-                    ChildLayoutResult {
-                        automatic_content_inline_size: context.automatic_content_inline_size(),
-                        min_content_inline_size_from_max_content_layout: context
-                            .min_content_inline_size_from_max_content_layout(),
-                        automatic_content_block_size: context.automatic_content_block_size(),
-                        automatic_line_clamp_max_lines: context.automatic_line_clamp_max_lines(),
-                        baselines,
-                        table_box_in_wrapper_border_box_block_size: context
-                            .table_box_in_wrapper_border_box_block_size(),
-                        ..ChildLayoutResult::default()
-                    }
-                }
-                FormattingContextImplementation::Flex(context) => {
-                    context.run(run, body_input);
-                    let baselines = context.derived_baselines_of_root_box();
-                    store_derived_baselines(run.records.used_values(run.box_), baselines);
-                    ChildLayoutResult {
-                        automatic_content_inline_size: context.automatic_content_inline_size(),
-                        automatic_content_block_size: context.automatic_content_block_size(),
-                        baselines,
-                        ..ChildLayoutResult::default()
-                    }
-                }
-                FormattingContextImplementation::Grid(context) => {
-                    context.run(run, body_input);
-                    let baselines = context.derived_baselines_of_root_box();
-                    store_derived_baselines(run.records.used_values(run.box_), baselines);
-                    ChildLayoutResult {
-                        automatic_content_inline_size: context.automatic_content_inline_size(),
-                        automatic_content_block_size: context.automatic_content_block_size(),
-                        baselines,
-                        ..ChildLayoutResult::default()
-                    }
-                }
-                FormattingContextImplementation::Table(context) => {
-                    context.run(run, body_input, run.records.take_table_inline_layout(run.box_));
-                    let baselines = context.derived_baselines_of_root_box();
-                    store_derived_baselines(run.records.used_values(run.box_), baselines);
-                    ChildLayoutResult {
-                        automatic_content_inline_size: context.automatic_content_inline_size(),
-                        automatic_content_block_size: context.automatic_content_block_size,
-                        baselines,
-                        ..ChildLayoutResult::default()
-                    }
-                }
-                FormattingContextImplementation::Svg(context) => {
-                    context.run(run, body_input);
-                    ChildLayoutResult::default()
-                }
-                FormattingContextImplementation::ReplacedWithChildren => {
-                    replaced_with_children_formatting_context::layout_replaced_with_children(run, body_input)
-                }
-                FormattingContextImplementation::InternalReplaced | FormattingContextImplementation::InternalDummy => {
-                    ChildLayoutResult::default()
-                }
-            };
-            implementation = Some(context_implementation);
-            result
-        };
-
-        // https://drafts.csswg.org/css-sizing-4/#intrinsic-size-override
-        // If an element has an explicit intrinsic inner size in an axis, then after laying out the element as normal for
-        // size containment, the size of the contents in that axis are instead treated as being the explicit intrinsic inner
-        // size instead of what was calculated in layout, and layout is performed again if necessary.
-        //
-        // Every formatting context reports its content sizes through ChildLayoutResult, so overriding here covers them all
-        // rather than one context's root-height path.
-        let containment_facts = NodeFacts::new(&run.callbacks, run.box_);
-        if containment_facts.node_has_size_containment() {
-            let style = containment_facts.style();
-            // https://drafts.csswg.org/css-contain-2/#containment-size
-            // Giving an element size containment makes its principal box a size containment box and has the following
-            // effects:
-            // 1. The intrinsic sizes of the size containment box are determined as if the element had no content, following
-            //    the same logic as when sizing as if empty.
-            result.automatic_content_inline_size = if style.contain_intrinsic_width_has_length() {
-                CssPixels::nearest_value_for(style.contain_intrinsic_width_px())
-            } else {
-                CssPixels::default()
-            };
-            result.automatic_content_block_size = if style.contain_intrinsic_height_has_length() {
-                CssPixels::nearest_value_for(style.contain_intrinsic_height_px())
-            } else {
-                CssPixels::default()
-            };
-        } else if containment_facts.node_has_inline_size_containment() {
-            // https://drafts.csswg.org/css-contain-2/#containment-inline-size
-            // "This means the inline-axis intrinsic sizes of the principal box are determined as if the element had
-            //  no content."
-            let style = containment_facts.style();
-            result.automatic_content_inline_size = if style.contain_intrinsic_width_has_length() {
-                CssPixels::nearest_value_for(style.contain_intrinsic_width_px())
-            } else {
-                CssPixels::default()
-            };
-        }
-
-        if containment_facts.has_preferred_aspect_ratio() {
-            result.content_block_size_for_aspect_ratio_minimum = content_block_size_for_aspect_ratio_minimum(
-                run.records,
-                &run.callbacks,
-                run.box_,
-                result.automatic_content_block_size,
-            );
-        }
-
-        match input.participation {
-            ParticipationInParentFormattingContext::BlockLevel => {
-                finalize_block_level_root(run, &input, &result);
-            }
-            ParticipationInParentFormattingContext::Float => {
-                finalize_float_root(run, &input, &result);
-            }
-            ParticipationInParentFormattingContext::AtomicInline => {
-                let automatic_content_block_size_of_completed_body_run = cached_atomic_block_size
-                    .is_none()
-                    .then_some(result.automatic_content_block_size);
-                finalize_atomic_root_block_size(
-                    run,
-                    &input,
-                    cached_atomic_block_size.map(|(block_size, _)| block_size),
-                    automatic_content_block_size_of_completed_body_run,
-                    parent_block,
-                );
-            }
-            ParticipationInParentFormattingContext::AbsolutelyPositioned(abspos_inputs) => {
-                abspos_engine::AbsposEngine::for_run(run).finalize_out_of_flow_root_after_inside_layout(
+            ) {
+                run.sizing().apply_cached_intrinsic_inline_measurement(
                     run.box_,
-                    abspos_inputs,
-                    Some(result.automatic_content_block_size),
-                );
-            }
-            ParticipationInParentFormattingContext::Item => {
-                if input.sizing.adopt_automatic_content_block_size {
-                    let used = run.records.used_values(run.box_);
-                    used.set_content_block_size(result.automatic_content_block_size);
-                }
-            }
-            ParticipationInParentFormattingContext::Root => {}
-        }
-        if matches!(
-            input.participation,
-            ParticipationInParentFormattingContext::BlockLevel
-                | ParticipationInParentFormattingContext::Float
-                | ParticipationInParentFormattingContext::AtomicInline
-        ) {
-            let sizing = run.sizing();
-            sizing.apply_automatic_minimum_block_size_from_aspect_ratio(
-                run.box_,
-                sizing.available_space_for_block_size_resolution(
-                    run.box_,
-                    input.available_space,
+                    input.available_space.inline_size,
+                    body_input.available_space.block_size,
                     input.containing_block_constraints,
-                ),
-                input.containing_block_constraints,
-                result.content_block_size_for_aspect_ratio_minimum,
-            );
-        }
-        result.omitted_line_layout = run.records.omitted_line_layout();
-        result.depends_on_percentage_block_size = run.sizing().resolve_percentage_block_size_dependency(run.box_);
+                )
+            } else {
+                None
+            };
+            let mut implementation = None;
+            let mut result = if let Some((cached_block_size, cached_baselines)) = cached_atomic_block_size {
+                ChildLayoutResult {
+                    automatic_content_block_size: cached_block_size,
+                    baselines: cached_baselines,
+                    ..ChildLayoutResult::default()
+                }
+            } else if layout_mode == LayoutMode::Normal
+                && !purpose.is_measurement()
+                && matches!(
+                    input.participation,
+                    ParticipationInParentFormattingContext::AtomicInline
+                )
+                && fc_type == FormattingContextType::Block
+                && callbacks.first_child(box_).is_invalid()
+            {
+                // An empty atomic block context has no body output. Root sizing and finalization still
+                // run through the shared paths around this branch.
+                ChildLayoutResult::default()
+            } else {
+                let mut context_implementation = create_formatting_context_implementation(run, parent_grid, fc_type);
+                let result = match &mut context_implementation {
+                    FormattingContextImplementation::Block(context) => {
+                        context.run(run, body_input);
+                        let baselines = context.derived_baselines_of_root_box();
+                        store_derived_baselines(run.records.used_values(run.box_), baselines);
+                        ChildLayoutResult {
+                            automatic_content_inline_size: context.automatic_content_inline_size(),
+                            min_content_inline_size_from_max_content_layout: context
+                                .min_content_inline_size_from_max_content_layout(),
+                            automatic_content_block_size: context.automatic_content_block_size(),
+                            automatic_line_clamp_max_lines: context.automatic_line_clamp_max_lines(),
+                            baselines,
+                            table_box_in_wrapper_border_box_block_size: context
+                                .table_box_in_wrapper_border_box_block_size(),
+                            ..ChildLayoutResult::default()
+                        }
+                    }
+                    FormattingContextImplementation::Flex(context) => {
+                        context.run(run, body_input);
+                        let baselines = context.derived_baselines_of_root_box();
+                        store_derived_baselines(run.records.used_values(run.box_), baselines);
+                        ChildLayoutResult {
+                            automatic_content_inline_size: context.automatic_content_inline_size(),
+                            automatic_content_block_size: context.automatic_content_block_size(),
+                            baselines,
+                            ..ChildLayoutResult::default()
+                        }
+                    }
+                    FormattingContextImplementation::Grid(context) => {
+                        context.run(run, body_input);
+                        let baselines = context.derived_baselines_of_root_box();
+                        store_derived_baselines(run.records.used_values(run.box_), baselines);
+                        ChildLayoutResult {
+                            automatic_content_inline_size: context.automatic_content_inline_size(),
+                            automatic_content_block_size: context.automatic_content_block_size(),
+                            baselines,
+                            ..ChildLayoutResult::default()
+                        }
+                    }
+                    FormattingContextImplementation::Table(context) => {
+                        context.run(run, body_input, run.records.take_table_inline_layout(run.box_));
+                        let baselines = context.derived_baselines_of_root_box();
+                        store_derived_baselines(run.records.used_values(run.box_), baselines);
+                        ChildLayoutResult {
+                            automatic_content_inline_size: context.automatic_content_inline_size(),
+                            automatic_content_block_size: context.automatic_content_block_size,
+                            baselines,
+                            ..ChildLayoutResult::default()
+                        }
+                    }
+                    FormattingContextImplementation::Svg(context) => {
+                        context.run(run, body_input);
+                        ChildLayoutResult::default()
+                    }
+                    FormattingContextImplementation::ReplacedWithChildren => {
+                        replaced_with_children_formatting_context::layout_replaced_with_children(run, body_input)
+                    }
+                    FormattingContextImplementation::InternalReplaced
+                    | FormattingContextImplementation::InternalDummy => ChildLayoutResult::default(),
+                };
+                implementation = Some(context_implementation);
+                result
+            };
 
-        let take_run_fragments = || {
-            run.fragments
-                .as_ref()
-                .map(|fragments| fragments.take_unplaced_root(run.records, &run.callbacks))
-        };
+            // https://drafts.csswg.org/css-sizing-4/#intrinsic-size-override
+            // If an element has an explicit intrinsic inner size in an axis, then after laying out the element as normal for
+            // size containment, the size of the contents in that axis are instead treated as being the explicit intrinsic inner
+            // size instead of what was calculated in layout, and layout is performed again if necessary.
+            //
+            // Every formatting context reports its content sizes through ChildLayoutResult, so overriding here covers them all
+            // rather than one context's root-height path.
+            let containment_facts = NodeFacts::new(&run.callbacks, run.box_);
+            if containment_facts.node_has_size_containment() {
+                let style = containment_facts.style();
+                // https://drafts.csswg.org/css-contain-2/#containment-size
+                // Giving an element size containment makes its principal box a size containment box and has the following
+                // effects:
+                // 1. The intrinsic sizes of the size containment box are determined as if the element had no content, following
+                //    the same logic as when sizing as if empty.
+                result.automatic_content_inline_size = if style.contain_intrinsic_width_has_length() {
+                    CssPixels::nearest_value_for(style.contain_intrinsic_width_px())
+                } else {
+                    CssPixels::default()
+                };
+                result.automatic_content_block_size = if style.contain_intrinsic_height_has_length() {
+                    CssPixels::nearest_value_for(style.contain_intrinsic_height_px())
+                } else {
+                    CssPixels::default()
+                };
+            } else if containment_facts.node_has_inline_size_containment() {
+                // https://drafts.csswg.org/css-contain-2/#containment-inline-size
+                // "This means the inline-axis intrinsic sizes of the principal box are determined as if the element had
+                //  no content."
+                let style = containment_facts.style();
+                result.automatic_content_inline_size = if style.contain_intrinsic_width_has_length() {
+                    CssPixels::nearest_value_for(style.contain_intrinsic_width_px())
+                } else {
+                    CssPixels::default()
+                };
+            }
 
-        let registered_abspos_children_could_never_be_laid_out = run.fragments.is_none();
-        if registered_abspos_children_could_never_be_laid_out {
-            return run.outputs(
+            if containment_facts.has_preferred_aspect_ratio() {
+                result.content_block_size_for_aspect_ratio_minimum = content_block_size_for_aspect_ratio_minimum(
+                    run.records,
+                    &run.callbacks,
+                    run.box_,
+                    result.automatic_content_block_size,
+                );
+            }
+
+            match input.participation {
+                ParticipationInParentFormattingContext::BlockLevel => {
+                    finalize_block_level_root(run, &input, &result);
+                }
+                ParticipationInParentFormattingContext::Float => {
+                    finalize_float_root(run, &input, &result);
+                }
+                ParticipationInParentFormattingContext::AtomicInline => {
+                    let automatic_content_block_size_of_completed_body_run = cached_atomic_block_size
+                        .is_none()
+                        .then_some(result.automatic_content_block_size);
+                    finalize_atomic_root_block_size(
+                        run,
+                        &input,
+                        cached_atomic_block_size.map(|(block_size, _)| block_size),
+                        automatic_content_block_size_of_completed_body_run,
+                        parent_block,
+                    );
+                }
+                ParticipationInParentFormattingContext::AbsolutelyPositioned(abspos_inputs) => {
+                    abspos_engine::AbsposEngine::for_run(run).finalize_out_of_flow_root_after_inside_layout(
+                        run.box_,
+                        abspos_inputs,
+                        Some(result.automatic_content_block_size),
+                    );
+                }
+                ParticipationInParentFormattingContext::Item => {
+                    if input.sizing.adopt_automatic_content_block_size {
+                        let used = run.records.used_values(run.box_);
+                        used.set_content_block_size(result.automatic_content_block_size);
+                    }
+                }
+                ParticipationInParentFormattingContext::Root => {}
+            }
+            if matches!(
+                input.participation,
+                ParticipationInParentFormattingContext::BlockLevel
+                    | ParticipationInParentFormattingContext::Float
+                    | ParticipationInParentFormattingContext::AtomicInline
+            ) {
+                let sizing = run.sizing();
+                sizing.apply_automatic_minimum_block_size_from_aspect_ratio(
+                    run.box_,
+                    sizing.available_space_for_block_size_resolution(
+                        run.box_,
+                        input.available_space,
+                        input.containing_block_constraints,
+                    ),
+                    input.containing_block_constraints,
+                    result.content_block_size_for_aspect_ratio_minimum,
+                );
+            }
+            result.omitted_line_layout = run.records.omitted_line_layout();
+            result.depends_on_percentage_block_size = run.sizing().resolve_percentage_block_size_dependency(run.box_);
+
+            let take_run_fragments = || {
+                run.fragments
+                    .as_ref()
+                    .map(|fragments| fragments.take_unplaced_root(run.records, &run.callbacks))
+            };
+
+            let registered_abspos_children_could_never_be_laid_out = run.fragments.is_none();
+            if registered_abspos_children_could_never_be_laid_out {
+                return run.outputs(
+                    result,
+                    take_run_fragments(),
+                    atomic_root_sizing_repeats_for_available_inline_sizes_at_or_above,
+                );
+            }
+            if let Some(implementation) = implementation {
+                match &implementation {
+                    FormattingContextImplementation::Block(_) => {}
+                    FormattingContextImplementation::Table(_) => {
+                        let box_ = run.box_;
+                        register_table_abspos_descendants(run, box_);
+                    }
+                    FormattingContextImplementation::Flex(context) => {
+                        context.parent_did_dimension();
+                    }
+                    FormattingContextImplementation::Grid(context) => {
+                        context.parent_did_dimension();
+                    }
+                    FormattingContextImplementation::Svg(_) | FormattingContextImplementation::ReplacedWithChildren => {
+                    }
+                    FormattingContextImplementation::InternalReplaced
+                    | FormattingContextImplementation::InternalDummy => {
+                        return run.outputs(
+                            result,
+                            take_run_fragments(),
+                            atomic_root_sizing_repeats_for_available_inline_sizes_at_or_above,
+                        );
+                    }
+                }
+            }
+            run.records.used_values(run.box_).seal_own_metrics();
+            run.outputs(
                 result,
                 take_run_fragments(),
                 atomic_root_sizing_repeats_for_available_inline_sizes_at_or_above,
-            );
-        }
-        if let Some(implementation) = implementation {
-            match &implementation {
-                FormattingContextImplementation::Block(_) => {}
-                FormattingContextImplementation::Table(_) => {
-                    let box_ = run.box_;
-                    register_table_abspos_descendants(run, box_);
-                }
-                FormattingContextImplementation::Flex(context) => {
-                    context.parent_did_dimension();
-                }
-                FormattingContextImplementation::Grid(context) => {
-                    context.parent_did_dimension();
-                }
-                FormattingContextImplementation::Svg(_) | FormattingContextImplementation::ReplacedWithChildren => {}
-                FormattingContextImplementation::InternalReplaced | FormattingContextImplementation::InternalDummy => {
-                    return run.outputs(
-                        result,
-                        take_run_fragments(),
-                        atomic_root_sizing_repeats_for_available_inline_sizes_at_or_above,
-                    );
-                }
-            }
-        }
-        run.records.used_values(run.box_).seal_own_metrics();
-        run.outputs(
-            result,
-            take_run_fragments(),
-            atomic_root_sizing_repeats_for_available_inline_sizes_at_or_above,
-        )
-    })
+            )
+        },
+    )
 }
 
 fn finalize_atomic_root_block_size(
@@ -2109,6 +2178,25 @@ pub(crate) fn layout_inside_child(
     ChildLayoutOutcome::Created(result)
 }
 
+/// Lays out a child that establishes a formatting context of its own, as every flex and grid item does, whatever its
+/// facts say: an item whose facts lag its container's style still gets a context of its own rather than re-entering
+/// its container's. Returns None where the child's layout was skipped.
+pub(crate) fn layout_inside_independent_child(
+    run: &FormattingContextRun,
+    parent_grid: Option<&grid_formatting_context::GridFormattingContext>,
+    child: Node,
+    input: LayoutInput,
+) -> Option<ChildLayoutResult> {
+    match layout_inside_child(run, None, parent_grid, child, LayoutMode::Normal, input, true) {
+        ChildLayoutOutcome::Created(result) => Some(result),
+        ChildLayoutOutcome::Skipped => None,
+        ChildLayoutOutcome::ReenterCurrent => {
+            debug_assert!(false, "an independent child run re-entered its parent's context");
+            None
+        }
+    }
+}
+
 /// Runs a table cell's committing layout while its table still sizes rows, beside the cell's record, and keeps the
 /// outputs in the run cache. The cell's committing run, once the rows are sized, replays them: its input differs only
 /// in the intrinsic block padding, which the contents of an eligible cell never observe (see
@@ -2158,8 +2246,7 @@ pub(crate) fn run_table_cell_ahead_of_its_intrinsic_block_padding(
         Ok(fc_run_cache::FcRunCacheAttempt::Bypass) => return None,
         Ok(attempt) => attempt,
         Err(entry) => {
-            let _trace = run.callbacks.arena().layout_trace.run(
-                run.callbacks.arena(),
+            let _trace = run.callbacks.arena().trace_run(
                 cell,
                 FormattingContextType::Block,
                 LayoutPurpose::Commit,
@@ -2169,8 +2256,7 @@ pub(crate) fn run_table_cell_ahead_of_its_intrinsic_block_padding(
             return Some(entry.outputs.result);
         }
     };
-    let _trace = run.callbacks.arena().layout_trace.run(
-        run.callbacks.arena(),
+    let _trace = run.callbacks.arena().trace_run(
         cell,
         FormattingContextType::Block,
         LayoutPurpose::Commit,
@@ -2279,67 +2365,52 @@ pub(crate) fn treat_block_axis_percentage_insets_as_auto_beyond_anonymous_child_
     )
 }
 
-/// # Safety
-///
-/// `arena` must be a live handle with a registered layout host, used on the document thread,
-/// and `viewport` must be its live viewport box.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_run_root_layout(
-    arena: *mut c_void,
-    viewport: NodeSlotId,
-    viewport_inline_size_raw: i32,
-    viewport_block_size_raw: i32,
-    document_in_quirks_mode: bool,
-    should_collect_devtools_layout_data: bool,
-) {
-    // SAFETY: Guaranteed by the entry point's contract.
-    unsafe {
-        run_root_layout(
-            arena,
-            viewport,
-            viewport_inline_size_raw,
-            viewport_block_size_raw,
-            document_in_quirks_mode,
-            should_collect_devtools_layout_data,
-        );
-    }
-}
-
-/// Lays the document out from its viewport: propagates the root and body styles the viewport
-/// takes over, syncs enrolled content, computes and commits fragments, and notifies the host.
-///
-/// # Safety
-///
-/// `arena_handle` must be a live handle with a registered layout host, used on the document
-/// thread, and `root` must be its live viewport box.
-pub(crate) unsafe fn run_root_layout(
-    arena_handle: *mut c_void,
+/// What a layout stage runs on. The stage holds the arena exclusively while the owning thread
+/// waits for it, so the input is sendable because the arena is, not because it is shared.
+struct LayoutStageInput<'a> {
+    arena: &'a mut LayoutNodeArena,
     root: NodeSlotId,
     viewport_inline_size_raw: i32,
     viewport_block_size_raw: i32,
     document_in_quirks_mode: bool,
     should_collect_devtools_layout_data: bool,
-) {
-    assert!(!arena_handle.is_null(), "layout node arena handle is null");
-    assert!(!root.is_invalid());
-    // SAFETY: The caller keeps the arena alive for this synchronous call. The host table is
-    // copied out so no arena borrow spans a host callback.
-    let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_host();
-    // SAFETY: The document answers from its elements' style records without entering the arena.
-    let propagation_facts = unsafe { (host.viewport_propagation_facts)(host.context) };
-    // The style rewrites enroll the affected boxes' text children for content sync, so the sync
-    // follows them, and both precede the pass, which caches decoded style.
-    // SAFETY: As above; the propagation borrows the arena only for its own call.
-    viewport_propagation::propagate_root_styles_to_viewport(
-        unsafe { LayoutNodeArena::from_handle(arena_handle) },
+}
+
+/// The fragments a layout stage computed, which its commit consumes on the document thread.
+pub(crate) struct LayoutStageOutput(fragment_tree::CompletedPassFragments);
+
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<LayoutStageInput<'static>>();
+    assert_send::<LayoutStageOutput>();
+    assert_send::<LayoutScratch>();
+};
+
+/// The render state's arena and layout scratch for a stage, with what the scratch keeps for the slots the arena freed
+/// or recorded as stale since the last pass dropped, so the stage never reads them.
+///
+/// # Safety
+///
+/// `state` must be the live render state of the stage's document, which nothing else reaches while the stage runs.
+unsafe fn arena_and_scratch_for_stage<'a>(state: *mut ArenaHandle) -> (&'a mut LayoutNodeArena, &'a mut LayoutScratch) {
+    // SAFETY: Guaranteed by the caller.
+    let (arena, scratch) = unsafe { &mut *state }.arena_and_scratch();
+    scratch.drop_slots(arena.take_intrinsic_size_caches_to_drop());
+    (arena, scratch)
+}
+
+/// The host-free full layout stage. Host callbacks require a `MainThread` capability, which this
+/// function neither receives nor stores in its input.
+fn run_root_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -> LayoutStageOutput {
+    let LayoutStageInput {
+        arena,
         root,
-        &propagation_facts,
-    );
-    // SAFETY: As above.
-    unsafe { super::layout_node_arena::sync_enrolled_content_for_layout(arena_handle) };
-    // SAFETY: The host keeps the document's layout inputs alive and unchanged
-    // while computing fragments. Nested measurements only mutate side caches.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+        viewport_inline_size_raw,
+        viewport_block_size_raw,
+        document_in_quirks_mode,
+        should_collect_devtools_layout_data,
+    } = stage;
+    let arena: &LayoutNodeArena = arena;
     arena.begin_active_layout_pass();
     // NB: The tree builder derives the facts of rebuilt subtrees. Unclassified invalidations
     // require deriving them for the entire tree instead.
@@ -2353,8 +2424,9 @@ pub(crate) unsafe fn run_root_layout(
     }
     let callbacks = LayoutPass::new(
         arena,
-        &host,
+        scratch,
         CssPixels::from_raw(viewport_inline_size_raw),
+        CssPixels::from_raw(viewport_block_size_raw),
         document_in_quirks_mode,
     );
     let viewport_inline_size = CssPixels::from_raw(viewport_inline_size_raw);
@@ -2365,8 +2437,8 @@ pub(crate) unsafe fn run_root_layout(
         percentage_basis_block_size: Some(viewport_block_size),
         ..ContainingBlockConstraints::default()
     };
-    let pass_fragments = RunRecords::with_unrooted(arena, root, NodeSlotId::INVALID, |entry_records| {
-        let _trace = arena.layout_trace.pass(arena, None);
+    let pass_fragments = RunRecords::with_unrooted(scratch, arena, root, NodeSlotId::INVALID, |entry_records| {
+        let _trace = arena.trace_pass(None);
         let viewport_used = entry_records.create_used_values(&callbacks, root, root_constraints);
         let entry_fragments = std::rc::Rc::new(fragment_tree::RunFragmentBuilder::new_entry_accumulator(root));
         let entry_run = FormattingContextRun {
@@ -2424,10 +2496,216 @@ pub(crate) unsafe fn run_root_layout(
             should_collect_devtools_layout_data,
         )
     });
-    // SAFETY: Computation has finished and its input borrows are no longer used.
-    let arena = unsafe { commit_entry_pass(arena_handle, &host, root, &pass_fragments) };
-    arena.did_commit_full_layout(root);
-    arena.end_active_layout_pass();
+    LayoutStageOutput(pass_fragments)
+}
+
+/// The arena half ahead of a root layout, from what the document answered for it beforehand:
+/// propagates the root and body styles, as their published style records have them, to the
+/// viewport and syncs enrolled content. It needs no host, and what it owes the host is paid with the pass's commit's
+/// handbacks, which must be followed by `end_layout_pass_preparation_handbacks`.
+///
+/// # Safety
+///
+/// `state` must be the live render state of the pass's document, which nothing else reaches while
+/// the pass runs, `root` its live viewport box, and nothing may have freed a row since `content`
+/// was read.
+pub(crate) unsafe fn prepare_root_layout_from_sources(
+    state: *mut ArenaHandle,
+    root: NodeSlotId,
+    content: super::layout_node_arena::EnrolledContentSources,
+) {
+    assert!(!root.is_invalid());
+    // SAFETY: Guaranteed by the caller; the propagation borrows the arena only for its own call.
+    let arena = unsafe { &*state }.arena();
+    arena.begin_layout_pass_preparation_handbacks();
+    let propagation_facts = viewport_propagation::viewport_propagation_facts(arena);
+    viewport_propagation::propagate_root_styles_to_viewport(arena, root, &propagation_facts);
+    // The style rewrites enroll the affected boxes' text children for content sync, so the sync
+    // follows them, and both precede the pass, which caches decoded style.
+    // SAFETY: As above.
+    unsafe { super::layout_node_arena::apply_enrolled_content_sources(state, content) };
+}
+
+/// Computes the fragments of a root layout without the host, in the unit or the rendering update
+/// the render owner runs it in.
+///
+/// # Safety
+///
+/// `state` must be the live render state of the pass's document, which nothing else reaches while
+/// the pass runs, with the arena prepared by [`prepare_root_layout_from_sources`] and `root` its
+/// live viewport box.
+pub(crate) unsafe fn compute_root_layout(
+    state: *mut ArenaHandle,
+    root: NodeSlotId,
+    viewport_inline_size_raw: i32,
+    viewport_block_size_raw: i32,
+    document_in_quirks_mode: bool,
+    should_collect_devtools_layout_data: bool,
+) -> LayoutStageOutput {
+    // SAFETY: Guaranteed by the caller; the arena's published inputs stay unchanged for the
+    // synchronous stage run.
+    let (arena, scratch) = unsafe { arena_and_scratch_for_stage(state) };
+    let input = LayoutStageInput {
+        arena,
+        root,
+        viewport_inline_size_raw,
+        viewport_block_size_raw,
+        document_in_quirks_mode,
+        should_collect_devtools_layout_data,
+    };
+    run_root_layout_stage(input, scratch)
+}
+
+/// Commits a computed root layout to the arena without the host. The arena half is settled by
+/// [`PendingLayoutCommit::settle_ahead_of_host`], and the host half, which pays what the commit owes
+/// the host and notifies it, is left to [`DeferredLayoutCommitHostHalf::deliver`].
+///
+/// # Safety
+///
+/// `state` must be the live render state of the pass's document, which nothing else reaches while
+/// the pass runs, and `output` must be the computation of `root`, its live viewport box.
+pub(crate) unsafe fn commit_root_layout_to_arena(
+    state: *mut ArenaHandle,
+    root: NodeSlotId,
+    output: &LayoutStageOutput,
+) -> PendingLayoutCommit {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { commit_entry_pass_to_arena(state, root, &output.0, CommittedEntry::Root) }
+}
+
+/// Which layout entry a [`PendingLayoutCommit`] committed.
+enum CommittedEntry {
+    Root,
+    Subtree,
+}
+
+/// A pass committed to the arena whose host half has not run yet. Until it has, the host has not
+/// heard of the commit and the arena still counts the pass as running.
+#[must_use]
+pub(crate) struct PendingLayoutCommit {
+    state: *mut ArenaHandle,
+    root: NodeSlotId,
+    entry: CommittedEntry,
+    notifications: commit::CommitNotifications,
+}
+
+/// The host half of a commit whose arena half has already settled, so the frame could go on without
+/// the document thread. What the commit owes the host and the notifications it produced wait here,
+/// in order, for the frame's next join.
+#[must_use]
+pub(crate) struct DeferredLayoutCommitHostHalf {
+    state: *mut ArenaHandle,
+    handbacks: crate::layout::layout_node_arena::HostHandbacks,
+    notifications: commit::CommitNotifications,
+}
+
+impl PendingLayoutCommit {
+    /// Settles the arena-local bookkeeping every layout entry owes its caller before the commit's
+    /// host half runs: cache maintenance and the reset of the update flags the committed subtree
+    /// satisfied. The frame goes on from the settled arena without a join. Whatever the host code
+    /// marks inside the subtree once its half runs is left for another pass.
+    ///
+    /// # Safety
+    ///
+    /// The arena must still be live, with no borrow taken during the pass still in use, and the
+    /// frame must deliver the returned host half, in commit order, before the host half of any
+    /// later commit.
+    pub(crate) unsafe fn settle_ahead_of_host(self) -> DeferredLayoutCommitHostHalf {
+        let Self {
+            state,
+            root,
+            entry,
+            notifications,
+        } = self;
+        // SAFETY: Guaranteed by the caller; commit's mutable borrow has ended.
+        let (arena, scratch) = unsafe { &mut *state }.arena_and_scratch();
+        let arena: &LayoutNodeArena = arena;
+        let handbacks = arena.take_host_handbacks_ahead_of_payment();
+        scratch.clear_inline_item_stashes();
+        arena.end_layout_pass();
+        scratch.end_layout_pass();
+        arena.reset_layout_update_flags_in_subtree(root);
+        match entry {
+            CommittedEntry::Root => arena.did_commit_full_layout(root),
+            CommittedEntry::Subtree => {
+                // Commit reset the subtree's rows, and its new size may affect ancestor scrollable
+                // overflow. Partial relayout roots are SVG viewports or abspos boxes, never SVG
+                // content boxes that would require a new layout instead of an overflow update.
+                debug_assert!(!node_facts::kind_is_svg_box(arena.data(root).kind.get()));
+                arena.schedule_scrollable_overflow_recalculation(root);
+            }
+        }
+        arena.end_active_layout_pass();
+        DeferredLayoutCommitHostHalf {
+            state,
+            handbacks,
+            notifications,
+        }
+    }
+}
+
+impl DeferredLayoutCommitHostHalf {
+    /// Whether paying this leaves the host no style or layout work to do, so a frame made from the
+    /// arena ahead of the payment is the one the document shows once it is paid.
+    pub(crate) fn leaves_the_host_no_work(&self) -> bool {
+        self.handbacks.only_reset_paintable_rows() && self.notifications.leave_the_host_no_work()
+    }
+
+    /// Whether the commit resized a navigable the document hosts.
+    pub(crate) fn resized_a_hosted_navigable(&self) -> bool {
+        self.notifications.resized_a_hosted_navigable()
+    }
+
+    /// Resolves what the commit owed the host from the arena, as the frame that made the commit left it, for the
+    /// document thread to pay without the arena, and closes the span the commit opened.
+    ///
+    /// # Safety
+    ///
+    /// The arena must still be live, with no borrow taken during a pass still in use, on the thread that owns it.
+    pub(crate) unsafe fn resolve(self) -> CommitPayment {
+        let Self {
+            state,
+            handbacks,
+            notifications,
+        } = self;
+        // SAFETY: Guaranteed by the caller.
+        let arena = unsafe { &*state }.arena();
+        let payment = arena.resolve_host_handbacks(handbacks);
+        arena.end_layout_commit_handbacks();
+        CommitPayment {
+            payment,
+            notifications,
+            traced_nodes: arena.layout_trace().take_nodes_to_name(),
+        }
+    }
+}
+
+/// What a layout commit owes the host, resolved from the arena (see [`DeferredLayoutCommitHostHalf::resolve`]).
+#[must_use]
+pub(crate) struct CommitPayment {
+    payment: crate::layout::layout_node_arena::HostPayment,
+    notifications: commit::CommitNotifications,
+    /// The DOM nodes the layout trace named since the commit before, which the host names while they are live.
+    traced_nodes: crate::layout::trace::TracedNodes,
+}
+
+impl CommitPayment {
+    /// Pays the host what the commit owed it and delivers the commit's notifications.
+    ///
+    /// # Safety
+    ///
+    /// On the document thread, with the document live.
+    pub(crate) unsafe fn deliver(self, main_thread: &crate::stage::MainThread) {
+        let Self {
+            payment,
+            notifications,
+            traced_nodes,
+        } = self;
+        crate::layout::trace::name_traced_nodes(main_thread, traced_nodes);
+        payment.pay(main_thread);
+        // SAFETY: The host and shells remain live, and no arena borrow is active.
+        unsafe { notifications.notify_host(main_thread, &LayoutHost::of(main_thread)) };
+    }
 }
 
 fn finish_entry_pass(
@@ -2450,81 +2728,49 @@ fn finish_entry_pass(
     pass_fragments
 }
 
-/// Commits the finished entry pass rooted at `commit_root` and settles the arena-local
-/// bookkeeping every layout entry owes its caller: host notifications, cache maintenance, and
-/// the reset of the update flags the committed subtree satisfied. Returns the arena re-borrowed
-/// after commit for entry-specific epilogues.
+/// Commits the finished entry pass rooted at `commit_root` to the arena. What the commit owes the
+/// host waits in the handback span it opens, which [`CommitPayment::deliver`] pays once the frame has resolved it.
 ///
 /// # Safety
 ///
-/// `arena_handle` must be the live arena the pass computed against, and no borrow taken during
-/// the pass may still be live.
-unsafe fn commit_entry_pass<'a>(
-    arena_handle: *mut c_void,
-    host: &FfiLayoutHostCallbacks,
+/// `state` must be the live render state the pass computed against, which nothing else reaches
+/// while the pass runs, and no borrow taken during the pass may still be live.
+unsafe fn commit_entry_pass_to_arena(
+    state: *mut ArenaHandle,
     commit_root: NodeSlotId,
     pass_fragments: &fragment_tree::CompletedPassFragments,
-) -> &'a LayoutNodeArena {
-    // SAFETY: Computation has finished and its input borrows are no longer used.
-    // Commit performs no host callbacks while it borrows the arena exclusively.
-    let notifications = commit::commit_replacing(
-        commit_root,
-        unsafe { LayoutNodeArena::from_handle_mut(arena_handle) },
-        pass_fragments,
-    );
-    // SAFETY: The host and shells remain live, and commit's mutable borrow has ended.
-    unsafe { notifications.notify_host(host) };
-    // SAFETY: Host callbacks have returned; borrow the arena again for the epilogue, which
-    // performs no host callbacks.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
-    arena.end_layout_pass();
-    arena.reset_layout_update_flags_in_subtree(commit_root);
-    arena
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle with a registered layout host, used on the document thread, and
-/// `root` must be a live partial relayout boundary.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_compute_subtree_layout(
-    arena: *mut c_void,
-    root: NodeSlotId,
-    viewport_inline_size_raw: i32,
-    document_in_quirks_mode: bool,
-) {
-    // SAFETY: Guaranteed by the entry point's contract.
-    unsafe {
-        compute_subtree_layout(arena, root, viewport_inline_size_raw, document_in_quirks_mode);
+    entry: CommittedEntry,
+) -> PendingLayoutCommit {
+    // SAFETY: Guaranteed by the caller. Computation has finished and its input borrows are no longer
+    // used, and commit performs no host callbacks while it borrows the arena exclusively.
+    let arena = unsafe { &mut *state }.arena_mut();
+    arena.begin_layout_commit_handbacks();
+    let notifications = commit::commit_replacing(commit_root, arena, pass_fragments);
+    PendingLayoutCommit {
+        state,
+        root: commit_root,
+        entry,
+        notifications,
     }
 }
 
-/// Lays out one partial relayout boundary in place and commits its fragments. Enrolled content
-/// is not synced here: the caller syncs once ahead of a batch of boundaries.
-///
-/// # Safety
-///
-/// `arena_handle` must be a live handle with a registered layout host, used on the document
-/// thread, and `root` must be a live partial relayout boundary.
-pub(crate) unsafe fn compute_subtree_layout(
-    arena_handle: *mut c_void,
-    root: NodeSlotId,
-    viewport_inline_size_raw: i32,
-    document_in_quirks_mode: bool,
-) {
-    assert!(!arena_handle.is_null(), "layout node arena handle is null");
-    assert!(!root.is_invalid());
-    // SAFETY: The caller keeps the arena alive for this synchronous call. The host table is
-    // copied out so no arena borrow spans a host callback.
-    let host = unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_host();
-    // SAFETY: The host keeps the document's layout inputs alive and unchanged
-    // while computing fragments. Nested measurements only mutate side caches.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+/// The host-free partial layout stage. Its input carries no host table or main-thread capability.
+fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -> LayoutStageOutput {
+    let LayoutStageInput {
+        arena,
+        root,
+        viewport_inline_size_raw,
+        viewport_block_size_raw,
+        document_in_quirks_mode,
+        should_collect_devtools_layout_data: _,
+    } = stage;
+    let arena: &LayoutNodeArena = arena;
     arena.begin_active_layout_pass();
     let callbacks = LayoutPass::new(
         arena,
-        &host,
+        scratch,
         CssPixels::from_raw(viewport_inline_size_raw),
+        CssPixels::from_raw(viewport_block_size_raw),
         document_in_quirks_mode,
     );
     // The boundary can be wider than the rebuilt roots that led to it, and laying it out may
@@ -2549,36 +2795,80 @@ pub(crate) unsafe fn compute_subtree_layout(
             .map_or(NodeSlotId::INVALID, |link| link.containing_block);
         (root, containing_block)
     };
-    let pass_fragments = RunRecords::with_unrooted(arena, entry_root, entry_root_containing_block, |entry_records| {
-        let _trace = arena.layout_trace.pass(arena, Some(root));
-        let entry_fragments = std::rc::Rc::new(fragment_tree::RunFragmentBuilder::new_entry_accumulator(entry_root));
-        let entry_run = FormattingContextRun {
-            purpose: LayoutPurpose::Commit,
-            records: entry_records,
-            box_: entry_root,
-            layout_mode: LayoutMode::Normal,
-            callbacks,
-            should_collect_devtools_layout_data: false,
-            treat_block_axis_percentage_insets_as_auto_beyond_root: false,
-            fragments: Some(entry_fragments.clone()),
-            previous_line_data: None,
-        };
-        if root_is_absolutely_positioned {
-            abspos_engine::AbsposEngine::for_run(&entry_run).replay(&entry_run, root);
-        } else {
-            layout_subtree_with_frozen_root_geometry(&entry_run);
-        }
-        finish_entry_pass(entry_records, &entry_fragments, &callbacks, false)
-    });
+    let pass_fragments = RunRecords::with_unrooted(
+        scratch,
+        arena,
+        entry_root,
+        entry_root_containing_block,
+        |entry_records| {
+            let _trace = arena.trace_pass(Some(root));
+            let entry_fragments =
+                std::rc::Rc::new(fragment_tree::RunFragmentBuilder::new_entry_accumulator(entry_root));
+            let entry_run = FormattingContextRun {
+                purpose: LayoutPurpose::Commit,
+                records: entry_records,
+                box_: entry_root,
+                layout_mode: LayoutMode::Normal,
+                callbacks,
+                should_collect_devtools_layout_data: false,
+                treat_block_axis_percentage_insets_as_auto_beyond_root: false,
+                fragments: Some(entry_fragments.clone()),
+                previous_line_data: None,
+            };
+            if root_is_absolutely_positioned {
+                abspos_engine::AbsposEngine::for_run(&entry_run).replay(&entry_run, root);
+            } else {
+                layout_subtree_with_frozen_root_geometry(&entry_run);
+            }
+            finish_entry_pass(entry_records, &entry_fragments, &callbacks, false)
+        },
+    );
     drop(read_scope);
-    // SAFETY: Computation has finished and its input borrows are no longer used.
-    let arena = unsafe { commit_entry_pass(arena_handle, &host, root, &pass_fragments) };
-    // Commit reset the subtree's rows, and its new size may affect ancestor scrollable overflow.
-    // Partial relayout roots are SVG viewports or abspos boxes, never SVG content boxes that
-    // would require a new layout instead of an overflow update.
-    debug_assert!(!node_facts::kind_is_svg_box(arena.data(root).kind.get()));
-    arena.schedule_scrollable_overflow_recalculation(root);
-    arena.end_active_layout_pass();
+    LayoutStageOutput(pass_fragments)
+}
+
+/// Computes the fragments of one partial relayout boundary without the host, in the unit or the
+/// rendering update the render owner runs it in.
+///
+/// # Safety
+///
+/// `state` must be the live render state of the pass's document, which nothing else reaches while
+/// the pass runs, and `root` must be a live partial relayout boundary.
+pub(crate) unsafe fn compute_subtree_layout_fragments(
+    state: *mut ArenaHandle,
+    root: NodeSlotId,
+    viewport_inline_size_raw: i32,
+    viewport_block_size_raw: i32,
+    document_in_quirks_mode: bool,
+) -> LayoutStageOutput {
+    assert!(!root.is_invalid());
+    // SAFETY: Guaranteed by the caller; the arena's published inputs stay unchanged for the
+    // synchronous stage run.
+    let (arena, scratch) = unsafe { arena_and_scratch_for_stage(state) };
+    let input = LayoutStageInput {
+        arena,
+        root,
+        viewport_inline_size_raw,
+        viewport_block_size_raw,
+        document_in_quirks_mode,
+        should_collect_devtools_layout_data: false,
+    };
+    compute_subtree_layout_stage(input, scratch)
+}
+
+/// Commits a computed partial relayout boundary to the arena without the host, leaving the host
+/// half to [`DeferredLayoutCommitHostHalf::deliver`].
+///
+/// # Safety
+///
+/// As for [`commit_root_layout_to_arena`], with `root` a live partial relayout boundary.
+pub(crate) unsafe fn commit_subtree_layout_to_arena(
+    state: *mut ArenaHandle,
+    root: NodeSlotId,
+    output: &LayoutStageOutput,
+) -> PendingLayoutCommit {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { commit_entry_pass_to_arena(state, root, &output.0, CommittedEntry::Subtree) }
 }
 
 fn layout_subtree_with_frozen_root_geometry(run: &FormattingContextRun<'_>) {

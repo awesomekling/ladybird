@@ -148,8 +148,8 @@ fn apply_block_ellipsis(
         }) as u32;
     let presentation = libgfx_rust::font::emoji_presentation_for_code_point(first_code_point, None);
     let font = style
-        .font_cascade_list()
-        .font_for_code_point(first_code_point, presentation, None);
+        .frozen_font_list()
+        .font_for_code_point(first_code_point, presentation);
     let shaped_ellipsis = libgfx_rust::text_layout::shape_text(
         &font,
         ellipsis_text,
@@ -1265,14 +1265,9 @@ impl<'context> InlineFormattingContext<'context> {
         let facts = self.facts(node);
         // Any fragmented inline box should have generated line box fragments already.
         if facts.is_fragmented_inline() {
-            // SAFETY: The callback table and layout node remain live for this
-            // synchronous formatting-context run.
-            unsafe {
-                (self.callbacks.host.report_unexpected_fragmented_inline)(
-                    self.callbacks.host.context,
-                    self.callbacks.shell(node),
-                );
-            }
+            self.callbacks
+                .arena()
+                .report_to_document(node, commit::FfiCommitMessageKind::UnexpectedFragmentedInline);
             return DerivedBaselines::default();
         }
 
@@ -1979,7 +1974,7 @@ impl<'context> InlineFormattingContext<'context> {
 
     pub(crate) fn run(&mut self) {
         assert!(self.facts(self.containing_block).children_are_inline());
-        let iterator = inline_level_iterator::InlineLevelIterator::new(self);
+        let mut iterator = inline_level_iterator::InlineLevelIterator::new(self);
         // OPTIMIZATION: Under a min-content or max-content constraint every soft wrap opportunity breaks the line or
         //               none does, so eligible content is measured from its items without building line boxes.
         //               Earlier floats would shorten lines by an amount that depends on block positions the
@@ -2005,7 +2000,18 @@ impl<'context> InlineFormattingContext<'context> {
             self.callbacks.arena().note_intrinsic_inline_measurement();
             iterator.stash_for_reuse(self);
         } else {
+            // OPTIMIZATION: A measurement is laid out ahead of the committing layout of the same content (a table cell
+            //               whose row is sized first), which takes its items instead of generating them again.
+            let items_for_committing_layout = (self.run.purpose == formatting_context::LayoutPurpose::Measurement
+                && self.layout_mode == LayoutMode::Normal)
+                .then(|| iterator.share_for_reuse(self))
+                .flatten();
             self.generate_line_boxes(iterator);
+            if let Some(items) = items_for_committing_layout {
+                self.callbacks
+                    .layout_scratch()
+                    .store_inline_item_stash(self.containing_block, items);
+            }
             if self.layout_mode == LayoutMode::Normal && !self.run.purpose.is_measurement() {
                 self.compute_inline_box_pieces();
                 self.fold_inline_ancestor_relative_insets_into_line_data();

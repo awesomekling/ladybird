@@ -6,33 +6,21 @@
 
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
-use std::ffi::c_void;
 
-unsafe extern "C" {
-    fn ladybird_layout_node_shell_destroy(shell: *mut c_void);
-    fn ladybird_layout_node_rebind_dom_node(dom_node: *mut c_void, shell: *mut c_void);
-}
+mod host_calls;
 
-pub(crate) fn destroy_shell(shell: *mut c_void) {
-    if shell.is_null() {
-        return;
-    }
-    // SAFETY: The arena has already freed the shell's slot, and destroying a shell never
-    // re-enters the arena.
-    unsafe { ladybird_layout_node_shell_destroy(shell) };
-}
+pub(crate) use host_calls::{
+    destroy_image_observers, destroy_owned_image_provider, notify_owned_image_provider_of_detach,
+};
 
-pub(crate) fn rebind_dom_node_to_shell(dom_node: *mut c_void, shell: *mut c_void) {
-    // SAFETY: The arena freed the DOM node's bound row in this same mutation, the shell is the
-    // live row that takes over the binding, and rebinding never re-enters the arena.
-    unsafe { ladybird_layout_node_rebind_dom_node(dom_node, shell) };
-}
-
-pub(crate) fn free_subtree_and_destroy_shells(arena: *mut LayoutNodeArena, root: NodeSlotId) {
+/// Frees the subtree `root` heads and hands back what its rows held, for whoever pays the arena's
+/// handbacks to destroy.
+pub(crate) fn free_subtree_and_hand_back(arena: *mut LayoutNodeArena, root: NodeSlotId) {
     // SAFETY: Callers hold no reference derived from the arena across this call, and the
-    // mutable borrow ends before the shells are destroyed.
+    // mutable borrow ends before what the rows held is handed back.
     let freed = unsafe { &mut *arena }.free_subtree(root);
-    freed.destroy_shells_and_invoke_callbacks();
+    // SAFETY: As above; the mutable borrow has ended.
+    unsafe { &*arena }.hand_back_freed_subtree(freed);
 }
 
 #[must_use = "an unplaced layout node must be attached or freed"]
@@ -121,14 +109,13 @@ impl LayoutNodeArena {
 #[cfg(test)]
 mod ffi_test_stubs {
     #[unsafe(no_mangle)]
-    extern "C" fn ladybird_layout_node_shell_destroy(_shell: *mut std::ffi::c_void) {}
+    extern "C" fn ladybird_layout_owned_image_provider_destroy(_provider: *mut std::ffi::c_void) {}
 
     #[unsafe(no_mangle)]
-    extern "C" fn ladybird_layout_node_rebind_dom_node(
-        _dom_node: *mut std::ffi::c_void,
-        _shell: *mut std::ffi::c_void,
-    ) {
-    }
+    extern "C" fn ladybird_layout_image_observers_destroy(_observers: *mut std::ffi::c_void) {}
+
+    #[unsafe(no_mangle)]
+    extern "C" fn ladybird_layout_owned_image_provider_notify_detach(_provider: *mut std::ffi::c_void) {}
 }
 
 #[cfg(test)]
@@ -166,9 +153,7 @@ mod tests {
     }
 
     fn free(arena: &mut LayoutNodeArena, allocation: NodeAllocation) {
-        arena
-            .free_subtree(allocation.slot)
-            .destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(allocation.slot).invoke_callbacks();
     }
 
     #[test]
@@ -268,11 +253,10 @@ mod tests {
 
         let freed = arena.free_subtree(root.slot);
 
-        assert_eq!(freed.shell_count(), 4);
         for slot in [root.slot, a.slot, b.slot, c.slot] {
             assert!(!arena.slot_is_live(slot));
         }
-        freed.destroy_shells_and_invoke_callbacks();
+        freed.invoke_callbacks();
     }
 
     #[test]
@@ -319,30 +303,25 @@ mod tests {
         let grandparent = arena.allocate_for_test();
         let parent = arena.allocate_for_test();
         let child = arena.allocate_for_test();
-        arena.data(grandparent.slot).kind.set(NodeKind::BlockContainer);
-        arena.data(parent.slot).kind.set(NodeKind::InlineNode);
+        arena.write_shape(grandparent.slot).set_kind(NodeKind::BlockContainer);
+        arena.write_shape(parent.slot).set_kind(NodeKind::InlineNode);
         arena.attach_child(grandparent.slot, owned(parent.slot), NodeSlotId::INVALID);
         for node in [grandparent.slot, parent.slot] {
             arena.populate_paintable_row(node);
-            arena
-                .paintable_side_data(node)
-                .overflow_valid_across_recommits
-                .set(true);
+            arena.committed_side_data_mut(node).overflow_valid_across_recommits = true;
         }
 
         arena.attach_child(parent.slot, owned(child.slot), NodeSlotId::INVALID);
 
         assert!(
             !arena
-                .paintable_side_data(grandparent.slot)
+                .live_committed_side_data(grandparent.slot)
                 .overflow_valid_across_recommits
-                .get()
         );
         assert!(
             arena
-                .paintable_side_data(parent.slot)
+                .live_committed_side_data(parent.slot)
                 .overflow_valid_across_recommits
-                .get()
         );
 
         free(&mut arena, grandparent);

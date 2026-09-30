@@ -14,16 +14,22 @@ pub(crate) mod abspos_engine;
 pub(crate) mod abspos_inputs;
 pub(crate) mod block_formatting_context;
 pub mod commit;
+pub(crate) mod counters;
+pub(crate) mod debug_text;
 pub(crate) mod fc_run_cache;
 pub(crate) mod flex_formatting_context;
 pub mod formatting_context;
 pub(crate) mod fragment_tree;
+pub mod frame_retirement;
+pub(crate) mod generated_content;
 pub mod geometry;
 pub mod grid_formatting_context;
+mod host_tables;
 pub mod inline_content;
 pub(crate) mod inline_formatting_context;
 pub mod inline_level_iterator;
 mod intrinsic_sizing;
+pub(crate) mod layout_changes;
 mod layout_node_arena;
 mod layout_pass;
 pub(crate) mod line_box;
@@ -34,33 +40,39 @@ pub(crate) mod node_facts;
 pub use libcompositing_rust::node_slot_id;
 mod partial_relayout;
 mod read_scope;
-mod rendered_text;
+pub(crate) mod rendered_text;
 mod replaced_with_children_formatting_context;
+pub(crate) mod row_reads;
 pub(crate) mod run_records;
 pub(crate) mod sizing_context;
+pub mod style_snapshot;
 pub(crate) mod style_values;
 pub mod svg_formatting_context;
 pub mod table_formatting_context;
 pub(crate) mod text_chunker;
-mod text_queries;
+pub(crate) mod text_queries;
 mod text_transform;
-mod trace;
+pub(crate) mod trace;
 mod tree_builder;
 mod tree_mutation;
-mod update_layout;
+pub(crate) mod tree_shape;
+mod tree_update_marks;
+pub(crate) mod update_layout;
 pub mod used_values;
 mod viewport_propagation;
 
+pub(crate) use crate::css::style::engine_home::{StyleEngineHold, StyleEngineLink};
 use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::css::style::fast_hash::FastSet as HashSet;
 use crate::layout::layout_node_arena::IntrinsicBlockSizeMeasurement;
 use crate::layout::layout_node_arena::IntrinsicInlineSizeMeasurement;
 use crate::layout::layout_node_arena::IntrinsicSizeCacheKey;
 use crate::layout::layout_node_arena::IntrinsicSizeCacheKind;
-pub(crate) use crate::layout::layout_node_arena::LayoutNodeArena;
+pub(crate) use crate::layout::layout_node_arena::MainThreadFfiEntry as ArenaMainThreadFfiEntry;
+pub(crate) use crate::layout::layout_node_arena::{HeldPublication, HostPayment, OwnerAppliedStyle};
+pub(crate) use crate::layout::layout_node_arena::{LayoutNodeArena, SLOTS_PER_CHUNK};
 use crate::layout::layout_node_arena::{TableCellMeasurement, TableCellMeasurementKey};
 use crate::layout::node_data::AncestorFact;
-pub use crate::layout::node_data::FfiNodeConstructionFacts;
 pub use crate::layout::node_data::FfiReplacedContentFacts;
 pub use crate::layout::node_data::FfiStylePayloads;
 use crate::layout::node_data::NodeData;
@@ -68,9 +80,10 @@ use crate::layout::node_data::NodeFlag;
 use crate::layout::node_data::NodeKind;
 use crate::layout::node_data::NodeSlotId;
 pub use crate::layout::node_data::STYLE_GROUP_COUNT;
+pub(crate) use crate::layout::viewport_propagation::root_background_source;
 pub(crate) use abspos_inputs::{AbsposAlignment, StaticPositionAlignment};
 pub(crate) use formatting_context::{
-    ChildLayoutOutcome, DerivedBaselines, FfiLayoutHostCallbacks, FormattingContextRun, LayoutMode, Node, SizingAxis,
+    ChildLayoutOutcome, DerivedBaselines, FormattingContextRun, LayoutHost, LayoutMode, Node, SizingAxis,
     SizingProperty,
 };
 pub(crate) use fragment_tree::FragmentLink;
@@ -78,10 +91,11 @@ pub(crate) use geometry::{
     AvailableSize, AvailableSpace, ContainingBlockConstraints, LayoutInput, ParticipationInParentFormattingContext,
     RootSizingDirectives,
 };
+pub(crate) use host_tables::{ArenaHandle, HostTables};
 pub(crate) use layout_pass::LayoutPass;
 pub(crate) use node_facts::NodeFacts;
-pub(crate) use rendered_text::RenderedTextBoundary;
-pub(crate) use run_records::RunRecords;
+pub(crate) use rendered_text::{PublishedTextSlot, RenderedText, RenderedTextBoundary, TextFragments};
+pub(crate) use run_records::{LayoutScratch, RunRecords};
 use std::cell::Cell;
 use std::cell::OnceCell;
 use std::cell::Ref;
@@ -89,4 +103,9 @@ use std::cell::RefCell;
 use std::cell::RefMut;
 use std::ffi::c_void;
 pub(crate) use style_values::StyleValues;
+pub(crate) use tree_builder::MainThreadFfiEntry as TreeBuildMainThreadFfiEntry;
+pub(crate) use update_layout::MainThreadFfiEntry as UpdateMainThreadFfiEntry;
 pub(crate) use used_values::{FfiCssPixelPoint, FfiCssPixelRect, FfiCssPixelSize, SizeConstraint, UsedValues};
+
+/// Flushes what the document thread counted about its arenas, as a document's render state goes away.
+pub(crate) fn flush_arena_censuses() {}

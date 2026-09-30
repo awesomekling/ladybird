@@ -6,33 +6,120 @@
 
 use super::*;
 
-/// Arena and host inputs borrowed while computing a layout result. The pass ends before
-/// commit takes a mutable arena borrow, so its text and style views cannot survive commit.
+/// The arena inputs borrowed while computing a layout result. The pass ends before commit takes a
+/// mutable arena borrow, so its text and style views cannot survive commit.
+///
+/// It holds no host table: a running pass asks the document nothing.
 #[derive(Clone, Copy)]
 pub(crate) struct LayoutPass<'arena> {
     arena: &'arena LayoutNodeArena,
-    pub(crate) host: &'arena FfiLayoutHostCallbacks,
+    scratch: &'arena LayoutScratch,
     pub(crate) initial_containing_block_inline_size: CssPixels,
+    pub(crate) initial_containing_block_block_size: CssPixels,
     pub(crate) document_in_quirks_mode: bool,
 }
 
 impl<'arena> LayoutPass<'arena> {
     pub(crate) fn new(
         arena: &'arena LayoutNodeArena,
-        host: &'arena FfiLayoutHostCallbacks,
+        scratch: &'arena LayoutScratch,
         initial_containing_block_inline_size: CssPixels,
+        initial_containing_block_block_size: CssPixels,
         document_in_quirks_mode: bool,
     ) -> Self {
         Self {
             arena,
-            host,
+            scratch,
             initial_containing_block_inline_size,
+            initial_containing_block_block_size,
             document_in_quirks_mode,
         }
     }
 
     pub(crate) fn arena(&self) -> &'arena LayoutNodeArena {
         self.arena
+    }
+
+    /// The scratch the pass's runs lend their records through.
+    pub(crate) fn layout_scratch(&self) -> &'arena LayoutScratch {
+        self.scratch
+    }
+
+    pub(crate) fn intrinsic_block_size_cache_get(
+        &self,
+        data: &NodeData,
+        kind: IntrinsicSizeCacheKind,
+        key: IntrinsicSizeCacheKey,
+    ) -> Option<IntrinsicBlockSizeMeasurement> {
+        self.scratch
+            .intrinsic_size_caches
+            .intrinsic_block_size_cache_get(self.arena, data, kind, key)
+    }
+
+    pub(crate) fn intrinsic_block_size_cache_put(
+        &self,
+        data: &NodeData,
+        kind: IntrinsicSizeCacheKind,
+        key: IntrinsicSizeCacheKey,
+        value: IntrinsicBlockSizeMeasurement,
+    ) {
+        self.scratch
+            .intrinsic_size_caches
+            .intrinsic_block_size_cache_put(self.arena, data, kind, key, value);
+    }
+
+    pub(crate) fn intrinsic_inline_size_measurement_cache_get(
+        &self,
+        data: &NodeData,
+        kind: IntrinsicSizeCacheKind,
+        key: IntrinsicSizeCacheKey,
+    ) -> Option<IntrinsicInlineSizeMeasurement> {
+        self.scratch
+            .intrinsic_size_caches
+            .intrinsic_inline_size_measurement_cache_get(self.arena, data, kind, key)
+    }
+
+    pub(crate) fn intrinsic_inline_size_measurement_cache_put(
+        &self,
+        data: &NodeData,
+        kind: IntrinsicSizeCacheKind,
+        key: IntrinsicSizeCacheKey,
+        value: IntrinsicInlineSizeMeasurement,
+    ) {
+        self.scratch
+            .intrinsic_size_caches
+            .intrinsic_inline_size_measurement_cache_put(self.arena, data, kind, key, value);
+    }
+
+    pub(crate) fn intrinsic_inline_size_depends_on_block_size(
+        &self,
+        data: &NodeData,
+        compute: impl FnOnce() -> bool,
+    ) -> bool {
+        self.scratch
+            .intrinsic_size_caches
+            .intrinsic_inline_size_depends_on_block_size(self.arena, data, compute)
+    }
+
+    pub(crate) fn table_cell_measurement_cache_get(
+        &self,
+        data: &NodeData,
+        key: TableCellMeasurementKey,
+    ) -> Option<TableCellMeasurement> {
+        self.scratch
+            .intrinsic_size_caches
+            .table_cell_measurement_cache_get(self.arena, data, key)
+    }
+
+    pub(crate) fn table_cell_measurement_cache_put(
+        &self,
+        data: &NodeData,
+        key: TableCellMeasurementKey,
+        value: TableCellMeasurement,
+    ) {
+        self.scratch
+            .intrinsic_size_caches
+            .table_cell_measurement_cache_put(self.arena, data, key, value);
     }
 
     pub(crate) fn node_data(&self, node: Node) -> &'arena NodeData {
@@ -83,13 +170,6 @@ impl<'arena> LayoutPass<'arena> {
             child = data.next_sibling.get();
         }
         true
-    }
-
-    pub(crate) fn shell(&self, node: Node) -> *mut c_void {
-        self.arena.assert_layout_read_is_in_scope(node);
-        let shell = self.arena().node_shell(node);
-        assert!(!shell.is_null());
-        shell
     }
 
     pub(crate) fn is_before(&self, node: Node, other: Node) -> bool {

@@ -293,7 +293,7 @@ struct ExtraBoxMetrics {
 }
 
 struct TextNodeContext<'pass> {
-    chunks: std::rc::Rc<super::rendered_text::CachedTextChunks>,
+    chunks: std::sync::Arc<super::rendered_text::CachedTextChunks>,
     text: &'pass [u16],
     next_chunk_index: usize,
     should_collapse_whitespace: bool,
@@ -852,6 +852,7 @@ fn record_entered_inline_box<'context>(
     used
 }
 
+#[derive(Clone)]
 pub(crate) struct StashedInlineItems {
     items: Vec<Item>,
     entered_box_model_nodes: Vec<Node>,
@@ -879,10 +880,28 @@ impl InlineLevelIterator {
         atomic_sizing: AtomicInlineSizing,
     ) -> Option<Self> {
         let callbacks = context.callbacks;
-        match callbacks.arena().take_inline_item_stash(context.containing_block) {
-            Some(stash) => Some(Self::from_stash(context, stash)),
-            None => InlineLevelIteratorGenerator::generate(context, atomic_sizing),
+        let scratch = callbacks.layout_scratch();
+        if let Some(stash) = scratch.take_inline_item_stash(context.containing_block) {
+            return Some(Self::from_stash(context, stash));
         }
+        // OPTIMIZATION: Reusable items depend on the container's subtree alone, not on the run's available space, so
+        //               they are kept across passes until something invalidates the container's layout. A container
+        //               laid out again at another inline size, like a table cell whose column grows, reuses them.
+        //               The run cache's shadow mode verifies replays against real layout, so the real layout generates
+        //               its items afresh there.
+        let validity = (fc_run_cache::fc_run_cache_mode_from_environment() == fc_run_cache::FcRunCacheMode::Enabled)
+            .then(|| fc_run_cache::run_root_validity(&callbacks, context.containing_block));
+        if let Some(validity) = validity
+            && let Some(items) = scratch.retained_inline_items(context.containing_block, validity)
+        {
+            return Some(Self::from_stash(context, items));
+        }
+        let mut iterator = InlineLevelIteratorGenerator::generate(context, atomic_sizing)?;
+        if let Some(validity) = validity {
+            let items = iterator.share_for_reuse(context);
+            scratch.retain_inline_items(context.containing_block, validity, items);
+        }
+        Some(iterator)
     }
 
     fn from_stash(context: &inline_formatting_context::InlineFormattingContext<'_>, stash: StashedInlineItems) -> Self {
@@ -896,32 +915,57 @@ impl InlineLevelIterator {
     }
 
     /// Element items and percentage inline-box margins and paddings depend on the run's available space.
-    pub(crate) fn stash_for_reuse(self, context: &inline_formatting_context::InlineFormattingContext<'_>) {
+    fn items_are_reusable(&self, context: &inline_formatting_context::InlineFormattingContext<'_>) -> bool {
         if self
             .items
             .as_slice()
             .iter()
             .any(|item| !matches!(item.type_, ItemType::Text | ItemType::ForcedBreak))
         {
+            return false;
+        }
+        self.entered_box_model_nodes.iter().all(|node| {
+            let style = context.style(*node);
+            !style.margin_left().contains_percentage()
+                && !style.margin_right().contains_percentage()
+                && !style.padding_left().contains_percentage()
+                && !style.padding_right().contains_percentage()
+        })
+    }
+
+    pub(crate) fn stash_for_reuse(self, context: &inline_formatting_context::InlineFormattingContext<'_>) {
+        if !self.items_are_reusable(context) {
             return;
         }
-        for node in &self.entered_box_model_nodes {
-            let style = context.style(*node);
-            if style.margin_left().contains_percentage()
-                || style.margin_right().contains_percentage()
-                || style.padding_left().contains_percentage()
-                || style.padding_right().contains_percentage()
-            {
-                return;
-            }
-        }
-        context.callbacks.arena().store_inline_item_stash(
+        context.callbacks.layout_scratch().store_inline_item_stash(
             context.containing_block,
             StashedInlineItems {
                 items: self.items.collect(),
                 entered_box_model_nodes: self.entered_box_model_nodes,
             },
         );
+    }
+
+    /// A copy of the items for a later run of the same content to take, if they are reusable. The copy and the
+    /// iterator share their glyph buffers.
+    pub(crate) fn share_for_reuse(
+        &mut self,
+        context: &inline_formatting_context::InlineFormattingContext<'_>,
+    ) -> Option<StashedInlineItems> {
+        if !self.items_are_reusable(context) {
+            return None;
+        }
+        for item in self.items.as_mut_slice() {
+            if let Some(glyph_data) = &mut item.glyphs
+                && let libgfx_rust::text_layout::GlyphBuffer::Owned(glyphs) = &mut glyph_data.glyphs
+            {
+                glyph_data.glyphs = libgfx_rust::text_layout::GlyphBuffer::Shared(std::mem::take(glyphs).into());
+            }
+        }
+        Some(StashedInlineItems {
+            items: self.items.as_slice().to_vec(),
+            entered_box_model_nodes: self.entered_box_model_nodes.clone(),
+        })
     }
 
     pub(crate) fn next(&mut self) -> Option<Item> {

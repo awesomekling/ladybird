@@ -321,7 +321,7 @@ struct InlineLayoutDamage {
 /// surviving across layout passes on the node arena.
 #[derive(Default)]
 pub(crate) struct FcRunCacheArenaStore {
-    entries: RefCell<Vec<Option<std::rc::Rc<FcRunCacheEntry>>>>,
+    entries: RefCell<Vec<Option<std::sync::Arc<FcRunCacheEntry>>>>,
     inline_layout_damage: RefCell<Vec<InlineLayoutDamage>>,
     pending_sweep_slots: RefCell<Vec<u32>>,
     enrolled_for_sweep: RefCell<Vec<bool>>,
@@ -408,7 +408,7 @@ impl FcRunCacheArenaStore {
         slot: u32,
         validity: FcRunCacheValidity,
         key: &FcRunCacheKey,
-    ) -> Option<std::rc::Rc<FcRunCacheEntry>> {
+    ) -> Option<std::sync::Arc<FcRunCacheEntry>> {
         let entries = self.entries.borrow();
         let stored = entries.get(slot as usize)?;
         let entry = stored.as_ref()?;
@@ -434,7 +434,7 @@ impl FcRunCacheArenaStore {
         validity: FcRunCacheValidity,
         key: &FcRunCacheKey,
         structural_epoch_bumps: u32,
-    ) -> Option<std::rc::Rc<FcRunCacheEntry>> {
+    ) -> Option<std::sync::Arc<FcRunCacheEntry>> {
         if structural_epoch_bumps == 0 {
             return None;
         }
@@ -466,9 +466,9 @@ impl FcRunCacheArenaStore {
         if entries.len() <= slot as usize {
             entries.resize_with(slot as usize + 1, || None);
         }
-        match entries[slot as usize].as_mut().and_then(std::rc::Rc::get_mut) {
+        match entries[slot as usize].as_mut().and_then(std::sync::Arc::get_mut) {
             Some(stored) => *stored = entry,
-            None => entries[slot as usize] = Some(std::rc::Rc::new(entry)),
+            None => entries[slot as usize] = Some(std::sync::Arc::new(entry)),
         }
         drop(entries);
         // NB: Invalidation can occur between probing a run and storing its result.
@@ -491,7 +491,7 @@ impl FcRunCacheArenaStore {
     }
 }
 
-fn run_root_validity(callbacks: &LayoutPass<'_>, box_: Node) -> FcRunCacheValidity {
+pub(super) fn run_root_validity(callbacks: &LayoutPass<'_>, box_: Node) -> FcRunCacheValidity {
     let data = NodeFacts::new(callbacks, box_).data();
     FcRunCacheValidity {
         slot_generation: data.slot_generation.get(),
@@ -515,8 +515,8 @@ pub(super) enum FcRunCacheAttempt {
         /// on its next probe (a fail-safe miss) instead of being baked into
         /// a forever-valid entry.
         validity: FcRunCacheValidity,
-        shadow_entry: Option<std::rc::Rc<FcRunCacheEntry>>,
-        structurally_damaged_entry: Option<std::rc::Rc<FcRunCacheEntry>>,
+        shadow_entry: Option<std::sync::Arc<FcRunCacheEntry>>,
+        structurally_damaged_entry: Option<std::sync::Arc<FcRunCacheEntry>>,
     },
 }
 
@@ -540,7 +540,7 @@ impl FcRunCacheAttempt {
         should_collect_devtools_layout_data: bool,
         callbacks: &LayoutPass<'_>,
         key: &FcRunCacheKey,
-    ) -> Result<Self, std::rc::Rc<FcRunCacheEntry>> {
+    ) -> Result<Self, std::sync::Arc<FcRunCacheEntry>> {
         let fc_type = key.fc_type;
         let input = &key.input;
         let mode = fc_run_cache_mode_from_environment();
@@ -581,7 +581,7 @@ impl FcRunCacheAttempt {
         // narrowed: anchor() applies only to absolutely positioned boxes and every abspos
         // box is the root of its own spawned run, so the flag on the run root covers every
         // anchor consumer; anchor eligibility is resolved from used values of the same
-        // pass under the C++ anchor_lookup containing-block guard, never from a previous
+        // pass under the anchor lookup's containing-block guard, never from a previous
         // pass; scroll compensation compares chains that converge at the run root and
         // registers scroll-shift side effects a replay would skip; and anchor-size()
         // resolves to None today, so inset properties are the only anchor dependency a
@@ -615,7 +615,7 @@ impl FcRunCacheAttempt {
         }
     }
 
-    pub(super) fn previous_line_data(&self) -> Option<std::rc::Rc<inline_content::InlineContent>> {
+    pub(super) fn previous_line_data(&self) -> Option<std::sync::Arc<inline_content::InlineContent>> {
         let Self::Store {
             structurally_damaged_entry: Some(entry),
             ..

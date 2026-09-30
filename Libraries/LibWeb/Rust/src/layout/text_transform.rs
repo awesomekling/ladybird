@@ -97,6 +97,46 @@ unsafe extern "C" {
     fn unicode_text_may_require_bidi_processing(text: *const u16, length: usize) -> bool;
 }
 
+// The Rust tests link without LibUnicode: a mapping there maps nothing, and no text needs bidi processing.
+#[cfg(test)]
+mod unicode_test_stand_ins {
+    use super::UnicodeTextMappingOutput;
+
+    unsafe fn copy_unmapped(text: *const u16, length: usize, output: UnicodeTextMappingOutput) {
+        // SAFETY: The caller hands `length` readable units and a buffer of as many to write them to.
+        unsafe { std::ptr::copy_nonoverlapping(text, (output.allocate_text)(output.context, length), length) };
+    }
+
+    #[unsafe(no_mangle)]
+    unsafe extern "C" fn unicode_apply_case_mapping(
+        text: *const u16,
+        length: usize,
+        _mapping: u8,
+        _locale: *const u16,
+        _locale_length: usize,
+        _preserve_existing: bool,
+        output: UnicodeTextMappingOutput,
+    ) {
+        // SAFETY: As for the LibUnicode function.
+        unsafe { copy_unmapped(text, length, output) };
+    }
+
+    #[unsafe(no_mangle)]
+    unsafe extern "C" fn unicode_apply_fullwidth_mapping(
+        text: *const u16,
+        length: usize,
+        output: UnicodeTextMappingOutput,
+    ) {
+        // SAFETY: As for the LibUnicode function.
+        unsafe { copy_unmapped(text, length, output) };
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn unicode_text_may_require_bidi_processing(_text: *const u16, _length: usize) -> bool {
+        false
+    }
+}
+
 unsafe extern "C" fn allocate_text(context: *mut c_void, length: usize) -> *mut u16 {
     // SAFETY: unicode_mapping lends this result exclusively to its synchronous callbacks.
     let result = unsafe { &mut *context.cast::<TransformedText>() };

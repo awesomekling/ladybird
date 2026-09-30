@@ -4,18 +4,29 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use super::tree_shape::{ShapeCell, StyleCell};
 use crate::layout::CssPixels;
 use std::cell::Cell;
 use std::ffi::c_void;
 
 pub use super::node_slot_id::INVALID_NODE_SLOT_INDEX;
 pub const GENERATED_FOR_AFTER: u8 = 1;
+pub const GENERATED_FOR_BACKDROP: u8 = 2;
+pub const GENERATED_FOR_BEFORE: u8 = 3;
 pub const GENERATED_FOR_FIRST_LETTER: u8 = 4;
 pub const GENERATED_FOR_MARKER: u8 = 6;
+/// The last kind `CSS::is_synthetic_pseudo_element` answers for. Every synthetic kind is one a
+/// generator can hold a box for, so a walk over its boxes runs to here.
+pub const GENERATED_FOR_LAST_SYNTHETIC: u8 = 8;
 
 // The full C++ StyleGroupIndex space; LayoutRustBridge.cpp static-asserts the
 // count so the style container array and the registered group indices line up.
 pub const STYLE_GROUP_COUNT: usize = 23;
+
+/// Where a row's computed style is: the group payload array of the style record pinned for the
+/// row, or null for a row with no style. A pinned record's array is never written while a stage
+/// runs, and the groups it names are immutable payloads, so the row shares it as a `HostShared`.
+pub(crate) type StylePayloadsRef = crate::css::host_shared::HostShared<c_void>;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 #[repr(C)]
@@ -130,6 +141,35 @@ pub enum NodeFlag {
     EstablishesFixedPositionContainingBlock = 0x8000_0000,
 }
 
+/// The node flags the host sets on a row. The marks that make the next layout lay a node out again
+/// (`NeedsLayoutUpdate`, `NeedsOwnGeometryUpdate`) are not among them: those are render inputs, set
+/// only through the handle the document's render inputs hand out (`LayoutUpdateMarksHandle`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum HostNodeFlag {
+    ChildrenAreInline = 1 << 2,
+    IsEditingHost = 1 << 17,
+    ReplacedBoxCanHaveChildren = 1 << 18,
+    IsPseudoElementPrincipalBox = 1 << 19,
+    ProducesLineBoxFragmentWhenEmpty = 1 << 22,
+    ListMarkerIsInside = 1 << 23,
+    HasAnimatedOpacityOrTransform = 1 << 29,
+}
+
+impl From<HostNodeFlag> for NodeFlag {
+    fn from(flag: HostNodeFlag) -> Self {
+        match flag {
+            HostNodeFlag::ChildrenAreInline => NodeFlag::ChildrenAreInline,
+            HostNodeFlag::IsEditingHost => NodeFlag::IsEditingHost,
+            HostNodeFlag::ReplacedBoxCanHaveChildren => NodeFlag::ReplacedBoxCanHaveChildren,
+            HostNodeFlag::IsPseudoElementPrincipalBox => NodeFlag::IsPseudoElementPrincipalBox,
+            HostNodeFlag::ProducesLineBoxFragmentWhenEmpty => NodeFlag::ProducesLineBoxFragmentWhenEmpty,
+            HostNodeFlag::ListMarkerIsInside => NodeFlag::ListMarkerIsInside,
+            HostNodeFlag::HasAnimatedOpacityOrTransform => NodeFlag::HasAnimatedOpacityOrTransform,
+        }
+    }
+}
+
 /// Facts a node takes from its ancestors. They are derived when the node is attached or its
 /// ancestors' styles change, so laying out a subtree never reads above it to learn them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -161,8 +201,6 @@ pub enum CompositorAnimationFrameKind {
 pub enum FfiNodeLink {
     Parent,
     FirstChild,
-    LastChild,
-    PreviousSibling,
     NextSibling,
 }
 
@@ -175,34 +213,31 @@ pub enum DomPaintFact {
     NestedNavigableContainer = 1 << 3,
 }
 
+/// What a test stamps a row with.
+#[cfg(test)]
 #[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiNodeConstructionFacts {
+pub(crate) struct NodeConstructionFacts {
     pub kind: NodeKind,
-    pub shell: *mut c_void,
-    pub dom_node: *mut c_void,
     pub is_anonymous: bool,
-    pub is_html_input_element: bool,
-    pub is_html_html_element: bool,
-    pub is_document_element: bool,
-    pub is_in_user_agent_shadow_tree: bool,
-    pub uses_button_layout: bool,
-    pub is_editing_host: bool,
-    pub is_body: bool,
     pub dom_paint_facts: u8,
+    /// The StyleNodeID of the element the row is bound to, or 0. Every element fact the row is
+    /// built with is read from the style mirror under it; see `element_construction_fact`.
+    pub style_node: u32,
 }
 
+/// A node's data. The fields a [`PaintNode`] copies are [`ShapeCell`]s, and its style is a
+/// [`StyleCell`]; only the arena writes them (see [`super::tree_shape`]).
 #[repr(C)]
 pub(crate) struct NodeData {
-    pub parent: Cell<NodeSlotId>,
-    pub first_child: Cell<NodeSlotId>,
+    pub parent: ShapeCell<NodeSlotId>,
+    pub first_child: ShapeCell<NodeSlotId>,
     pub last_child: Cell<NodeSlotId>,
-    pub previous_sibling: Cell<NodeSlotId>,
-    pub next_sibling: Cell<NodeSlotId>,
-    pub kind: Cell<NodeKind>,
-    pub generated_for: Cell<u8>,
+    pub previous_sibling: ShapeCell<NodeSlotId>,
+    pub next_sibling: ShapeCell<NodeSlotId>,
+    pub kind: ShapeCell<NodeKind>,
+    pub generated_for: ShapeCell<u8>,
     pub intrinsic_cache_epoch: Cell<u16>,
-    pub flags: Cell<u32>,
+    pub flags: ShapeCell<u32>,
     /// Advanced on every layout invalidation that reaches this node or its
     /// subtree, with no propagation boundary: unlike the intrinsic epoch,
     /// changes inside absolutely positioned and SVG descendants must reach
@@ -210,37 +245,106 @@ pub(crate) struct NodeData {
     /// Wide enough that wrapping between a cache store and the next probe
     /// is unreachable.
     pub fragment_cache_epoch: Cell<u32>,
-    pub slot_generation: Cell<u8>,
-    pub compositor_animation_frame_kinds: Cell<u8>,
+    pub slot_generation: ShapeCell<u8>,
+    pub compositor_animation_frame_kinds: ShapeCell<u8>,
     pub table_column_span: Cell<u16>,
     pub table_row_span: Cell<u16>,
-    pub dom_paint_facts: Cell<u8>,
+    pub dom_paint_facts: ShapeCell<u8>,
     pub ancestor_facts: Cell<u8>,
-    pub style: Cell<*const c_void>,
-    pub shell: Cell<*mut c_void>,
+    pub style: StyleCell,
+    /// The next of the rows built for the same DOM node, which are chained into a ring through the
+    /// rows themselves; a row that is the only one built for its node links to nothing. The chain
+    /// lives on the rows rather than under a key so that it survives the node's identity being
+    /// retired and re-issued.
+    pub next_row_built_for_same_node: ShapeCell<NodeSlotId>,
+    /// Whether the row's style record is one the arena derived for it, which it pins, rather than
+    /// the record of the node it was built for.
+    pub holds_derived_style: ShapeCell<bool>,
+}
+
+/// What the paint side reads of a layout node, copied out of its [`NodeData`] when the arena
+/// publishes a frame. A slot that holds no node publishes the default, whose generation is 0.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct PaintNode {
+    pub(crate) generation: u8,
+    pub(crate) kind: NodeKind,
+    pub(crate) generated_for: u8,
+    pub(crate) dom_paint_facts: u8,
+    pub(crate) compositor_animation_frame_kinds: u8,
+    pub(crate) flags: u32,
+    pub(crate) parent: NodeSlotId,
+    pub(crate) first_child: NodeSlotId,
+    pub(crate) previous_sibling: NodeSlotId,
+    pub(crate) next_sibling: NodeSlotId,
+    pub(crate) next_row_built_for_same_node: NodeSlotId,
+    pub(crate) holds_derived_style: bool,
+    /// The style node of what the node was built for, which is how the host names that DOM node.
+    pub(crate) style_node: Option<crate::css::style::tree::StyleNodeID>,
+}
+
+impl Default for PaintNode {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            kind: NodeKind::Unset,
+            generated_for: 0,
+            dom_paint_facts: 0,
+            compositor_animation_frame_kinds: 0,
+            flags: 0,
+            parent: NodeSlotId::INVALID,
+            first_child: NodeSlotId::INVALID,
+            previous_sibling: NodeSlotId::INVALID,
+            next_sibling: NodeSlotId::INVALID,
+            next_row_built_for_same_node: NodeSlotId::INVALID,
+            holds_derived_style: false,
+            style_node: None,
+        }
+    }
+}
+
+impl PaintNode {
+    /// The node's row as `data` holds it, built for the node `style_node` names.
+    pub(crate) fn of(data: &NodeData, style_node: Option<crate::css::style::tree::StyleNodeID>) -> Self {
+        Self {
+            generation: data.slot_generation.get(),
+            kind: data.kind.get(),
+            generated_for: data.generated_for.get(),
+            dom_paint_facts: data.dom_paint_facts.get(),
+            compositor_animation_frame_kinds: data.compositor_animation_frame_kinds.get(),
+            flags: data.flags.get(),
+            parent: data.parent.get(),
+            first_child: data.first_child.get(),
+            previous_sibling: data.previous_sibling.get(),
+            next_sibling: data.next_sibling.get(),
+            next_row_built_for_same_node: data.next_row_built_for_same_node.get(),
+            holds_derived_style: data.holds_derived_style.get(),
+            style_node,
+        }
+    }
 }
 
 impl Default for NodeData {
     fn default() -> Self {
         Self {
-            parent: Cell::new(NodeSlotId::INVALID),
-            first_child: Cell::new(NodeSlotId::INVALID),
+            parent: ShapeCell::new(NodeSlotId::INVALID),
+            first_child: ShapeCell::new(NodeSlotId::INVALID),
             last_child: Cell::new(NodeSlotId::INVALID),
-            previous_sibling: Cell::new(NodeSlotId::INVALID),
-            next_sibling: Cell::new(NodeSlotId::INVALID),
-            kind: Cell::new(NodeKind::Unset),
-            generated_for: Cell::new(0),
+            previous_sibling: ShapeCell::new(NodeSlotId::INVALID),
+            next_sibling: ShapeCell::new(NodeSlotId::INVALID),
+            kind: ShapeCell::new(NodeKind::Unset),
+            generated_for: ShapeCell::new(0),
             intrinsic_cache_epoch: Cell::new(0),
-            flags: Cell::new(0),
-            slot_generation: Cell::new(0),
-            compositor_animation_frame_kinds: Cell::new(0),
+            flags: ShapeCell::new(0),
+            slot_generation: ShapeCell::new(0),
+            compositor_animation_frame_kinds: ShapeCell::new(0),
             table_column_span: Cell::new(1),
             table_row_span: Cell::new(1),
-            dom_paint_facts: Cell::new(0),
+            dom_paint_facts: ShapeCell::new(0),
             ancestor_facts: Cell::new(0),
             fragment_cache_epoch: Cell::new(0),
-            style: Cell::new(std::ptr::null()),
-            shell: Cell::new(std::ptr::null_mut()),
+            style: StyleCell::new(),
+            next_row_built_for_same_node: ShapeCell::new(NodeSlotId::INVALID),
+            holds_derived_style: ShapeCell::new(false),
         }
     }
 }
@@ -268,7 +372,8 @@ mod tests {
         assert_eq!(std::mem::offset_of!(NodeData, dom_paint_facts), 38);
         assert_eq!(std::mem::offset_of!(NodeData, ancestor_facts), 39);
         assert_eq!(std::mem::offset_of!(NodeData, style), 40);
-        assert_eq!(std::mem::offset_of!(NodeData, shell), 48);
+        assert_eq!(std::mem::offset_of!(NodeData, next_row_built_for_same_node), 48);
+        assert_eq!(std::mem::offset_of!(NodeData, holds_derived_style), 52);
     }
 
     #[test]

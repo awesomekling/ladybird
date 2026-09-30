@@ -6,33 +6,99 @@
 
 use super::*;
 
+/// What a commit message tells the document.
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FfiCommitMessageKind {
+    /// The node is a navigable container whose viewport committed at a new size.
+    NavigableContainerViewportCommitted,
+    /// The node is an inline box that reached atomic-inline layout without line box fragments.
+    UnexpectedFragmentedInline,
+    /// The node is an SVG resource - a `<mask>`, `<clipPath>` or `<pattern>` - whose content the
+    /// tree build laid out under the graphics element `other_style_node` names. The resource
+    /// outlives that box, so removing it has to rebuild the subtree the box sits in.
+    SvgResourceReferenced,
+    /// A top layer member was reached with no box and nothing scheduled to rebuild it, so the
+    /// document has to run another top layer zone pass. This one is about the document itself.
+    TopLayerZoneRebuildNeeded,
+    /// The node is the element a pseudo-element box escaped its rebuild root under, so its layout
+    /// tree has to be built again.
+    LayoutTreeRebuildRequested,
+    /// A pass reached the web font face `pending_face` names while it waits on its load. A pass
+    /// cannot start the load itself: the fetch, the font-display timer and the load-event delayer
+    /// are all document state. This one is about the document itself.
+    PendingFontFaceWanted,
+    /// A tree build placed a new viewport in place of the one before, whose paint state went with
+    /// it: the document gives the new tree a new paint state once it has taken in what the build
+    /// found out before this. This one is about the document itself.
+    LayoutTreeReplaced,
+    /// The node is a list owner a tree build found showing stale list-item counters, so its layout
+    /// tree has to be built again.
+    ListItemCountersStale,
+}
+
+/// One thing the render side has to tell the document. The node it is about is named by the style
+/// node the style tree gave it, with 0 for the document; no pointer crosses the boundary.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiCommitMessage {
+    pub style_node: u32,
+    /// A second node the message names, for the kinds that are about a pair. Zero otherwise.
+    pub other_style_node: u32,
+    pub kind: FfiCommitMessageKind,
+    /// The face a `PendingFontFaceWanted` message names, and whether the document has been offered
+    /// it once before without finding it. Zero and false otherwise.
+    pub pending_face: u64,
+    pub pending_face_has_been_retried: bool,
+}
+
 /// Host notifications contain no arena borrows. Dispatch them only after the
 /// mutation phase returns, since C++ can reenter Rust to read or update paint state.
 pub(crate) struct CommitNotifications {
-    row_resets: Vec<crate::painting::paintable_rows::PaintableRowReset>,
-    resized_container_shells: Vec<*mut c_void>,
-    viewport_shells: Vec<*mut c_void>,
+    row_resets: crate::painting::paintable_rows::RowResetsForHost,
+    messages: Vec<FfiCommitMessage>,
+    /// The commit gave a navigable container viewport another size: the navigable it hosts lays
+    /// itself out again at that size, and paints after the container's document.
+    resized_a_hosted_navigable: bool,
 }
 
 impl CommitNotifications {
+    /// Whether the commit resized a navigable its document hosts, whose frame at the new size is
+    /// painted after the container's document is.
+    pub(crate) fn resized_a_hosted_navigable(&self) -> bool {
+        self.resized_a_hosted_navigable
+    }
+
+    /// Whether telling the host these leaves it no style or layout work to do: the messages ask for
+    /// no rebuild and no top layer pass. A navigable container's committed viewport sizes the
+    /// navigable it hosts, whose document lays itself out; the container's document has nothing
+    /// more to do for it.
+    pub(crate) fn leave_the_host_no_work(&self) -> bool {
+        self.messages.iter().all(|message| {
+            matches!(
+                message.kind,
+                FfiCommitMessageKind::NavigableContainerViewportCommitted
+                    | FfiCommitMessageKind::PendingFontFaceWanted
+                    | FfiCommitMessageKind::UnexpectedFragmentedInline
+                    | FfiCommitMessageKind::SvgResourceReferenced
+            )
+        })
+    }
+
     /// # Safety
     ///
     /// The host must keep the document and node shells alive until these synchronous
     /// notifications return. No mutable arena borrow may be active.
-    pub(crate) unsafe fn notify_host(self, host: &FfiLayoutHostCallbacks) {
-        for reset in self.row_resets {
-            reset.invoke_callback();
+    pub(crate) unsafe fn notify_host(self, main_thread: &crate::stage::MainThread, host: &LayoutHost) {
+        self.row_resets.tell(main_thread);
+        if !self.messages.is_empty() {
+            unsafe { host.deliver_commit_messages(main_thread, &self.messages) };
         }
-        for shell in self.resized_container_shells {
-            unsafe { (host.content_size_changed_for_container_queries)(host.context, shell) };
-        }
-        unsafe { (host.finish_commit)(host.context, self.viewport_shells.as_ptr(), self.viewport_shells.len()) };
     }
 }
 
 fn commit_subtree(
     node: Node,
-    resized_container_shells: &mut Vec<*mut c_void>,
     paintables: &mut crate::painting::paintable_build::PaintableCommit<'_>,
     links_by_slot: &HashMap<u32, &FragmentLink>,
     pass_fragments: &fragment_tree::CompletedPassFragments,
@@ -57,10 +123,15 @@ fn commit_subtree(
 
     let mut has_pending_inline_box_geometry = false;
     let mut line_root_changes_for_children = enclosing_line_root_changes;
+    let mut laid_out_content_size = None;
     if let Some(link) = entry
         && prepared.has_paintable_row
     {
         let fragment = &link.fragment;
+        laid_out_content_size = Some(FfiCssPixelSize {
+            width: fragment.content_inline_size,
+            height: fragment.content_block_size,
+        });
         debug_assert!(
             fragment.computed_svg_path.is_some()
                 || !matches!(
@@ -84,8 +155,9 @@ fn commit_subtree(
             && crate::layout::node_facts::node_style_view(paintables.arena().data(node)).is_some_and(|style| {
                 content_size_change_affects_container_queries(style, old_content_size, new_content_size)
             })
+            && let Some(style_node) = paintables.arena().commit_message_style_node(node)
         {
-            resized_container_shells.push(paintables.arena().node_shell(node));
+            paintables.arena().record_size_container_content_size_change(style_node);
         }
 
         if !reuses_committed_subtree && let Some(line_data) = &fragment.line_data {
@@ -96,6 +168,10 @@ fn commit_subtree(
     if entry.is_none() && prepared.has_paintable_row {
         paintables.schedule_scrollable_overflow_recalculation(node);
     }
+
+    paintables
+        .arena()
+        .publish_layout_style_snapshot_geometry(node, laid_out_content_size);
 
     paintables.stamp_containing_block(node, entry);
     if reuses_committed_subtree {
@@ -108,7 +184,6 @@ fn commit_subtree(
         let next = paintables.arena().data(child).next_sibling.get();
         commit_subtree(
             child,
-            resized_container_shells,
             &mut *paintables,
             links_by_slot,
             pass_fragments,
@@ -150,21 +225,39 @@ pub(crate) fn commit_replacing(
     pass_fragments: &fragment_tree::CompletedPassFragments,
 ) -> CommitNotifications {
     let links_by_slot = pass_fragments.links_by_slot();
+    arena.release_published_paintable_rows();
+    arena.note_layout_commit();
+    arena.begin_layout_style_snapshot_commit();
     let mut paintables = crate::painting::paintable_build::PaintableCommit::new(arena, root);
     paintables.begin_commit();
-    let mut resized_container_shells = Vec::new();
+    // What the pass itself found out comes before what committing it finds out.
+    let mut messages = paintables.arena().take_messages_reported_during_pass();
     commit_subtree(
         root,
-        &mut resized_container_shells,
         &mut paintables,
         &links_by_slot,
         pass_fragments,
         Default::default(),
     );
     paintables.discard_absolute_rects_memoized_during_commit();
+    for (viewport, _) in paintables.committed_navigable_container_viewports() {
+        if let Some(style_node) = paintables.arena().commit_message_style_node(*viewport) {
+            messages.push(FfiCommitMessage {
+                style_node,
+                other_style_node: 0,
+                kind: FfiCommitMessageKind::NavigableContainerViewportCommitted,
+                pending_face: 0,
+                pending_face_has_been_retried: false,
+            });
+        }
+    }
+    let resized_a_hosted_navigable = paintables.resized_a_navigable_container_viewport();
+    // The rows are published when the main side next reads them, or when a recording is submitted:
+    // what derives from the commit before either writes them in place.
+    paintables.arena().finish_layout_style_snapshot_commit();
     CommitNotifications {
-        row_resets: paintables.take_row_reset_notifications(),
-        resized_container_shells,
-        viewport_shells: paintables.committed_navigable_container_viewport_shells(),
+        row_resets: paintables.take_row_resets(),
+        messages,
+        resized_a_hosted_navigable,
     }
 }

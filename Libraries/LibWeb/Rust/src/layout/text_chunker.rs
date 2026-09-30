@@ -6,7 +6,7 @@
 
 use super::*;
 
-use libgfx_rust::font::{EmojiPresentation, FontCascadeListHandle, FontHandle, emoji_presentation_for_code_point};
+use libgfx_rust::font::{EmojiPresentation, FontHandle, FrozenFontList, emoji_presentation_for_code_point};
 
 unsafe extern "C" {
     fn unicode_layout_grapheme_segmenter_create(text: *const u16, length_in_code_units: usize) -> *mut c_void;
@@ -25,6 +25,31 @@ unsafe extern "C" {
     fn ladybird_layout_code_point_has_keep_all_line_break_class(code_point: u32) -> bool;
     fn ladybird_layout_code_point_has_combining_mark_line_break_class(code_point: u32) -> bool;
     fn ladybird_layout_code_point_has_emoji_property(code_point: u32) -> bool;
+    fn ladybird_layout_code_point_category_facts(code_point: u32) -> super::tree_builder::FfiCodePointCategoryFacts;
+}
+
+// The Rust tests link without LibUnicode: there, the word at an offset is empty.
+#[cfg(test)]
+mod unicode_test_stand_ins {
+    #[unsafe(no_mangle)]
+    unsafe extern "C" fn unicode_layout_word_boundaries(
+        _text: *const u16,
+        _length: usize,
+        offset: usize,
+        start: *mut usize,
+        end: *mut usize,
+    ) {
+        // SAFETY: The caller hands two writable offsets.
+        unsafe {
+            *start = offset;
+            *end = offset;
+        }
+    }
+}
+
+pub(crate) fn code_point_category_facts(code_point: u32) -> super::tree_builder::FfiCodePointCategoryFacts {
+    // SAFETY: This service classifies a scalar value without accessing layout.
+    unsafe { ladybird_layout_code_point_category_facts(code_point) }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -41,7 +66,7 @@ pub(crate) struct TextChunk {
 
 pub(crate) struct TextChunkInputs<'text> {
     pub text: &'text [u16],
-    pub font_cascade_list: &'text FontCascadeListHandle,
+    pub frozen_font_list: &'text FrozenFontList,
     pub white_space_collapse: u8,
     pub word_break: u8,
     pub font_variant_emoji: u8,
@@ -71,6 +96,11 @@ pub(super) fn word_boundaries(text: &[u16], offset: usize) -> std::ops::Range<us
 pub(crate) struct IcuSegmenterHandle {
     raw: *mut c_void,
 }
+
+// SAFETY: The handle owns its ICU break iterator alone and destroys it exactly once. ICU objects may
+// be used from any thread so long as one thread at a time uses them, which owning the handle
+// guarantees; it is not `Sync`, because advancing the iterator writes its position.
+unsafe impl Send for IcuSegmenterHandle {}
 
 impl IcuSegmenterHandle {
     fn next_boundary(&self, index: usize, inclusive: bool) -> Option<usize> {
@@ -213,7 +243,7 @@ struct ChunkBreakFlags {
 
 struct TextChunker<'text> {
     text: &'text [u16],
-    font_cascade_list: &'text FontCascadeListHandle,
+    frozen_font_list: &'text FrozenFontList,
     grapheme_segmenter: GraphemeSegmenter,
     line_segmenter: LineSegmenter,
     word_break: u8,
@@ -230,7 +260,7 @@ impl<'text> TextChunker<'text> {
     fn new(inputs: TextChunkInputs<'text>) -> Self {
         Self {
             text: inputs.text,
-            font_cascade_list: inputs.font_cascade_list,
+            frozen_font_list: inputs.frozen_font_list,
             grapheme_segmenter: GraphemeSegmenter::new(inputs.text),
             line_segmenter: LineSegmenter::new(inputs.text),
             word_break: inputs.word_break,
@@ -367,11 +397,9 @@ impl<'text> TextChunker<'text> {
         while i < self.text.len() {
             let code_point = code_point_at(self.text, i);
             if !is_interword_space(code_point) && code_point != '\t' as u32 && code_point != '\n' as u32 {
-                let font = self.font_cascade_list.font_for_code_point(
-                    code_point,
-                    self.emoji_presentation_at(i, code_point),
-                    self.last_non_whitespace_font.as_ref(),
-                );
+                let font = self
+                    .frozen_font_list
+                    .font_for_code_point(code_point, self.emoji_presentation_at(i, code_point));
                 if !font.is_emoji_font() && has_glyph(&font) {
                     return font;
                 }
@@ -385,25 +413,21 @@ impl<'text> TextChunker<'text> {
         }
 
         // 3. No text around (leading/trailing/all spaces) — pick a font with the glyph from the cascade.
-        self.font_cascade_list.font_for_code_point(
+        self.frozen_font_list.font_for_code_point(
             space_code_point,
             EmojiPresentation {
                 is_emoji: false,
                 forced: false,
             },
-            self.last_non_whitespace_font.as_ref(),
         )
     }
 
-    fn expected_font_for(&self, code_point: u32, font_hint: Option<&FontHandle>) -> FontHandle {
+    fn expected_font_for(&self, code_point: u32) -> FontHandle {
         if is_interword_space(code_point) {
             self.font_for_space(self.current_index, code_point)
         } else {
-            self.font_cascade_list.font_for_code_point(
-                code_point,
-                self.emoji_presentation_at(self.current_index, code_point),
-                font_hint,
-            )
+            self.frozen_font_list
+                .font_for_code_point(code_point, self.emoji_presentation_at(self.current_index, code_point))
         }
     }
 
@@ -447,7 +471,7 @@ impl<'text> TextChunker<'text> {
             let mut can_break_at_current_position = self.is_at_line_break_opportunity();
             let mut pending = PendingChunk {
                 start: self.current_index,
-                font: self.expected_font_for(code_point, self.last_non_whitespace_font.as_ref()),
+                font: self.expected_font_for(code_point),
                 text_type: self.current_text_type(),
                 broken_on_tab: false,
             };
@@ -468,7 +492,7 @@ impl<'text> TextChunker<'text> {
                     can_break_at_current_position = self.is_at_line_break_opportunity();
                 }
 
-                let expected_font = self.expected_font_for(code_point, Some(&pending.font));
+                let expected_font = self.expected_font_for(code_point);
 
                 if pending.font != expected_font
                     && let Some(chunk) = self.try_commit_chunk_at_cursor(&pending, can_break_at_current_position)
@@ -607,7 +631,7 @@ pub(crate) fn text_chunks(
     should_wrap_lines: bool,
     should_respect_linebreaks: bool,
     unidirectional_ltr: bool,
-) -> std::rc::Rc<super::rendered_text::CachedTextChunks> {
+) -> std::sync::Arc<super::rendered_text::CachedTextChunks> {
     let parent_style = StyleValues::for_node(callbacks, callbacks.parent(node));
     let key = super::rendered_text::TextChunkCacheKey {
         should_wrap_lines,
@@ -616,13 +640,13 @@ pub(crate) fn text_chunks(
         white_space_collapse: parent_style.white_space_collapse(),
         word_break: parent_style.word_break(),
         font_variant_emoji: parent_style.font_variant_emoji(),
-        font_cascade_list: parent_style.font_cascade_list().clone(),
+        frozen_font_list: parent_style.frozen_font_list_ref(),
     };
     let text = &callbacks.text_content(node).text;
     callbacks.text_content(node).text_chunks(&key, || {
         chunk_text(TextChunkInputs {
             text,
-            font_cascade_list: &key.font_cascade_list,
+            frozen_font_list: &key.frozen_font_list,
             white_space_collapse: key.white_space_collapse,
             word_break: key.word_break,
             font_variant_emoji: key.font_variant_emoji,

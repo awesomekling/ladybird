@@ -2464,13 +2464,9 @@ impl<'pass> FlexFormattingContext<'pass> {
         }
 
         self.flex_items[index].content_baselines =
-            match formatting_context::layout_inside_child(run, None, None, node, LayoutMode::Normal, input, false) {
-                ChildLayoutOutcome::Created(result) => result.baselines,
-                ChildLayoutOutcome::ReenterCurrent => {
-                    self.run(run, input);
-                    self.item_used(index).content_baselines_from_cells()
-                }
-                ChildLayoutOutcome::Skipped => self.item_used(index).content_baselines_from_cells(),
+            match formatting_context::layout_inside_independent_child(run, None, node, input) {
+                Some(result) => result.baselines,
+                None => self.item_used(index).content_baselines_from_cells(),
             };
 
         let container_inline_size = self.container_used().content_inline_size.get();
@@ -2605,9 +2601,9 @@ impl<'pass> FlexFormattingContext<'pass> {
                 let main_size_property = self.select_main(style.width(), style.height());
                 let main_min_size_property = self.select_main(style.min_width(), style.min_height());
                 let main_max_size_property = self.select_main(style.max_width(), style.max_height());
-                let node_id = unsafe { (self.callbacks.host.node_unique_id)(self.callbacks.shell(node)) };
+                let style_node = self.callbacks.arena().node_style_node(node);
                 items.push(formatting_context::FlexLayoutItem {
-                    node_id: (node_id >= 0).then_some(node_id),
+                    style_node: style_node.map(|style_node| style_node.raw()),
                     rect,
                     main_base_size: item.flex_base_size,
                     main_delta_size: item.target_main_size - item.flex_base_size,
@@ -2677,7 +2673,7 @@ impl<'pass> FlexFormattingContext<'pass> {
                 as u8,
             lines,
         };
-        self.container_used().rare_data_mut().flex_layout_data = Some(std::rc::Rc::new(data));
+        self.container_used().rare_data_mut().flex_layout_data = Some(std::sync::Arc::new(data));
     }
 
     // https://drafts.csswg.org/css-sizing-4/#aspect-ratio-automatic

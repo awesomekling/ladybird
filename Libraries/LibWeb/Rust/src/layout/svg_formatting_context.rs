@@ -62,20 +62,56 @@ pub struct FfiSvgNumberPercentage {
     pub is_percentage: bool,
 }
 
+/// A `<number> | <length> | <percentage>` attribute value, exactly as the element parsed it. A
+/// relative length follows the element's font rather than its attributes, so the pass - not the
+/// publication - is what turns one into pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(C)]
-pub struct FfiSvgElementFacts {
-    pub is_document_element: bool,
-    pub document_is_decoded_svg: bool,
+pub struct FfiSvgLengthValue {
+    pub value: f64,
+    pub kind: u8,
+    /// The `CSS::LengthUnit` a length was written in; meaningless for the other kinds.
+    pub unit: u8,
+}
+
+pub const SVG_LENGTH_KIND_NONE: u8 = 0;
+pub const SVG_LENGTH_KIND_NUMBER: u8 = 1;
+pub const SVG_LENGTH_KIND_LENGTH: u8 = 2;
+pub const SVG_LENGTH_KIND_PERCENTAGE: u8 = 3;
+
+/// The values an SVG box resolves from its own computed style and the viewport it sits in. They
+/// are not element data - an ancestor's viewBox feeds a descendant's percentage basis - so the
+/// pass computes them rather than reading them off the row.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct SvgElementFacts {
+    is_document_element: bool,
+    document_is_decoded_svg: bool,
+    element_transform: FfiAffineTransform,
+    additional_element_transform: FfiAffineTransform,
+    visible_stroke_width: f32,
+    viewport_percentage_basis: CssPixels,
+}
+
+/// The SVG presentation attributes one element parses, as the document last published them. They
+/// are element data, not layout output: the document writes them when an attribute changes and
+/// when the style tree names the element, so a running pass reads what it published instead of
+/// asking.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[repr(C)]
+pub struct FfiSvgAttributeFacts {
+    /// The element class tests the pass cannot make from a row's NodeKind: `SVGGraphicsBox` also
+    /// stands for `<g>`, `<symbol>` and `<pattern>`, and `<rect>` carries the same computed `x`/`y`
+    /// properties that give `<use>` its additional transform.
+    pub is_graphics_element: bool,
+    pub is_use_element: bool,
+    pub is_svg_svg_element: bool,
+    pub is_symbol_element: bool,
+    pub is_text_element: bool,
     pub is_fit_to_view_box: bool,
     pub has_active_view_box: bool,
     pub active_view_box: FfiSvgViewBox,
     pub preserve_aspect_ratio_align: u8,
     pub preserve_aspect_ratio_meet_or_slice: u8,
-    pub element_transform: FfiAffineTransform,
-    pub additional_element_transform: FfiAffineTransform,
-    pub visible_stroke_width: f32,
-    pub viewport_percentage_basis: CssPixels,
     pub content_units: u8,
     pub pattern_units: u8,
     pub pattern_width: FfiSvgNumberPercentage,
@@ -85,6 +121,140 @@ pub struct FfiSvgElementFacts {
     pub mask_y: FfiSvgNumberPercentage,
     pub mask_width: FfiSvgNumberPercentage,
     pub mask_height: FfiSvgNumberPercentage,
+    /// Which shape a geometry element draws, and the endpoints a <line> parses. Every other
+    /// shape's geometry is computed style, which the row already carries.
+    pub geometry_kind: u8,
+    pub line_x1: FfiSvgNumberPercentage,
+    pub line_y1: FfiSvgNumberPercentage,
+    pub line_x2: FfiSvgNumberPercentage,
+    pub line_y2: FfiSvgNumberPercentage,
+    /// The text positioning attributes of a `<text>` or `<tspan>`.
+    /// FIXME: These only carry a single value each, not a list.
+    pub text_x: FfiSvgLengthValue,
+    pub text_y: FfiSvgLengthValue,
+    pub text_dx: FfiSvgLengthValue,
+    pub text_dy: FfiSvgLengthValue,
+    /// The element this one's `href` names, as the style mirror's id index answers for it: the
+    /// URL's decoded fragment, interned as the atom an element's id is indexed under. Zero when
+    /// the element names nothing, or names a URL with no fragment.
+    pub reference_fragment_atom: u32,
+    /// The resources this element's style names, in the same form. These come from `mask`,
+    /// `clip-path`, `fill` and `stroke`, so they are republished when the element's style is
+    /// installed rather than when an attribute changes.
+    pub mask_reference_atom: u32,
+    pub clip_path_reference_atom: u32,
+    pub fill_reference_atom: u32,
+    pub stroke_reference_atom: u32,
+    /// The `startOffset` of a `<textPath>`, against the length of the path it follows.
+    pub text_path_start_offset: FfiSvgNumberPercentage,
+    /// An `<svg>`'s `width` and `height` where they are a `<length>`, which its natural size is
+    /// negotiated from.
+    pub natural_width: FfiSvgLengthValue,
+    pub natural_height: FfiSvgLengthValue,
+    /// The natural aspect ratio an `<svg>`'s active SVG view or viewBox gives it, which the
+    /// negotiation falls back to where its width and height do not both give it one.
+    pub has_view_box_aspect_ratio: bool,
+    pub view_box_aspect_ratio_numerator: CssPixels,
+    pub view_box_aspect_ratio_denominator: CssPixels,
+}
+
+pub const SVG_GEOMETRY_KIND_NONE: u8 = 0;
+pub const SVG_GEOMETRY_KIND_PATH: u8 = 1;
+pub const SVG_GEOMETRY_KIND_RECT: u8 = 2;
+pub const SVG_GEOMETRY_KIND_CIRCLE: u8 = 3;
+pub const SVG_GEOMETRY_KIND_ELLIPSE: u8 = 4;
+pub const SVG_GEOMETRY_KIND_LINE: u8 = 5;
+pub const SVG_GEOMETRY_KIND_POLYLINE: u8 = 6;
+pub const SVG_GEOMETRY_KIND_POLYGON: u8 = 7;
+
+/// Sends the owner of the document whose arena `arena` names `change`, about the element `style_node` names.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+unsafe fn send_svg_change(
+    arena: *mut c_void,
+    style_node: u32,
+    change: impl FnOnce(crate::css::style::tree::StyleNodeID) -> crate::render_owner::ArenaChange,
+) {
+    let Some(element) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
+        return;
+    };
+    // SAFETY: Guaranteed by the caller.
+    let document = unsafe { super::ArenaHandle::document_of(arena) };
+    crate::render_owner::send_arena_change(document, change(element));
+}
+
+/// Publishes what an SVG element's presentation attributes parse to, under its style node. The
+/// `points` list of a <polyline> or <polygon> travels beside the facts rather than inside them,
+/// being the one geometry attribute that is not a fixed number of values.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and
+/// `points` must address `count` points for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_style_node_svg_attribute_facts(
+    arena: *mut c_void,
+    style_node: u32,
+    facts: FfiSvgAttributeFacts,
+    points: *const FfiFloatPoint,
+    count: usize,
+) {
+    // SAFETY: The caller keeps the list alive for this synchronous call.
+    let points = unsafe { libcompositing_rust::ffi::ffi_slice(points, count) }.to_vec();
+    // SAFETY: Guaranteed by the caller.
+    unsafe {
+        send_svg_change(arena, style_node, |element| {
+            crate::render_owner::ArenaChange::SvgAttributeFacts {
+                element,
+                facts: Box::new(facts),
+                points,
+            }
+        });
+    }
+}
+
+/// Publishes only the resources a graphics element's style names, leaving what its attributes
+/// parse to alone. Style is installed far more often than an SVG attribute changes, and parsing
+/// every presentation attribute again to carry four names would make every style change pay for it.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_style_node_svg_style_references(
+    arena: *mut c_void,
+    style_node: u32,
+    mask: u32,
+    clip_path: u32,
+    fill: u32,
+    stroke: u32,
+) {
+    // SAFETY: Guaranteed by the caller.
+    unsafe {
+        send_svg_change(arena, style_node, |element| {
+            crate::render_owner::ArenaChange::SvgStyleReferences {
+                element,
+                references: [mask, clip_path, fill, stroke],
+            }
+        });
+    }
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_clear_style_node_svg_attribute_facts(arena: *mut c_void, style_node: u32) {
+    // SAFETY: Guaranteed by the caller.
+    unsafe {
+        send_svg_change(
+            arena,
+            style_node,
+            crate::render_owner::ArenaChange::SvgAttributeFactsCleared,
+        );
+    };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -104,22 +274,6 @@ impl FfiSvgNumberPercentage {
             self.value
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[repr(C)]
-pub struct FfiSvgPathRequest {
-    pub viewport_width: CssPixels,
-    pub viewport_height: CssPixels,
-    pub current_text_position: FfiFloatPoint,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[repr(C)]
-pub struct FfiSvgPathResult {
-    pub path_handle: *mut c_void,
-    pub bounding_box: FfiFloatRect,
-    pub text_position_after: FfiFloatPoint,
 }
 
 pub(crate) const PRESERVE_ASPECT_RATIO_NONE: u8 = 0;
@@ -337,6 +491,49 @@ pub(crate) fn scale_and_align_viewbox_content(
     result
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SvgTextChunkMeasurement {
+    advance: f32,
+    anchor: u8,
+}
+
+impl Default for SvgTextChunkMeasurement {
+    fn default() -> Self {
+        Self {
+            advance: 0.0,
+            anchor: text_anchor::START,
+        }
+    }
+}
+
+/// The ASCII whitespace AK's Utf16String::trim_ascii_whitespace() strips from both ends.
+fn trim_ascii_whitespace(text: &[u16]) -> &[u16] {
+    let is_whitespace = |unit: &u16| matches!(unit, 0x09..=0x0d | 0x20);
+    let start = text.iter().position(|unit| !is_whitespace(unit));
+    let Some(start) = start else {
+        return &[];
+    };
+    let end = text.iter().rposition(|unit| !is_whitespace(unit)).unwrap_or(start);
+    &text[start..=end]
+}
+
+fn code_point_length_at(text: &[u16], offset: usize) -> usize {
+    let is_leading_surrogate = (0xd800..0xdc00).contains(&text[offset]);
+    let has_trailing_surrogate = offset + 1 < text.len() && (0xdc00..0xe000).contains(&text[offset + 1]);
+    if is_leading_surrogate && has_trailing_surrogate {
+        2
+    } else {
+        1
+    }
+}
+
+fn code_point_at(text: &[u16], offset: usize) -> u32 {
+    if code_point_length_at(text, offset) == 2 {
+        return 0x10000 + ((u32::from(text[offset]) - 0xd800) << 10) + (u32::from(text[offset + 1]) - 0xdc00);
+    }
+    u32::from(text[offset])
+}
+
 pub(super) struct SvgFormattingContext<'pass> {
     purpose: formatting_context::LayoutPurpose,
     records: &'pass RunRecords<'pass>,
@@ -421,10 +618,844 @@ impl<'pass> SvgFormattingContext<'pass> {
         self.callbacks.node_data(node).kind.get()
     }
 
-    fn svg_facts(&self, node: Node) -> FfiSvgElementFacts {
-        // SAFETY: The callback snapshots plain data from a live node and
-        // returns no borrowed storage.
-        unsafe { (self.callbacks.host.build_svg_facts)(self.callbacks.host.context, self.callbacks.shell(node)) }
+    fn svg_facts(&self, node: Node) -> SvgElementFacts {
+        let data = self.callbacks.node_data(node);
+        let arena = self.callbacks.arena();
+        let mut facts = SvgElementFacts {
+            is_document_element: node_facts::has_flag(data, NodeFlag::IsDocumentElement),
+            document_is_decoded_svg: arena.document_is_decoded_svg(),
+            ..Default::default()
+        };
+        // Everything below is a graphics element's business; a <mask> or <clipPath> box answers
+        // the defaults.
+        if self.svg_attributes(node).is_graphics_element {
+            facts.additional_element_transform = self.svg_additional_element_transform(node);
+            facts.element_transform = self.svg_element_transform(node);
+            facts.viewport_percentage_basis = self.viewport_percentage_basis(node);
+            facts.visible_stroke_width = self.visible_stroke_width(node, facts.viewport_percentage_basis);
+        }
+        facts
+    }
+
+    fn svg_element_transform(&self, node: Node) -> FfiAffineTransform {
+        if !self.svg_attributes(node).is_graphics_element {
+            return FfiAffineTransform::default();
+        }
+        self.svg_graphics_element_transform(node)
+    }
+
+    /// The row bound to the nearest flat-tree ancestor of `node` whose published attributes
+    /// `matches` accepts. The flat tree is the ancestry SVG resolves a viewport against, and it is
+    /// not the layout tree: a <mask> box hangs under the element that references it, and an <svg>
+    /// inside a <foreignObject> sits under a box that establishes no SVG viewport at all.
+    fn nearest_flat_tree_ancestor_row(
+        &self,
+        node: Node,
+        matches: impl Fn(FfiSvgAttributeFacts) -> bool,
+    ) -> Option<Node> {
+        let arena = self.callbacks.arena();
+        let mut style_node = arena.flat_tree_parent(arena.node_style_node(node));
+        while let Some(current) = style_node {
+            let row = arena.bound_row(current);
+            if !row.is_invalid() && matches(self.svg_attributes(row)) {
+                return Some(row);
+            }
+            style_node = arena.flat_tree_parent(Some(current));
+        }
+        None
+    }
+
+    /// The user-unit size of the viewport a viewport-establishing element sets up: its view box,
+    /// or its computed width and height. Percentages resolve against nothing here, since layout
+    /// has not sized the element yet when a descendant asks.
+    fn svg_viewport_element_size(&self, row: Node) -> FfiCssPixelSize {
+        let attributes = self.svg_attributes(row);
+        if attributes.has_active_view_box {
+            return FfiCssPixelSize {
+                width: CssPixels::nearest_value_for(attributes.active_view_box.width),
+                height: CssPixels::nearest_value_for(attributes.active_view_box.height),
+            };
+        }
+        let style = self.style(row);
+        FfiCssPixelSize {
+            width: style.width().to_px(CssPixels::default()),
+            height: style.height().to_px(CssPixels::default()),
+        }
+    }
+
+    // Resolved relative to the "Scaled viewport size": https://www.w3.org/TR/2017/WD-fill-stroke-3-20170413/#scaled-viewport-size
+    // FIXME: The spec formula is the normalized diagonal sqrt((width² + height²) / 2); this keeps
+    //        the historical (width + height) / 2 approximation.
+    // <symbol> instances establish nested viewports; percentages inside one resolve against it,
+    // not the enclosing <svg>.
+    fn viewport_percentage_basis(&self, node: Node) -> CssPixels {
+        let Some(row) =
+            self.nearest_flat_tree_ancestor_row(node, |facts| facts.is_svg_svg_element || facts.is_symbol_element)
+        else {
+            return CssPixels::default();
+        };
+        let viewport = self.svg_viewport_element_size(row);
+        (viewport.width + viewport.height) * CssPixels::nearest_value_for(0.5)
+    }
+
+    // https://svgwg.org/svg2-draft/struct.html#UseElement
+    // The x and y properties define an additional transformation (translate(x,y), where x and y
+    // represent the computed value of the corresponding property) to be applied to the 'use'
+    // element, after any transformations specified with other properties.
+    fn svg_additional_element_transform(&self, node: Node) -> FfiAffineTransform {
+        if !self.svg_attributes(node).is_use_element {
+            return FfiAffineTransform::default();
+        }
+        let viewport = self
+            .nearest_flat_tree_ancestor_row(node, |facts| facts.is_svg_svg_element)
+            .map_or_else(FfiCssPixelSize::default, |row| self.svg_viewport_element_size(row));
+        let style = self.style(node);
+        FfiAffineTransform::default().translated(
+            style.x().to_px(viewport.width).to_float(),
+            style.y().to_px(viewport.height).to_float(),
+        )
+    }
+
+    /// The element's own CSS transform, reduced to the 2D affine SVG geometry works in, with a
+    /// <use> element's additional translation multiplied in.
+    fn svg_graphics_element_transform(&self, node: Node) -> FfiAffineTransform {
+        let style = self.style(node);
+        let matrix = crate::painting::visual_context::node_values::multiply_transform_functions(
+            libgfx_rust::FloatMatrix4x4::identity(),
+            style.transform().resolved_transforms.as_slice(),
+            CssPixelRect::default(),
+        );
+        libgfx_rust::multiply_affine(
+            matrix.extract_2d_affine(),
+            self.svg_additional_element_transform(node).into(),
+        )
+        .into()
+    }
+
+    /// The stroke width the path's bounding box has to grow by: an invisible stroke takes up no
+    /// room.
+    // NB: CSS geometry-effect metadata relies on this reading only stroke color and width.
+    //     If SVG bounds begin accounting for caps, joins, miter limits, or stroke opacity,
+    //     mark those properties as affecting layout geometry as well.
+    fn visible_stroke_width(&self, node: Node, viewport_percentage_basis: CssPixels) -> f32 {
+        let style = self.style(node);
+        let svg = style.inherited_svg();
+        let stroke_is_visible =
+            crate::painting::record::paint::svg::svg_paint_color(&svg.stroke).is_some_and(|color| color >> 24 != 0);
+        if !stroke_is_visible {
+            return 0.0;
+        }
+        svg.stroke_width
+            .length_percentage()
+            .map_or(0.0, |value| value.to_px(viewport_percentage_basis).to_double() as f32)
+    }
+
+    // https://svgwg.org/svg2-draft/shapes.html#RectElement
+    // The used values for rx and ry are determined from the computed values by following these
+    // steps in order.
+    fn svg_rect_corner_radii(style: StyleValues<'_>, used_width: f32, used_height: f32) -> (f32, f32) {
+        let svg_reset = style.svg_reset();
+        let computed_rx = &svg_reset.rx;
+        let computed_ry = &svg_reset.ry;
+
+        // 1. If both rx and ry have a computed value of auto, then the used value of both is 0.
+        if computed_rx.is_auto() && computed_ry.is_auto() {
+            return (0.0, 0.0);
+        }
+
+        // 2. Otherwise, convert specified values to absolute values, resolving an rx percentage
+        //    against the used width and an ry percentage against the used height, and letting an
+        //    auto radius take the other one.
+        let absolute_rx = computed_rx
+            .to_px(CssPixels::nearest_value_for_f32(used_width))
+            .to_float();
+        let absolute_ry = computed_ry
+            .to_px(CssPixels::nearest_value_for_f32(used_height))
+            .to_float();
+        let (mut used_rx, mut used_ry) = match (computed_rx.is_auto(), computed_ry.is_auto()) {
+            (false, true) => (absolute_rx, absolute_rx),
+            (true, false) => (absolute_ry, absolute_ry),
+            _ => (absolute_rx, absolute_ry),
+        };
+
+        // 3. Finally, apply clamping: neither radius may exceed half of the used size on its axis.
+        if used_rx > used_width / 2.0 {
+            used_rx = used_width / 2.0;
+        }
+        if used_ry > used_height / 2.0 {
+            used_ry = used_height / 2.0;
+        }
+        (used_rx, used_ry)
+    }
+
+    fn svg_rect_path(&self, style: StyleValues<'_>) -> libgfx_rust::path::PathBuilder {
+        let mut path = libgfx_rust::path::PathBuilder::new();
+        let computed_width = style.width();
+        let computed_height = style.height();
+        // FIXME: to_px rounds prematurely here - we shouldn't round to fixed point CSSPixels until
+        //        converting to CSS pixel space from SVG user space - this likely extends to other
+        //        SVG geometry elements as well.
+        let width = if computed_width.is_length_percentage() {
+            computed_width
+                .length_percentage()
+                .to_px(self.viewport_width)
+                .to_double()
+        } else {
+            0.0
+        };
+        let height = if computed_height.is_length_percentage() {
+            computed_height
+                .length_percentage()
+                .to_px(self.viewport_height)
+                .to_double()
+        } else {
+            0.0
+        };
+        let x = style.x().to_px(self.viewport_width).to_double();
+        let y = style.y().to_px(self.viewport_height).to_double();
+
+        // Non-positive dimensions disable rendering. In particular, a negative width or height is
+        // an invalid geometry value rather than a rectangle extending in the opposite direction.
+        if width <= 0.0 || height <= 0.0 {
+            return path;
+        }
+
+        let (rx, ry) = Self::svg_rect_corner_radii(style, width as f32, height as f32);
+        let corner = (rx > 0.0) && (ry > 0.0);
+        let x_axis_rotation = 0.0;
+        let large_arc_flag = false;
+        let sweep_flag = true;
+
+        // 1. perform an absolute moveto operation to location (x+rx,y);
+        path.move_to((x + rx as f64) as f32, y as f32);
+        // 2. perform an absolute horizontal lineto with parameter x+width-rx;
+        path.line_to((x + width - rx as f64) as f32, y as f32);
+        // 3. if both rx and ry are greater than zero, perform an absolute elliptical arc operation
+        //    to coordinate (x+width,y+ry), where rx and ry are used as the equivalent parameters
+        //    to the elliptical arc command, the x-axis-rotation and large-arc-flag are set to
+        //    zero, the sweep-flag is set to one;
+        if corner {
+            path.elliptical_arc_to(
+                (x + width) as f32,
+                (y + ry as f64) as f32,
+                rx,
+                ry,
+                x_axis_rotation,
+                large_arc_flag,
+                sweep_flag,
+            );
+        }
+        // 4. perform an absolute vertical lineto parameter y+height-ry;
+        path.line_to((x + width) as f32, (y + height - ry as f64) as f32);
+        // 5. if both rx and ry are greater than zero, perform an absolute elliptical arc operation
+        //    to coordinate (x+width-rx,y+height), using the same parameters as previously;
+        if corner {
+            path.elliptical_arc_to(
+                (x + width - rx as f64) as f32,
+                (y + height) as f32,
+                rx,
+                ry,
+                x_axis_rotation,
+                large_arc_flag,
+                sweep_flag,
+            );
+        }
+        // 6. perform an absolute horizontal lineto parameter x+rx;
+        path.line_to((x + rx as f64) as f32, (y + height) as f32);
+        // 7. if both rx and ry are greater than zero, perform an absolute elliptical arc operation
+        //    to coordinate (x,y+height-ry), using the same parameters as previously;
+        if corner {
+            path.elliptical_arc_to(
+                x as f32,
+                (y + height - ry as f64) as f32,
+                rx,
+                ry,
+                x_axis_rotation,
+                large_arc_flag,
+                sweep_flag,
+            );
+        }
+        // 8. perform an absolute vertical lineto parameter y+ry
+        path.line_to(x as f32, (y + ry as f64) as f32);
+        // 9. if both rx and ry are greater than zero, perform an absolute elliptical arc operation
+        //    with a segment-completing close path operation, using the same parameters as
+        //    previously.
+        if corner {
+            path.elliptical_arc_to(
+                (x + rx as f64) as f32,
+                y as f32,
+                rx,
+                ry,
+                x_axis_rotation,
+                large_arc_flag,
+                sweep_flag,
+            );
+        }
+        path.close();
+        path
+    }
+
+    fn svg_circle_path(&self, style: StyleValues<'_>) -> libgfx_rust::path::PathBuilder {
+        let mut path = libgfx_rust::path::PathBuilder::new();
+        let svg_reset = style.svg_reset();
+        let to_px = |handle: &ComputedStyleValueHandle, basis: CssPixels| {
+            handle
+                .length_percentage()
+                .map_or(CssPixels::default(), |value| value.to_px(basis))
+        };
+        let cx = to_px(&svg_reset.cx, self.viewport_width).to_float();
+        let cy = to_px(&svg_reset.cy, self.viewport_height).to_float();
+        // Percentages refer to the normalized diagonal of the current SVG viewport
+        // (see Units: https://svgwg.org/svg2-draft/coords.html#Units)
+        let r = to_px(&svg_reset.r, self.normalized_diagonal_length()).to_float();
+
+        // A zero radius disables rendering.
+        if r == 0.0 {
+            return path;
+        }
+        let large_arc = false;
+        let sweep = true;
+        // 1. A move-to command to the point cx+r,cy;
+        path.move_to(cx + r, cy);
+        // 2. arc to cx,cy+r;
+        path.arc_to(cx, cy + r, r, large_arc, sweep);
+        // 3. arc to cx-r,cy;
+        path.arc_to(cx - r, cy, r, large_arc, sweep);
+        // 4. arc to cx,cy-r;
+        path.arc_to(cx, cy - r, r, large_arc, sweep);
+        // 5. arc with a segment-completing close path operation.
+        path.arc_to(cx + r, cy, r, large_arc, sweep);
+        path
+    }
+
+    fn normalized_diagonal_length(&self) -> CssPixels {
+        if self.viewport_width == self.viewport_height {
+            return self.viewport_width;
+        }
+        let sum_of_squares = self.viewport_width * self.viewport_width + self.viewport_height * self.viewport_height;
+        CssPixels::nearest_value_for_f32(
+            sum_of_squares
+                .div_as_fraction(CssPixels::from_integer(2))
+                .to_float()
+                .sqrt(),
+        )
+    }
+
+    fn svg_ellipse_path(&self, style: StyleValues<'_>) -> libgfx_rust::path::PathBuilder {
+        let mut path = libgfx_rust::path::PathBuilder::new();
+        let svg_reset = style.svg_reset();
+        let computed_rx = &svg_reset.rx;
+        let computed_ry = &svg_reset.ry;
+        let mut rx = computed_rx.to_px(self.viewport_width).to_float();
+        let mut ry = computed_ry.to_px(self.viewport_height).to_float();
+
+        // https://svgwg.org/svg2-draft/geometry.html#RxProperty
+        // When the computed value of 'rx' is auto, the used radius is equal to the absolute length
+        // used for ry, creating a circular arc. If both 'rx' and 'ry' have a computed value of
+        // auto, the used value is 0. The same holds the other way around.
+        if computed_rx.is_auto() {
+            rx = computed_ry.to_px(self.viewport_height).to_float();
+        }
+        if computed_ry.is_auto() {
+            ry = computed_rx.to_px(self.viewport_width).to_float();
+        }
+
+        let to_px = |handle: &ComputedStyleValueHandle, basis: CssPixels| {
+            handle
+                .length_percentage()
+                .map_or(CssPixels::default(), |value| value.to_px(basis))
+        };
+        let cx = to_px(&svg_reset.cx, self.viewport_width).to_float();
+        let cy = to_px(&svg_reset.cy, self.viewport_height).to_float();
+
+        // A negative radius is invalid. If only one radius is invalid, SVG uses the other valid
+        // radius for both axes; if both are invalid, rendering is disabled. A computed value of
+        // zero for either dimension also disables rendering.
+        if rx < 0.0 && ry >= 0.0 {
+            rx = ry;
+        } else if ry < 0.0 && rx >= 0.0 {
+            ry = rx;
+        }
+        if rx <= 0.0 || ry <= 0.0 {
+            return path;
+        }
+
+        let x_axis_rotation = 0.0;
+        let large_arc = false;
+        // NB: Spec says sweep should be false, but it's wrong. https://github.com/w3c/svgwg/issues/765
+        let sweep = true;
+        // 1. A move-to command to the point cx+rx,cy;
+        path.move_to(cx + rx, cy);
+        // 2. arc to cx,cy+ry;
+        path.elliptical_arc_to(cx, cy + ry, rx, ry, x_axis_rotation, large_arc, sweep);
+        // 3. arc to cx-rx,cy;
+        path.elliptical_arc_to(cx - rx, cy, rx, ry, x_axis_rotation, large_arc, sweep);
+        // 4. arc to cx,cy-ry;
+        path.elliptical_arc_to(cx, cy - ry, rx, ry, x_axis_rotation, large_arc, sweep);
+        // 5. arc with a segment-completing close path operation.
+        path.elliptical_arc_to(cx + rx, cy, rx, ry, x_axis_rotation, large_arc, sweep);
+        path
+    }
+
+    fn svg_line_path(&self, attributes: FfiSvgAttributeFacts) -> libgfx_rust::path::PathBuilder {
+        let mut path = libgfx_rust::path::PathBuilder::new();
+        let viewport_width = self.viewport_width.to_float();
+        let viewport_height = self.viewport_height.to_float();
+        // 1. perform an absolute moveto operation to absolute location (x1,y1)
+        path.move_to(
+            attributes.line_x1.resolve_relative_to(viewport_width),
+            attributes.line_y1.resolve_relative_to(viewport_height),
+        );
+        // 2. perform an absolute lineto operation to absolute location (x2,y2)
+        path.line_to(
+            attributes.line_x2.resolve_relative_to(viewport_width),
+            attributes.line_y2.resolve_relative_to(viewport_height),
+        );
+        path
+    }
+
+    fn svg_poly_path(points: Option<&[FfiFloatPoint]>, close: bool) -> libgfx_rust::path::PathBuilder {
+        let mut path = libgfx_rust::path::PathBuilder::new();
+        let Some(points) = points.filter(|points| !points.is_empty()) else {
+            return path;
+        };
+        // 1. perform an absolute moveto operation to the first coordinate pair in the list of points
+        path.move_to(points[0].x, points[0].y);
+        // 2. for each subsequent coordinate pair, perform an absolute lineto operation to that
+        //    coordinate pair.
+        for point in &points[1..] {
+            path.line_to(point.x, point.y);
+        }
+        // 3. a polygon performs a closepath command; a polyline does not.
+        if close {
+            path.close();
+        }
+        path
+    }
+
+    /// The geometry a shape element draws, in the user units of the viewport it sits in.
+    fn svg_geometry_path(&self, node: Node) -> libgfx_rust::path::OwnedPath {
+        let points = self.callbacks.arena().svg_points(node);
+        self.svg_geometry_path_of(self.svg_attributes(node), self.style(node), points.as_deref())
+    }
+
+    /// As above, from an element's published attributes and computed style rather than from its
+    /// box: a `<textPath>` follows a shape that is normally inside a `<defs>` and so has no box.
+    fn svg_geometry_path_of(
+        &self,
+        attributes: FfiSvgAttributeFacts,
+        style: StyleValues<'_>,
+        points: Option<&[FfiFloatPoint]>,
+    ) -> libgfx_rust::path::OwnedPath {
+        let builder = match attributes.geometry_kind {
+            SVG_GEOMETRY_KIND_PATH => return self.svg_path_element_path(style),
+            SVG_GEOMETRY_KIND_RECT => self.svg_rect_path(style),
+            SVG_GEOMETRY_KIND_CIRCLE => self.svg_circle_path(style),
+            SVG_GEOMETRY_KIND_ELLIPSE => self.svg_ellipse_path(style),
+            SVG_GEOMETRY_KIND_LINE => self.svg_line_path(attributes),
+            SVG_GEOMETRY_KIND_POLYLINE => Self::svg_poly_path(points, false),
+            SVG_GEOMETRY_KIND_POLYGON => Self::svg_poly_path(points, true),
+            _ => libgfx_rust::path::PathBuilder::new(),
+        };
+        builder.build()
+    }
+
+    /// The `d` property's path. It is already a shared, immutable blob on the computed style, so
+    /// the pass only has to realize it as geometry and stamp the shape's fill rule onto it.
+    fn svg_path_element_path(&self, style: StyleValues<'_>) -> libgfx_rust::path::OwnedPath {
+        let Some(shape) = style
+            .svg_reset()
+            .d
+            .style_value()
+            .and_then(crate::css::style_value::StyleValueData::basic_shape)
+        else {
+            return libgfx_rust::path::PathBuilder::new().build();
+        };
+        let mut path = shape.path.to_gfx_path();
+        path.set_fill_type(i32::from(shape.fill_rule));
+        path
+    }
+
+    /// The pixel value one of the text positioning attributes resolves to. A relative length is
+    /// absolutized against the element's own style, exactly as the attribute's parse used to be.
+    fn resolve_svg_text_length(&self, node: Node, value: FfiSvgLengthValue, reference: CssPixels) -> f32 {
+        match value.kind {
+            SVG_LENGTH_KIND_NUMBER => value.value as f32,
+            SVG_LENGTH_KIND_PERCENTAGE => {
+                CssPixels::truncated_value_for(reference.to_double() * value.value / 100.0).to_float()
+            }
+            SVG_LENGTH_KIND_LENGTH => {
+                let context = self.length_resolution_context(node);
+                let absolutized =
+                    crate::css::style_compute::absolutize_length_for_calc(value.value, value.unit as usize, &context);
+                CssPixels::nearest_value_for(absolutized.px).to_float()
+            }
+            _ => 0.0,
+        }
+    }
+
+    fn font_metrics_for_length_resolution(style: StyleValues<'_>) -> crate::css::style_compute::FfiFontMetrics {
+        let font = style.font();
+        crate::css::style_compute::FfiFontMetrics {
+            font_size: style.font_size().to_double(),
+            x_height: CssPixels::nearest_value_for_f32(font.font_x_height).to_double(),
+            // FIXME: This is only approximately the cap height, exactly as Length::FontMetrics has it.
+            cap_height: CssPixels::nearest_value_for_f32(font.font_ascent).to_double(),
+            zero_advance: CssPixels::nearest_value_for_f32(font.font_zero_advance).to_double(),
+            line_height: style.line_height().to_double(),
+        }
+    }
+
+    fn length_resolution_context(&self, node: Node) -> crate::css::style_compute::FfiLengthResolutionContext {
+        svg_length_resolution_context(&self.callbacks, node)
+    }
+
+    /// The character data an SVG text content element renders: its direct child text, as written.
+    /// SVG shapes the element's own characters, not the white-space-collapsed text a line box
+    /// would lay out, so this reads the source text the row kept beside its rendering.
+    fn svg_text_contents(&self, node: Node) -> Vec<u16> {
+        let mut text: Vec<u16> = Vec::new();
+        let mut child = self.first_child(node);
+        while !child.is_invalid() {
+            if node_facts::kind_is_text(self.node_kind(child)) {
+                self.append_svg_source_text(child, &mut text);
+            }
+            child = self.next_sibling(child);
+        }
+        trim_ascii_whitespace(&text).to_vec()
+    }
+
+    /// The character data text on a path renders: the source text of every text node in its
+    /// subtree whose parent has a box, rather than of its direct children alone.
+    fn rendered_svg_text_contents(&self, root: Node) -> Vec<u16> {
+        let mut text: Vec<u16> = Vec::new();
+        let mut current = root;
+        loop {
+            if node_facts::kind_is_text(self.node_kind(current)) {
+                self.append_svg_source_text(current, &mut text);
+            }
+            let child = self.first_child(current);
+            if !child.is_invalid() {
+                current = child;
+                continue;
+            }
+            loop {
+                if current == root {
+                    return trim_ascii_whitespace(&text).to_vec();
+                }
+                let sibling = self.next_sibling(current);
+                if !sibling.is_invalid() {
+                    current = sibling;
+                    break;
+                }
+                current = self.parent(current);
+            }
+        }
+    }
+
+    fn append_svg_source_text(&self, text_node: Node, out: &mut Vec<u16>) {
+        let content = self.callbacks.arena().text_content(text_node);
+        debug_assert!(content.is_some(), "SVG text child was not synced before layout");
+        if let Some(source) = content.and_then(|content| content.svg_source_text.as_deref()) {
+            out.extend_from_slice(source);
+        }
+    }
+
+    /// https://svgwg.org/svg2-draft/text.html#TermTextChunk
+    /// Each new absolute positioning adjustment (due to an 'x' or 'y' attribute, or forced line
+    /// break) creates a new text chunk.
+    /// https://svgwg.org/svg2-draft/text.html#TextElementXAttribute
+    /// NB: The initial value of 'x' and 'y' is "0 for 'text'; (none) for 'tspan'". So, a <text>
+    ///     element always positions its first character absolutely, and so always starts a chunk.
+    fn svg_text_box_starts_text_chunk(&self, text_box: Node) -> bool {
+        let attributes = self.svg_attributes(text_box);
+        attributes.is_text_element
+            || attributes.text_x.kind != SVG_LENGTH_KIND_NONE
+            || attributes.text_y.kind != SVG_LENGTH_KIND_NONE
+    }
+
+    fn apply_svg_text_positioning(&mut self, text_box: Node, attributes: FfiSvgAttributeFacts) {
+        let viewport_width = self.viewport_width;
+        let viewport_height = self.viewport_height;
+        if attributes.text_x.kind != SVG_LENGTH_KIND_NONE {
+            self.current_text_position.x = self.resolve_svg_text_length(text_box, attributes.text_x, viewport_width);
+        }
+        if attributes.text_y.kind != SVG_LENGTH_KIND_NONE {
+            self.current_text_position.y = self.resolve_svg_text_length(text_box, attributes.text_y, viewport_height);
+        }
+        self.current_text_position.x += self.resolve_svg_text_length(text_box, attributes.text_dx, viewport_width);
+        self.current_text_position.y += self.resolve_svg_text_length(text_box, attributes.text_dy, viewport_height);
+    }
+
+    /// https://drafts.csswg.org/css-inline/#dominant-baseline-property
+    fn svg_dominant_baseline_offset(&self, style: StyleValues<'_>) -> f32 {
+        let svg = style.inherited_svg();
+        let metric = if svg.has_dominant_baseline {
+            svg.dominant_baseline
+        } else {
+            // https://drafts.csswg.org/css-inline/#valdef-dominant-baseline-auto
+            // Equivalent to alphabetic in horizontal writing modes and in vertical writing modes
+            // when text-orientation is sideways. Equivalent to central in vertical writing modes
+            // when text-orientation is mixed or upright.
+            // FIXME: Take text-orientation into account once it is implemented.
+            match style.writing_mode() {
+                writing_mode::VERTICAL_RL | writing_mode::VERTICAL_LR => baseline_metric::CENTRAL,
+                _ => baseline_metric::ALPHABETIC,
+            }
+        };
+        // NB: The dominant-baseline offset is resolved against the metrics of the first available
+        //     font - while each glyph is rendered with the first font in the cascade that contains
+        //     its code point.
+        let font = style.font();
+        match metric {
+            baseline_metric::CENTRAL => (font.font_ascent - font.font_descent) / 2.0,
+            baseline_metric::MIDDLE => font.font_x_height / 2.0,
+            // FIXME: Read the hanging baseline from the font's BASE table.
+            baseline_metric::HANGING => font.font_ascent * 0.8,
+            // FIXME: Read the ideographic baseline from the font's BASE table.
+            baseline_metric::IDEOGRAPHIC => -font.font_descent,
+            // FIXME: Read the math baseline from the font's BASE table.
+            baseline_metric::MATHEMATICAL => font.font_ascent * 0.5,
+            // FIXME: Support text-top and text-bottom.
+            _ => 0.0,
+        }
+    }
+
+    /// Mirrors Gfx::shape_text(baseline_start, text, font_cascade_list): one run per stretch of
+    /// text the cascade resolves to the same font, each starting where the last one ended.
+    fn shape_svg_text(
+        &self,
+        style: StyleValues<'_>,
+        text: &[u16],
+        baseline_start: FfiFloatPoint,
+    ) -> (Vec<libgfx_rust::path::GlyphRun>, f32) {
+        let mut runs = Vec::new();
+        let mut advance = 0.0f32;
+        if text.is_empty() {
+            return (runs, advance);
+        }
+        let frozen_font_list = style.frozen_font_list();
+        let font_for = |offset: usize| {
+            frozen_font_list.font_for_code_point(
+                code_point_at(text, offset),
+                libgfx_rust::font::EmojiPresentation {
+                    is_emoji: false,
+                    forced: false,
+                },
+            )
+        };
+        let mut add_run = |font: &libgfx_rust::font::FontHandle, range: std::ops::Range<usize>, advance: &mut f32| {
+            let shaped = libgfx_rust::text_layout::shape_text(
+                font,
+                &text[range],
+                libgfx_rust::text_layout::TextType::Common,
+                baseline_start.x + *advance,
+                0.0,
+                0.0,
+            );
+            *advance += shaped.width();
+            let mut glyph_buffer = shaped.into_glyphs();
+            let glyphs = glyph_buffer.to_mut();
+            if baseline_start.y != 0.0 {
+                for glyph in glyphs.iter_mut() {
+                    glyph.y += baseline_start.y;
+                }
+            }
+            runs.push(libgfx_rust::path::GlyphRun {
+                font: font.clone(),
+                glyphs: std::mem::take(glyphs),
+            });
+        };
+
+        let mut last_font = font_for(0);
+        let mut run_start = 0;
+        let mut offset = 0;
+        while offset < text.len() {
+            let font = font_for(offset);
+            if font != last_font {
+                add_run(&last_font, run_start..offset, &mut advance);
+                last_font = font;
+                run_start = offset;
+            }
+            offset += code_point_length_at(text, offset);
+        }
+        add_run(&last_font, run_start..text.len(), &mut advance);
+        (runs, advance)
+    }
+
+    /// The advance of the text run rendered by the given box; that is, of its direct child text.
+    fn svg_text_run_advance(&self, text_box: Node, text: &[u16]) -> f32 {
+        self.shape_svg_text(self.style(text_box), text, FfiFloatPoint::default())
+            .1
+    }
+
+    /// Measures the total advance of the text chunk that starts at the given box, and determines
+    /// the 'text-anchor' value that applies to the chunk. The chunk extends in document order
+    /// through the subtree of the containing <text> element until the next box that starts a chunk
+    /// of its own.
+    fn measure_svg_text_chunk(&self, chunk_start_box: Node) -> SvgTextChunkMeasurement {
+        let mut subtree_root = chunk_start_box;
+        let mut ancestor = self.parent(chunk_start_box);
+        while !ancestor.is_invalid() && self.node_kind(ancestor) == NodeKind::SVGTextBox {
+            subtree_root = ancestor;
+            ancestor = self.parent(ancestor);
+        }
+
+        let mut measurement = SvgTextChunkMeasurement::default();
+        let mut found_chunk_start = false;
+        let mut found_first_rendered_text = false;
+        let mut current = subtree_root;
+        'walk: loop {
+            let kind = self.node_kind(current);
+            // AD-HOC: Text on a path is laid out independently; see compute_path_for_svg_text_path().
+            let descend = kind != NodeKind::SVGTextPathBox;
+            if kind == NodeKind::SVGTextBox {
+                if current == chunk_start_box {
+                    found_chunk_start = true;
+                } else if found_chunk_start && self.svg_text_box_starts_text_chunk(current) {
+                    break 'walk;
+                }
+                if found_chunk_start {
+                    let text = self.svg_text_contents(current);
+                    if !text.is_empty() {
+                        if !found_first_rendered_text {
+                            // https://svgwg.org/svg2-draft/text.html#TextLayoutAlgorithm
+                            // Adjust shift based on the value of 'text-anchor' and 'direction' of
+                            // the element the character at index i.
+                            // FIXME: Take text direction into account.
+                            measurement.anchor = self.style(current).inherited_svg().text_anchor;
+                            found_first_rendered_text = true;
+                        }
+                        measurement.advance += self.svg_text_run_advance(current, &text);
+                    }
+                }
+            }
+            if descend {
+                let child = self.first_child(current);
+                if !child.is_invalid() {
+                    current = child;
+                    continue;
+                }
+            }
+            loop {
+                if current == subtree_root {
+                    break 'walk;
+                }
+                let sibling = self.next_sibling(current);
+                if !sibling.is_invalid() {
+                    current = sibling;
+                    break;
+                }
+                current = self.parent(current);
+            }
+        }
+        measurement
+    }
+
+    /// The glyph outlines a <text> or <tspan> renders, and the current text position it leaves.
+    fn svg_text_box_path(&mut self, text_box: Node) -> libgfx_rust::path::OwnedPath {
+        let attributes = self.svg_attributes(text_box);
+        // https://svgwg.org/svg2-draft/text.html#TextElementXAttribute
+        // the starting X (Y) coordinate for rendering the glyphs corresponding to the given
+        // character is the X (Y) coordinate of the resulting current text position from the most
+        // recently rendered glyph for the current 'text' element.
+        // NB: The initial value of 'x' and 'y' is "0 for 'text'; (none) for 'tspan'": a <text>
+        //     element starts at (0, 0) regardless of the current text position, while a <tspan>
+        //     without 'x'/'y' continues at the current text position.
+        if attributes.is_text_element {
+            self.current_text_position = FfiFloatPoint::default();
+        }
+        self.apply_svg_text_positioning(text_box, attributes);
+        if self.svg_text_box_starts_text_chunk(text_box) {
+            // https://svgwg.org/svg2-draft/text.html#TextAnchoringProperties
+            // The 'text-anchor' property is applied to each individual text chunk within a given
+            // 'text' element.
+            // AD-HOC: The spec applies 'text-anchor' as a shift of the chunk's rendered glyphs
+            //         after layout; shifting the chunk's starting position up front by the chunk's
+            //         total advance is equivalent for horizontal text - since every run in the
+            //         chunk is laid out sequentially from this position.
+            let chunk = self.measure_svg_text_chunk(text_box);
+            match chunk.anchor {
+                // The rendered characters are aligned such that the start of the resulting
+                // rendered text is at the initial current text position.
+                text_anchor::START => {}
+                // The rendered characters are shifted such that the geometric middle of the
+                // resulting rendered text (determined from the initial and final current text
+                // position before applying the 'text-anchor' property) is at the initial current
+                // text position.
+                text_anchor::MIDDLE => self.current_text_position.x -= chunk.advance / 2.0,
+                // The rendered characters are shifted such that the end of the resulting rendered
+                // text (final current text position before applying the 'text-anchor' property) is
+                // at the initial current text position.
+                text_anchor::END => self.current_text_position.x -= chunk.advance,
+                _ => unreachable!("invalid text-anchor value"),
+            }
+        }
+
+        let style = self.style(text_box);
+        let text_offset = FfiFloatPoint {
+            x: self.current_text_position.x,
+            y: self.current_text_position.y + self.svg_dominant_baseline_offset(style),
+        };
+        let text = self.svg_text_contents(text_box);
+        let (runs, advance) = self.shape_svg_text(style, &text, text_offset);
+        // https://svgwg.org/svg2-draft/text.html#TextLayoutIntroduction
+        // After each glyph is placed, the current text position is advanced by the glyph's advance
+        // value (typically the width for horizontal text or height for vertical text).
+        // FIXME: Take writing mode and text direction into account.
+        self.current_text_position.x += advance;
+        libgfx_rust::path::OwnedPath::from_glyph_runs(&runs)
+    }
+
+    /// The glyph outlines a <textPath> renders: its whole subtree's text, shaped from the origin
+    /// and then laid along the shape its `href` names.
+    /// https://svgwg.org/svg2-draft/text.html#TextPathElement
+    fn svg_text_path_box_path(&self, text_path_box: Node) -> libgfx_rust::path::OwnedPath {
+        let empty = || libgfx_rust::path::PathBuilder::new().build();
+        let Some(shape_path) = self.svg_referenced_shape_path(text_path_box) else {
+            return empty();
+        };
+
+        let style = self.style(text_path_box);
+        let text = self.rendered_svg_text_contents(text_path_box);
+        let (runs, total_advance) = self.shape_svg_text(style, &text, FfiFloatPoint::default());
+
+        // https://svgwg.org/svg2-draft/text.html#TextPathElementStartOffsetAttribute
+        let mut start_offset = self
+            .svg_attributes(text_path_box)
+            .text_path_start_offset
+            .resolve_relative_to(shape_path.length());
+        // FIXME: Take writing mode and text direction into account.
+        match style.inherited_svg().text_anchor {
+            text_anchor::START => {}
+            text_anchor::MIDDLE => start_offset -= total_advance / 2.0,
+            text_anchor::END => start_offset -= total_advance,
+            _ => unreachable!("invalid text-anchor value"),
+        }
+
+        shape_path.place_glyph_runs_along(&runs, start_offset)
+    }
+
+    /// The geometry of the shape element an SVG reference names, read from what that element
+    /// published rather than from a box: a `<textPath>`'s target is normally a `<path>` inside a
+    /// `<defs>`, and a `<defs>` builds no box at all.
+    fn svg_referenced_shape_path(&self, referring_box: Node) -> Option<libgfx_rust::path::OwnedPath> {
+        let arena = self.callbacks.arena();
+        let referrer = arena.node_style_node(referring_box)?;
+        let atom = self.svg_attributes(referring_box).reference_fragment_atom;
+        let shape = arena.element_by_svg_reference(referrer, atom)?;
+        let attributes = arena.style_node_svg_attribute_facts(shape);
+        // Only a geometry element is followed; every other element answers with no shape at all.
+        if attributes.geometry_kind == SVG_GEOMETRY_KIND_NONE {
+            return None;
+        }
+        let payloads = arena.style_node_style_payloads(shape)?;
+        let points = arena.style_node_svg_points(shape);
+        Some(self.svg_geometry_path_of(attributes, StyleValues::new(&payloads), points.as_deref()))
+    }
+
+    fn svg_attributes(&self, node: Node) -> FfiSvgAttributeFacts {
+        self.callbacks.arena().svg_attribute_facts(node)
     }
 
     fn style(&self, node: Node) -> StyleValues<'_> {
@@ -452,22 +1483,23 @@ impl<'pass> SvgFormattingContext<'pass> {
         self.used_values(node).rare_data_mut().svg.viewport_size = Some(viewport_size);
     }
 
-    fn commit_svg_element_facts(&self, node: Node, facts: FfiSvgElementFacts) {
+    fn commit_svg_element_facts(&self, node: Node, facts: SvgElementFacts, attributes: FfiSvgAttributeFacts) {
         let used = self.used_values(node);
         let mut rare = used.rare_data_mut();
-        rare.svg.view_box = facts.has_active_view_box.then_some(facts.active_view_box);
+        rare.svg.view_box = attributes.has_active_view_box.then_some(attributes.active_view_box);
         rare.svg.element_transform = (!facts.element_transform.is_identity()).then_some(facts.element_transform);
         rare.svg.additional_element_transform =
             (!facts.additional_element_transform.is_identity()).then_some(facts.additional_element_transform);
         rare.svg.mask_area_facts = (self.node_kind(node) == NodeKind::SVGMaskBox).then_some(SvgMaskAreaFacts {
-            units_are_object_bounding_box: facts.mask_units == SVG_UNITS_OBJECT_BOUNDING_BOX,
-            x: facts.mask_x,
-            y: facts.mask_y,
-            width: facts.mask_width,
-            height: facts.mask_height,
+            units_are_object_bounding_box: attributes.mask_units == SVG_UNITS_OBJECT_BOUNDING_BOX,
+            x: attributes.mask_x,
+            y: attributes.mask_y,
+            width: attributes.mask_width,
+            height: attributes.mask_height,
         });
         rare.svg.viewport_percentage_basis = facts.viewport_percentage_basis;
-        rare.svg.resource_content_units_are_object_bounding_box = facts.content_units == SVG_UNITS_OBJECT_BOUNDING_BOX;
+        rare.svg.resource_content_units_are_object_bounding_box =
+            attributes.content_units == SVG_UNITS_OBJECT_BOUNDING_BOX;
     }
 
     fn place_child(&self, node: Node, x: CssPixels, y: CssPixels) {
@@ -498,9 +1530,10 @@ impl<'pass> SvgFormattingContext<'pass> {
         //       obvious way to drive SVG layout in our engine at the moment.
         let kind = self.node_kind(self.box_);
         let facts = self.svg_facts(self.box_);
+        let attributes = self.svg_attributes(self.box_);
         let used_pointer = self.used_values(self.box_);
         let used = &used_pointer;
-        self.commit_svg_element_facts(self.box_, facts);
+        self.commit_svg_element_facts(self.box_, facts, attributes);
 
         if facts.is_document_element && !facts.document_is_decoded_svg && !used.has_content_offset.get() {
             // Overwrite the content width/height with the styled node width/height (from <svg width height ...>)
@@ -543,10 +1576,10 @@ impl<'pass> SvgFormattingContext<'pass> {
         // pattern's used size is its tile size, so the same computation maps its viewBox onto the
         // tile.
         let box_establishes_viewport = kind == NodeKind::SVGSVGBox
-            || (kind_is_svg_graphics_box(kind) && facts.is_fit_to_view_box)
-            || (kind == NodeKind::SVGPatternBox && facts.is_fit_to_view_box);
+            || (kind_is_svg_graphics_box(kind) && attributes.is_fit_to_view_box)
+            || (kind == NodeKind::SVGPatternBox && attributes.is_fit_to_view_box);
 
-        let mut active_view_box = facts.has_active_view_box.then_some(facts.active_view_box);
+        let mut active_view_box = attributes.has_active_view_box.then_some(attributes.active_view_box);
         // https://svgwg.org/svg2-draft/coords.html#ViewBoxAttribute
         if let Some(view_box) = active_view_box {
             if view_box.width < 0.0 || view_box.height < 0.0 {
@@ -578,8 +1611,8 @@ impl<'pass> SvgFormattingContext<'pass> {
                 };
                 // The initial value for preserveAspectRatio is xMidYMid meet.
                 let transform = scale_and_align_viewbox_content(
-                    facts.preserve_aspect_ratio_align,
-                    facts.preserve_aspect_ratio_meet_or_slice,
+                    attributes.preserve_aspect_ratio_align,
+                    attributes.preserve_aspect_ratio_meet_or_slice,
                     view_box,
                     scale_width as f32,
                     scale_height as f32,
@@ -634,8 +1667,7 @@ impl<'pass> SvgFormattingContext<'pass> {
 
     fn layout_svg_element(&mut self, run: &FormattingContextRun<'pass>, child: Node, input: LayoutInput) {
         let kind = self.node_kind(child);
-        let facts = self.svg_facts(child);
-        if facts.is_fit_to_view_box {
+        if self.svg_attributes(child).is_fit_to_view_box {
             self.layout_nested_viewport(run, child);
         } else if kind == NodeKind::SVGForeignObjectBox {
             let child_used_pointer = self.create_used_values(child);
@@ -724,7 +1756,7 @@ impl<'pass> SvgFormattingContext<'pass> {
     fn layout_graphics_element(&mut self, run: &FormattingContextRun<'pass>, graphics_box: Node, input: LayoutInput) {
         self.create_used_values(graphics_box);
         let facts = self.svg_facts(graphics_box);
-        self.commit_svg_element_facts(graphics_box, facts);
+        self.commit_svg_element_facts(graphics_box, facts, self.svg_attributes(graphics_box));
         let kind = self.node_kind(graphics_box);
 
         // https://svgwg.org/svg2-draft/struct.html#GroupsOverview
@@ -740,7 +1772,7 @@ impl<'pass> SvgFormattingContext<'pass> {
             self.layout_image_element(graphics_box);
         } else {
             // Assume this is a path-like element.
-            self.layout_path_like_element(run, graphics_box, input);
+            self.layout_path_like_element(run, graphics_box, input, facts);
         }
 
         if let Some(mask) = self.first_child_of_kind(graphics_box, NodeKind::SVGMaskBox) {
@@ -759,27 +1791,23 @@ impl<'pass> SvgFormattingContext<'pass> {
         }
     }
 
-    fn layout_path_like_element(&mut self, run: &FormattingContextRun<'pass>, graphics_box: Node, input: LayoutInput) {
-        let facts = self.svg_facts(graphics_box);
-        // SAFETY: The callback computes geometry synchronously and transfers
-        // sole ownership of a heap-allocated path into the result.
-        let result = unsafe {
-            (self.callbacks.host.compute_svg_path)(
-                self.callbacks.host.context,
-                self.callbacks.shell(graphics_box),
-                FfiSvgPathRequest {
-                    viewport_width: self.viewport_width,
-                    viewport_height: self.viewport_height,
-                    current_text_position: self.current_text_position,
-                },
-            )
+    fn layout_path_like_element(
+        &mut self,
+        run: &FormattingContextRun<'pass>,
+        graphics_box: Node,
+        input: LayoutInput,
+        facts: SvgElementFacts,
+    ) {
+        // A shape's geometry is its own attributes and computed style against the viewport, and
+        // text is its own character data shaped with its own font cascade, so the pass draws both.
+        let path = match self.node_kind(graphics_box) {
+            NodeKind::SVGGeometryBox => self.svg_geometry_path(graphics_box),
+            NodeKind::SVGTextBox => self.svg_text_box_path(graphics_box),
+            NodeKind::SVGTextPathBox => self.svg_text_path_box_path(graphics_box),
+            _ => libgfx_rust::path::PathBuilder::new().build(),
         };
-        // SAFETY: The callback just handed over its one owning pointer.
-        let path = unsafe { libgfx_rust::path::OwnedPath::adopt(result.path_handle) };
 
         if self.node_kind(graphics_box) == NodeKind::SVGTextBox {
-            // Descendant and following text elements continue from the text position after this element's own text run.
-            self.current_text_position = result.text_position_after;
             // <text> and <tspan> elements can contain more text elements.
             let mut child = self.first_child(graphics_box);
             while !child.is_invalid() {
@@ -791,7 +1819,8 @@ impl<'pass> SvgFormattingContext<'pass> {
             }
         }
 
-        let mut bounding_box = float_rect_to_css_pixels(result.bounding_box);
+        let [x, y, width, height] = path.bounding_box();
+        let mut bounding_box = float_rect_to_css_pixels(FfiFloatRect { x, y, width, height });
         // Stroke increases the path's size by stroke_width/2 per side.
         let stroke_width = CssPixels::nearest_value_for_f32(facts.visible_stroke_width);
         bounding_box.inflate(stroke_width, stroke_width);
@@ -800,24 +1829,55 @@ impl<'pass> SvgFormattingContext<'pass> {
         let used = &used_pointer;
         used.set_content_inline_size(bounding_box.width);
         used.set_content_block_size(bounding_box.height);
-        self.used_values(graphics_box).rare_data_mut().computed_svg_path = Some(std::rc::Rc::new(path));
+        self.used_values(graphics_box).rare_data_mut().computed_svg_path = Some(std::sync::Arc::new(path));
         self.place_child(graphics_box, bounding_box.x, bounding_box.y);
         used.has_definite_inline_size.set(true);
         used.has_definite_block_size.set(true);
     }
 
-    fn layout_image_element(&self, image_box: Node) {
-        // SAFETY: The callback returns a POD bounding box for the live image
-        // node and requested viewport.
-        let source = unsafe {
-            (self.callbacks.host.svg_image_bounding_box)(
-                self.callbacks.host.context,
-                self.callbacks.shell(image_box),
-                self.viewport_width,
-                self.viewport_height,
-            )
+    // https://w3c.github.io/svgwg/svg2-draft/embedded.html#Placement
+    // Computation of automatically-sized values follows the Default Sizing Algorithm defined for
+    // replaced elements in CSS layout [css-images-3]. In particular, when the referenced resource
+    // does not have an intrinsic size (such as image types with no defined dimensions), it is
+    // assumed to have a width of 300px and a height of 150px.
+    fn svg_image_bounding_box(&self, image_box: Node) -> SvgCssPixelRect {
+        use crate::painting::record::paint::replaced::{SizeWithAspectRatio, run_default_sizing_algorithm};
+        let style = self.style(image_box);
+        let specified_width = style
+            .width()
+            .is_length_percentage()
+            .then(|| style.width().to_px(self.viewport_width));
+        let specified_height = style
+            .height()
+            .is_length_percentage()
+            .then(|| style.height().to_px(self.viewport_height));
+
+        let facts = self.callbacks.replaced_content_facts(image_box).unwrap_or_default();
+        let natural = SizeWithAspectRatio {
+            width: facts.has_auto_content_width.then_some(facts.auto_content_width),
+            height: facts.has_auto_content_height.then_some(facts.auto_content_height),
+            aspect_ratio: (facts.auto_content_aspect_ratio_denominator != CssPixels::default()).then_some(
+                crate::painting::record::paint::replaced::Fraction {
+                    numerator: facts.auto_content_aspect_ratio_numerator,
+                    denominator: facts.auto_content_aspect_ratio_denominator,
+                },
+            ),
         };
-        let bounding_box = float_rect_to_css_pixels(source);
+        // The default object size applies only once something has decoded; until then the image
+        // has no size at all.
+        let default_size = CssPixelSize::new(facts.default_preferred_width, facts.default_preferred_height);
+
+        let sizing = run_default_sizing_algorithm(specified_width, specified_height, &natural, default_size);
+        SvgCssPixelRect {
+            x: style.x().to_px(self.viewport_width),
+            y: style.y().to_px(self.viewport_height),
+            width: sizing.width,
+            height: sizing.height,
+        }
+    }
+
+    fn layout_image_element(&self, image_box: Node) {
+        let bounding_box = self.svg_image_bounding_box(image_box);
         let used_pointer = self.used_values(image_box);
         let used = &used_pointer;
         used.set_content_inline_size(bounding_box.width);
@@ -830,22 +1890,23 @@ impl<'pass> SvgFormattingContext<'pass> {
     fn layout_mask_or_clip(&mut self, run: &FormattingContextRun<'pass>, resource: Node) {
         let kind = self.node_kind(resource);
         let facts = self.svg_facts(resource);
+        let attributes = self.svg_attributes(resource);
         assert!(kind_is_svg_resource_box(kind));
         // FIXME: Somehow limit <clipPath> contents to: shape elements, <text>, and <use>.
         let used_pointer = self.create_used_values(resource);
-        self.commit_svg_element_facts(resource, facts);
+        self.commit_svg_element_facts(resource, facts, attributes);
 
-        if kind == NodeKind::SVGPatternBox && facts.has_active_view_box {
-            if facts.pattern_units == SVG_UNITS_USER_SPACE_ON_USE {
-                let width = if facts.pattern_width.is_percentage {
-                    facts.pattern_width.value * (self.viewport_width.raw_value() as f32 / 64.0)
+        if kind == NodeKind::SVGPatternBox && attributes.has_active_view_box {
+            if attributes.pattern_units == SVG_UNITS_USER_SPACE_ON_USE {
+                let width = if attributes.pattern_width.is_percentage {
+                    attributes.pattern_width.value * (self.viewport_width.raw_value() as f32 / 64.0)
                 } else {
-                    facts.pattern_width.value
+                    attributes.pattern_width.value
                 };
-                let height = if facts.pattern_height.is_percentage {
-                    facts.pattern_height.value * (self.viewport_height.raw_value() as f32 / 64.0)
+                let height = if attributes.pattern_height.is_percentage {
+                    attributes.pattern_height.value * (self.viewport_height.raw_value() as f32 / 64.0)
                 } else {
-                    facts.pattern_height.value
+                    attributes.pattern_height.value
                 };
                 let used = &used_pointer;
                 used.set_content_inline_size(CssPixels::nearest_value_for_f32(width));
@@ -857,13 +1918,13 @@ impl<'pass> SvgFormattingContext<'pass> {
                 let parent_used = parent_used_pointer;
                 let used = &used_pointer;
                 used.set_content_inline_size(CssPixels::nearest_value_for(
-                    facts.pattern_width.value as f64 * parent_used.content_inline_size.get().to_double(),
+                    attributes.pattern_width.value as f64 * parent_used.content_inline_size.get().to_double(),
                 ));
                 used.set_content_block_size(CssPixels::nearest_value_for(
-                    facts.pattern_height.value as f64 * parent_used.content_block_size.get().to_double(),
+                    attributes.pattern_height.value as f64 * parent_used.content_block_size.get().to_double(),
                 ));
             }
-        } else if facts.content_units == SVG_UNITS_OBJECT_BOUNDING_BOX {
+        } else if attributes.content_units == SVG_UNITS_OBJECT_BOUNDING_BOX {
             let parent = self.parent(resource);
             assert!(!parent.is_invalid());
             let parent_used_pointer = self.used_values(parent);
@@ -903,7 +1964,7 @@ impl<'pass> SvgFormattingContext<'pass> {
                 let child_used = child_used_pointer;
                 // The container's bounding box includes descendants' transforms; children lay out
                 // untransformed, so each child rect maps through the child's own transform here.
-                let mapped_child_rect = self.svg_facts(child).element_transform.map_rect(FfiFloatRect {
+                let mapped_child_rect = self.svg_element_transform(child).map_rect(FfiFloatRect {
                     x: child_used.content_offset.get().x.raw_value() as f32 / 64.0,
                     y: child_used.content_offset.get().y.raw_value() as f32 / 64.0,
                     width: child_used.content_inline_size.get().raw_value() as f32 / 64.0,
@@ -937,4 +1998,86 @@ impl<'pass> SvgFormattingContext<'pass> {
         used.has_definite_inline_size.set(true);
         used.has_definite_block_size.set(true);
     }
+}
+
+/// What a length an SVG element's attribute gives resolves against: the element's own style, the
+/// document element's, and the viewport.
+fn svg_length_resolution_context(
+    callbacks: &LayoutPass<'_>,
+    node: Node,
+) -> crate::css::style_compute::FfiLengthResolutionContext {
+    let style = StyleValues::for_node(callbacks, node);
+    let root_style = document_element_style(callbacks, node).unwrap_or(style);
+    let viewport_width = callbacks.initial_containing_block_inline_size.to_double();
+    let viewport_height = callbacks.initial_containing_block_block_size.to_double();
+    crate::css::style_compute::FfiLengthResolutionContext {
+        viewport_width,
+        viewport_height,
+        font_metrics: SvgFormattingContext::font_metrics_for_length_resolution(style),
+        root_font_metrics: SvgFormattingContext::font_metrics_for_length_resolution(root_style),
+        // Only the out-flag below consumes these, and this resolution reports no dependency.
+        font_metrics_depend_on_viewport_metrics: false,
+        root_font_metrics_depend_on_viewport_metrics: false,
+        // A container unit with no size-query container above it resolves against the small
+        // viewport size.
+        // FIXME: Take a size-query container ancestor into account.
+        has_container_width_basis: true,
+        has_container_height_basis: true,
+        container_width_basis: viewport_width,
+        container_height_basis: viewport_height,
+        container_width_basis_depends_on_viewport_metrics: false,
+        container_height_basis_depends_on_viewport_metrics: false,
+        subject_inline_axis_is_horizontal: style.writing_mode() == writing_mode::HORIZONTAL_TB,
+        resolved_viewport_relative_length: std::ptr::null_mut(),
+    }
+}
+
+/// The style of the document element, which a root-relative length resolves against.
+fn document_element_style<'pass>(callbacks: &LayoutPass<'pass>, node: Node) -> Option<StyleValues<'pass>> {
+    let mut ancestor = node;
+    while !ancestor.is_invalid() {
+        let data = callbacks.node_data(ancestor);
+        if node_facts::has_flag(data, NodeFlag::IsDocumentElement) {
+            return callbacks.arena().style_payloads(ancestor).map(StyleValues::new);
+        }
+        ancestor = data.parent.get();
+    }
+    None
+}
+
+// https://www.w3.org/TR/SVG2/coords.html#SizingSVGInCSS
+/// The natural size of an `<svg>` root's box, negotiated from the attributes its element published.
+pub(crate) fn svg_root_natural_size(
+    callbacks: &LayoutPass<'_>,
+    node: Node,
+) -> (Option<CssPixels>, Option<CssPixels>, Option<(CssPixels, CssPixels)>) {
+    let attributes = callbacks.arena().svg_attribute_facts(node);
+    // The intrinsic dimensions must also be determined from the width and height sizing properties. If either width or
+    // height are not specified, the used value is the initial value 'auto'. 'auto' and percentage lengths must not be
+    // used to determine an intrinsic width or intrinsic height.
+    let resolve = |length: FfiSvgLengthValue| {
+        (length.kind == SVG_LENGTH_KIND_LENGTH).then(|| {
+            let context = svg_length_resolution_context(callbacks, node);
+            let absolutized =
+                crate::css::style_compute::absolutize_length_for_calc(length.value, length.unit as usize, &context);
+            CssPixels::nearest_value_for(absolutized.px)
+        })
+    };
+    let width = resolve(attributes.natural_width);
+    let height = resolve(attributes.natural_height);
+    // The intrinsic aspect ratio must be calculated using the following algorithm. If the algorithm returns null, then
+    // there is no intrinsic aspect ratio.
+    let aspect_ratio = match (width, height) {
+        // 1. If the width and height sizing properties on the ‘svg’ element are both absolute values: return width /
+        //    height.
+        (Some(width), Some(height)) => {
+            (width != CssPixels::default() && height != CssPixels::default()).then_some((width, height))
+        }
+        // 2.-4. What the active SVG view or the viewBox gives it, if anything.
+        _ => attributes.has_view_box_aspect_ratio.then_some((
+            attributes.view_box_aspect_ratio_numerator,
+            attributes.view_box_aspect_ratio_denominator,
+        )),
+    };
+    (width, height, aspect_ratio)
 }

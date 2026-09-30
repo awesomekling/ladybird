@@ -107,7 +107,6 @@ impl<'pass> SizingContext<'pass> {
         // assigned block sizes, while preserving distinct entries for orthogonal flows and aspect-ratio transfers.
         let depends_on_block_size =
             self.callbacks
-                .arena()
                 .intrinsic_inline_size_depends_on_block_size(self.callbacks.node_data(root), || {
                     let mut pending = vec![root];
                     while let Some(node) = pending.pop() {
@@ -1898,10 +1897,9 @@ impl<'pass> SizingContext<'pass> {
         kind: IntrinsicSizeCacheKind,
         key: IntrinsicSizeCacheKey,
     ) -> Option<IntrinsicBlockSizeMeasurement> {
-        let measurement =
-            self.callbacks
-                .arena()
-                .intrinsic_block_size_cache_get(self.callbacks.node_data(node), kind, key)?;
+        let measurement = self
+            .callbacks
+            .intrinsic_block_size_cache_get(self.callbacks.node_data(node), kind, key)?;
         self.charge_measurement_dependency_to_measured_box_and_containing_block(
             node,
             measurement.depends_on_percentage_block_size,
@@ -1917,7 +1915,6 @@ impl<'pass> SizingContext<'pass> {
         value: IntrinsicBlockSizeMeasurement,
     ) {
         self.callbacks
-            .arena()
             .intrinsic_block_size_cache_put(self.callbacks.node_data(node), kind, key, value);
     }
 
@@ -1927,11 +1924,9 @@ impl<'pass> SizingContext<'pass> {
         kind: IntrinsicSizeCacheKind,
         key: IntrinsicSizeCacheKey,
     ) -> Option<IntrinsicInlineSizeMeasurement> {
-        let measurement = self.callbacks.arena().intrinsic_inline_size_measurement_cache_get(
-            self.callbacks.node_data(node),
-            kind,
-            key,
-        )?;
+        let measurement =
+            self.callbacks
+                .intrinsic_inline_size_measurement_cache_get(self.callbacks.node_data(node), kind, key)?;
         self.charge_measurement_dependency_to_measured_box_and_containing_block(
             node,
             measurement.depends_on_percentage_block_size,
@@ -1946,12 +1941,8 @@ impl<'pass> SizingContext<'pass> {
         key: IntrinsicSizeCacheKey,
         value: IntrinsicInlineSizeMeasurement,
     ) {
-        self.callbacks.arena().intrinsic_inline_size_measurement_cache_put(
-            self.callbacks.node_data(node),
-            kind,
-            key,
-            value,
-        );
+        self.callbacks
+            .intrinsic_inline_size_measurement_cache_put(self.callbacks.node_data(node), kind, key, value);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2724,6 +2715,7 @@ impl<'pass> SizingContext<'pass> {
             .set(table_style.padding_right().to_px(containing_block_inline_size));
 
         RunRecords::with_root(
+            measurement.callbacks().layout_scratch(),
             measurement.callbacks().arena(),
             table_box,
             measurement.callbacks().in_flow_containing_block(table_box),
