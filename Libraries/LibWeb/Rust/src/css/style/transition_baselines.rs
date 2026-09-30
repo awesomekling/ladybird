@@ -1,0 +1,174 @@
+/*
+ * Copyright (c) 2026-present, the Ladybird developers.
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+//! The before-change styles a style stabilization epoch decides CSS transitions against.
+
+use super::RetainedState;
+use super::tree::StyleNodeID;
+use crate::css::animated_overlay::AnimatedOverlay;
+use crate::css::animated_overlay::FfiAnimatedOverlayEntry;
+use crate::css::computed_longhand_table::ComputedLonghandTable;
+use crate::css::style_value::StyleValueData;
+
+/// An animated value a record inherited, as the nearest ancestor that animates the property holds
+/// it: the overlay entry and the base value beneath it.
+#[derive(Clone, Copy)]
+pub(crate) struct InheritedAnimatedValue<'a> {
+    pub(crate) entry: &'a FfiAnimatedOverlayEntry,
+    pub(crate) base_value: *const StyleValueData,
+}
+
+impl RetainedState {
+    /// https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
+    /// Style, layout or animation feedback can give a target a transition in any later pass of
+    /// the epoch, and that transition starts from the style the target held before the epoch's
+    /// first pass. The first record named for a target is that style: it is kept, pinned, until
+    /// the epoch commits.
+    pub(crate) fn record_transition_baseline(&mut self, node: StyleNodeID, pseudo_kind: u8, style_record: u64) {
+        if style_record == 0 || self.transition_baselines.contains_key(&(node, pseudo_kind)) {
+            return;
+        }
+        // A settled row can name a before-change record the engine has already released: an
+        // animation overlay goes the moment its node's assignment moves off it and nothing pins
+        // it. Such a record is no style to decide against, and the pass that samples the target
+        // records the baseline instead.
+        if !self.computed_group_sets.style_record_is_held(style_record) {
+            return;
+        }
+        self.computed_group_sets.pin_style_record(style_record);
+        self.transition_baselines.insert((node, pseudo_kind), style_record);
+    }
+
+    /// The before-change style the epoch decides the target's transitions against, or 0 before a
+    /// pass has recorded one.
+    pub(crate) fn transition_baseline(&self, node: StyleNodeID, pseudo_kind: u8) -> u64 {
+        self.transition_baselines
+            .get(&(node, pseudo_kind))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// The epoch committed: no later pass decides against these styles.
+    pub(crate) fn release_transition_baselines(&mut self) {
+        for (_, style_record) in std::mem::take(&mut self.transition_baselines) {
+            self.computed_group_sets.unpin_style_record(style_record);
+        }
+    }
+
+    /// A retired node's identity can name another element before the epoch commits.
+    pub(crate) fn release_transition_baselines_of(&mut self, node: StyleNodeID) {
+        let computed_group_sets = &mut self.computed_group_sets;
+        self.transition_baselines.retain(|(target, _), style_record| {
+            if *target != node {
+                return true;
+            }
+            computed_group_sets.unpin_style_record(*style_record);
+            false
+        });
+    }
+
+    /// The ancestors a record for `node` inherits along, where one of them holds an animation
+    /// overlay: only then can a value the record inherits be an animated one. Most elements have
+    /// no animated ancestor, which this one walk decides for every property.
+    pub(crate) fn animated_inheritance_chain(&self, node: StyleNodeID) -> Option<AnimatedInheritanceChain<'_>> {
+        std::iter::successors(self.tree.inheritance_parent(node), |&ancestor| {
+            self.tree.inheritance_parent(ancestor)
+        })
+        .any(|ancestor| {
+            self.record_parts(ancestor)
+                .is_some_and(|(_, overlay)| overlay.is_some())
+        })
+        .then_some(AnimatedInheritanceChain { engine: self, node })
+    }
+
+    fn record_parts(&self, node: StyleNodeID) -> Option<(&ComputedLonghandTable, Option<&AnimatedOverlay>)> {
+        let record = self.computed_group_sets.assigned_style_record(node)?;
+        let view = self.computed_group_sets.style_record_view(record.raw())?;
+        Some((unsafe { view.longhand_table.as_ref() }?, unsafe {
+            view.animated_overlay.as_ref()
+        }))
+    }
+}
+
+/// The inheritance chain above an element with an animated ancestor on it.
+#[derive(Clone, Copy)]
+pub(crate) struct AnimatedInheritanceChain<'a> {
+    engine: &'a RetainedState,
+    node: StyleNodeID,
+}
+
+impl<'a> AnimatedInheritanceChain<'a> {
+    /// Where an inherited value of `property` in `table`, a record for the node, comes from when an
+    /// ancestor animates it: the nearest ancestor along the chain of records that inherited the
+    /// property and holds an overlay entry for it, and the base value of the ancestor the chain
+    /// starts at. None when no such ancestor exists.
+    pub(crate) fn inherited_animated_value(
+        self,
+        table: &ComputedLonghandTable,
+        property: u16,
+    ) -> Option<InheritedAnimatedValue<'a>> {
+        let engine = self.engine;
+        let mut entry = None;
+        let mut inherits = table.is_inherited(property);
+        let mut ancestor = engine.tree.inheritance_parent(self.node);
+        while inherits {
+            let current = ancestor?;
+            let (ancestor_table, overlay) = engine.record_parts(current)?;
+            // NB: A record the engine derived holds an inherited animated value in its table, so
+            //     the base value is read where the chain of inheriting records starts.
+            entry = entry.or_else(|| overlay.and_then(|overlay| overlay.get(property)));
+            inherits = ancestor_table.is_inherited(property);
+            if !inherits {
+                let base_value = crate::css::style_compute::ParentSnapshot::new(ancestor_table, None, false)
+                    .value(property)
+                    .map_or(std::ptr::null(), std::ptr::from_ref);
+                return entry
+                    .filter(|_| !base_value.is_null())
+                    .map(|entry| InheritedAnimatedValue { entry, base_value });
+            }
+            ancestor = engine.tree.inheritance_parent(current);
+        }
+        None
+    }
+}
+
+impl RetainedState {
+    /// What a transition on an element resolves its lengths against: the font of the record the
+    /// element has installed, including a sampled animated font, the root's font, and the
+    /// viewport. None before the document published any computation inputs.
+    pub(crate) fn transition_length_resolution_context(
+        &self,
+        style_record: u64,
+    ) -> Option<crate::css::animation::FfiAnimationLengthResolutionContext> {
+        use crate::css::animation::{FfiAnimationFontMetrics, FfiAnimationLengthResolutionContext};
+
+        let inputs = self.document_style_computation_inputs;
+        let view = self.computed_group_sets.style_record_view(style_record)?;
+        let values = crate::css::computed_value_views::ComputedValuesView::new(
+            crate::css::host_shared::SharedPayload::as_pointer_slice(view.payloads),
+        );
+        Some(FfiAnimationLengthResolutionContext {
+            viewport_width: inputs.viewport_width,
+            viewport_height: inputs.viewport_height,
+            font_metrics: FfiAnimationFontMetrics {
+                font_size: values.font_size().to_double(),
+                x_height: super::publication::drive_font_metric(values.font_x_height()),
+                cap_height: super::publication::drive_font_metric(values.font_ascent()),
+                zero_advance: super::publication::drive_font_metric(values.font_zero_advance()),
+                line_height: values.line_height().to_double(),
+            },
+            root_font_metrics: FfiAnimationFontMetrics {
+                font_size: inputs.root_font_size,
+                x_height: inputs.root_font_x_height,
+                cap_height: inputs.root_font_cap_height,
+                zero_advance: inputs.root_font_zero_advance,
+                line_height: inputs.root_line_height,
+            },
+            font_metrics_depend_on_viewport_metrics: view.dependency_flags & (1 << 1) != 0,
+            root_font_metrics_depend_on_viewport_metrics: inputs.root_font_metrics_depend_on_viewport_metrics,
+        })
+    }
+}

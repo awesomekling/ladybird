@@ -24,7 +24,7 @@ use crate::css::function_signature::FunctionSignature;
 use crate::css::parser::query_parser::{
     FfiMediaEnvironment, MatchResult, parse_and_evaluate_media_if_condition, parse_and_evaluate_supports_if_condition,
 };
-use crate::css::parser::syntax::{SyntaxNode, clone_syntax_handle, parse_syntax, parse_with_syntax};
+use crate::css::parser::syntax::{SyntaxNode, SyntaxType, clone_syntax_handle, parse_syntax, parse_with_syntax};
 use crate::css::parser::value_parser::{FfiValueParsingContext, FfiValueParsingContextKind, ParseContext};
 use crate::css::retained_fly_string::RetainedUtf16FlyString;
 use crate::css::style_value::RetainedStyleValueData;
@@ -110,16 +110,34 @@ pub struct CustomPropertyStore {
 unsafe impl Send for CustomPropertyStore {}
 unsafe impl Sync for CustomPropertyStore {}
 
+#[derive(Clone)]
 pub struct CustomPropertyRegistry {
     registrations: HashMap<Vec<u16>, RegisteredCustomProperty>,
     document_url: Vec<u8>,
     document_base_url: Vec<u8>,
 }
 
+#[derive(Clone)]
 struct RegisteredCustomProperty {
     syntax: SyntaxNode,
     inherits: bool,
     initial_source: Option<Vec<u16>>,
+    /// What `compute_registered_custom_property_initial_value` settled for this registration,
+    /// published with it. The computation resolves lengths against the *document* - the initial
+    /// font and the viewport, not the element - so it is a fact about the registration rather than
+    /// about whoever reads it, and the host already memoizes it on the registration and drops the
+    /// memo when the viewport moves. Absent only where the registry was filled without one.
+    computed_initial: Option<RetainedStyleValueData>,
+}
+
+/// What a `@property` registration decides about a name, for a caller that answers for it without
+/// the host: whether it inherits, whether its specified value has to be computed against the
+/// registered syntax at all, and what the registration's initial value computed to. The initial
+/// value is absent only where the registry was filled without the host's published one.
+pub(crate) struct RegistrationFacts {
+    pub(crate) inherits: bool,
+    pub(crate) computes_a_specified_value: bool,
+    pub(crate) initial_value: Option<RetainedStyleValueData>,
 }
 
 type CustomFunctionIdentity = u64;
@@ -136,6 +154,7 @@ struct CustomFunctionDefinition {
 struct CustomFunctionRegistry {
     caller_scope_identity: usize,
     definitions: Vec<CustomFunctionDefinition>,
+    visible_definitions: HashMap<(usize, Vec<u16>), CustomFunctionIdentity>,
 }
 
 #[derive(Clone)]
@@ -165,6 +184,9 @@ pub struct FfiCustomPropertyRegistration {
     pub inherits: bool,
     pub has_initial_value: bool,
     pub initial_value: FfiUtf16View,
+    /// The computed initial value the host derived from `initial_value` against the document,
+    /// borrowed for the call and retained by the registry. Null where the host has none.
+    pub computed_initial_value: *const c_void,
 }
 
 #[repr(C)]
@@ -196,10 +218,32 @@ pub struct FfiSubstitutionFunctionDefinition {
     pub declaration_count: usize,
 }
 
+#[repr(C)]
+pub struct FfiSubstitutionFunctionVisibility {
+    pub caller_scope_identity: usize,
+    pub function_identity: u64,
+}
+
 impl CustomPropertyRegistry {
     /// Whether any custom property is registered; an unregistered name resolves without a syntax.
     pub(crate) fn has_registrations(&self) -> bool {
         !self.registrations.is_empty()
+    }
+
+    /// Whether descendants need a filtered projection of their parent's environment.
+    pub(crate) fn has_non_inheriting_registrations(&self) -> bool {
+        self.registrations.values().any(|registration| !registration.inherits)
+    }
+
+    /// What a registration says about a name, for a caller that has to answer for it without the
+    /// host: `None` where the name is not registered at all.
+    pub(crate) fn registration_facts(&self, name: &[u16]) -> Option<RegistrationFacts> {
+        let registration = self.registrations.get(name)?;
+        Some(RegistrationFacts {
+            inherits: registration.inherits,
+            computes_a_specified_value: !matches!(registration.syntax, SyntaxNode::Universal),
+            initial_value: registration.computed_initial.clone(),
+        })
     }
 
     pub(crate) fn parse_context(&self, random_function_index: &mut usize) -> ParseContext {
@@ -222,7 +266,391 @@ impl CustomPropertyRegistry {
     }
 }
 
+pub(crate) fn collect_registered_custom_property_random_sharings(
+    store: &CustomPropertyStore,
+    registry: &CustomPropertyRegistry,
+    sharings: &mut Vec<*const StyleValueData>,
+) -> Vec<RetainedStyleValueData> {
+    let mut parsed_values = Vec::new();
+    for entry in store.own_values.values() {
+        let initial_count = sharings.len();
+        crate::css::style_compute::collect_unfixed_random_sharings_in_value(entry.value.data(), sharings);
+        if sharings.len() != initial_count {
+            continue;
+        }
+        let Some(registration) = registry.registrations.get(entry.name.as_ref()) else {
+            continue;
+        };
+        if matches!(registration.syntax, SyntaxNode::Universal) {
+            continue;
+        }
+        let Some(source) = crate::css::serialize::serialize_resolved_style_value_to_utf16(entry.value.data()) else {
+            continue;
+        };
+        let mut random_function_index = 0;
+        let value_context = FfiValueParsingContext {
+            kind: FfiValueParsingContextKind::Property,
+            value: crate::css::property_metadata::property_id::CUSTOM,
+            secondary_value: 0,
+            name: Default::default(),
+        };
+        let mut parse_context = registry.parse_context(&mut random_function_index);
+        parse_context.value_contexts = &raw const value_context;
+        parse_context.value_context_count = 1;
+        let Some(parsed) = parse_with_syntax(&parse_context, &source, &registration.syntax) else {
+            continue;
+        };
+        let parsed = RetainedStyleValueData::from_owned(parsed);
+        crate::css::style_compute::collect_unfixed_random_sharings_in_value(parsed.data(), sharings);
+        parsed_values.push(parsed);
+    }
+    parsed_values
+}
+
+fn registered_initial_value(
+    registry: &CustomPropertyRegistry,
+    registration: &RegisteredCustomProperty,
+    length: &crate::css::style_compute::FfiLengthResolutionContext,
+    scheme: u8,
+) -> RetainedStyleValueData {
+    // The host publishes what it computed for the registration itself, against the document. That
+    // is what every reader of an initial value gets from the host, so it is what this answers too.
+    if let Some(computed_initial) = registration.computed_initial.as_ref() {
+        return computed_initial.clone();
+    }
+    let Some(source) = registration.initial_source.as_ref() else {
+        return RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid);
+    };
+    let mut random_function_index = 0;
+    let Some(parsed) = parse_with_syntax(
+        &registry.parse_context(&mut random_function_index),
+        source,
+        &registration.syntax,
+    ) else {
+        return RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid);
+    };
+    absolutize_registered_custom_property_value(registry, parsed, length, None, &[], scheme).0
+}
+
+fn absolutize_registered_custom_property_value(
+    registry: &CustomPropertyRegistry,
+    value: StyleValueData,
+    length: &crate::css::style_compute::FfiLengthResolutionContext,
+    environment: Option<&crate::css::style_compute::FfiStyleComputationEnvironment>,
+    random_base_values: &[crate::css::style_compute::FfiRandomBaseValue],
+    scheme: u8,
+) -> (RetainedStyleValueData, bool) {
+    let tree_counting = environment
+        .filter(|environment| environment.has_tree_counting_context)
+        .map(|environment| (environment.sibling_count, environment.sibling_index));
+    let context = crate::css::absolutize::AbsolutizationContext {
+        length,
+        scheme: Some(scheme),
+        resolved_viewport_relative_length: Cell::new(false),
+        tree_counting,
+        random_base_values,
+        document_base_url: &registry.document_base_url,
+        style_sheet_resource_context: None,
+    };
+    let value = match crate::css::absolutize::absolutize(&value, &context) {
+        Some(crate::css::absolutize::Absolutized::Changed(value)) => value,
+        Some(crate::css::absolutize::Absolutized::Unchanged) | None => RetainedStyleValueData::from_owned(value),
+    };
+    (value, context.resolved_viewport_relative_length.get())
+}
+
+fn random_base_values_for_reparsed_value(
+    reparsed: &StyleValueData,
+    sources: &[&StyleValueData],
+    environment: Option<&crate::css::style_compute::FfiStyleComputationEnvironment>,
+) -> Vec<crate::css::style_compute::FfiRandomBaseValue> {
+    let Some(environment) = environment else {
+        return Vec::new();
+    };
+    let published = if environment.random_base_value_count == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(environment.random_base_values, environment.random_base_value_count) }
+    };
+    let mut reparsed_sharings = Vec::new();
+    crate::css::style_compute::collect_unfixed_random_sharings_in_value(reparsed, &mut reparsed_sharings);
+    let source_sharings = sources
+        .iter()
+        .map(|source| {
+            let mut sharings = Vec::new();
+            crate::css::style_compute::collect_unfixed_random_sharings_in_value(source, &mut sharings);
+            sharings
+        })
+        .collect::<Vec<_>>();
+    reparsed_sharings
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, reparsed)| {
+            let StyleValueData::RandomValueSharing {
+                is_auto,
+                name,
+                element_shared,
+                ..
+            } = (unsafe { &*reparsed })
+            else {
+                unreachable!();
+            };
+            let exact_base = published.iter().find(|base| {
+                let StyleValueData::RandomValueSharing {
+                    is_auto: published_is_auto,
+                    name: published_name,
+                    element_shared: published_element_shared,
+                    ..
+                } = (unsafe { &*base.source.cast::<StyleValueData>() })
+                else {
+                    return false;
+                };
+                *published_is_auto == *is_auto && *published_element_shared == *element_shared && published_name == name
+            });
+            let source_base = || {
+                source_sharings.iter().find_map(|sharings| {
+                    let source = *sharings.get(index)?;
+                    published.iter().find(|base| base.source == source.cast())
+                })
+            };
+            let base = exact_base.or_else(source_base);
+            let base = base?;
+            Some(crate::css::style_compute::FfiRandomBaseValue {
+                source: reparsed.cast(),
+                value: base.value,
+            })
+        })
+        .collect()
+}
+
+/// Finalizes one substituted custom-property value against immutable registry, parent-store,
+/// length, and color-scheme inputs, without consulting the DOM or any GC-managed object.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn finalize_custom_property_value(
+    registry: Option<&CustomPropertyRegistry>,
+    resolved_parent: Option<&CustomPropertyStore>,
+    name_raw: usize,
+    name: &[u16],
+    value: RetainedStyleValueData,
+    specified_value: Option<&StyleValueData>,
+    length: Option<&crate::css::style_compute::FfiLengthResolutionContext>,
+    environment: Option<&crate::css::style_compute::FfiStyleComputationEnvironment>,
+    scheme: u8,
+    uses_tree_counting_function: Option<&mut bool>,
+) -> (RetainedStyleValueData, bool) {
+    let registration = registry.and_then(|registry| registry.registrations.get(name));
+    let initial = || {
+        registration.map_or_else(
+            || RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid),
+            |registration| registered_initial_value(registry.unwrap(), registration, length.unwrap(), scheme),
+        )
+    };
+    let inherited = || {
+        resolved_parent
+            .and_then(|parent| parent.get(name_raw))
+            .map(|entry| entry.value.clone())
+            .unwrap_or_else(initial)
+    };
+
+    let value = match value.data() {
+        StyleValueData::Keyword { keyword } if name != "result".encode_utf16().collect::<Vec<_>>() => {
+            if *keyword == crate::css::css_enums::keyword::INITIAL {
+                initial()
+            } else if *keyword == crate::css::css_enums::keyword::INHERIT {
+                inherited()
+            } else if *keyword == crate::css::css_enums::keyword::UNSET {
+                if registration.is_some_and(|registration| !registration.inherits) {
+                    initial()
+                } else {
+                    inherited()
+                }
+            } else {
+                value
+            }
+        }
+        _ => value,
+    };
+
+    let invalid_fallback = || {
+        let Some(registration) = registration else {
+            return RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid);
+        };
+        if matches!(registration.syntax, SyntaxNode::Universal) {
+            return RetainedStyleValueData::from_owned(StyleValueData::GuaranteedInvalid);
+        }
+        if registration.inherits { inherited() } else { initial() }
+    };
+    if matches!(value.data(), StyleValueData::GuaranteedInvalid) {
+        return (invalid_fallback(), false);
+    }
+    let Some(registration) = registration else {
+        return (value, false);
+    };
+    if matches!(registration.syntax, SyntaxNode::Universal) {
+        return (value, false);
+    }
+
+    let contains_attr_tainted_values = matches!(
+        value.data(),
+        StyleValueData::Unresolved {
+            contains_attr_tainted_values: true,
+            ..
+        }
+    );
+    let Some(source) = crate::css::serialize::serialize_resolved_style_value_to_utf16(value.data()) else {
+        return (invalid_fallback(), false);
+    };
+    let mut random_function_index = 0;
+    let value_context = FfiValueParsingContext {
+        kind: FfiValueParsingContextKind::Property,
+        value: crate::css::property_metadata::property_id::CUSTOM,
+        secondary_value: 0,
+        name: Default::default(),
+    };
+    let mut parse_context = registry.unwrap().parse_context(&mut random_function_index);
+    parse_context.value_contexts = &raw const value_context;
+    parse_context.value_context_count = 1;
+    let Some(parsed) = parse_with_syntax(&parse_context, &source, &registration.syntax) else {
+        return (invalid_fallback(), false);
+    };
+    // Parsing a registered value creates fresh random-sharing nodes, while the published random
+    // bases are keyed by the corresponding nodes in the substituted value. Preserve their
+    // traversal correspondence across the required serialize-and-reparse step.
+    let mut random_sources = vec![value.data()];
+    if let Some(specified_value) = specified_value {
+        random_sources.push(specified_value);
+    }
+    let random_base_values = random_base_values_for_reparsed_value(&parsed, &random_sources, environment);
+    if let Some(uses_tree_counting_function) = uses_tree_counting_function {
+        *uses_tree_counting_function =
+            crate::css::style_compute::collect_external_value_dependencies(&parsed).uses_tree_counting_function;
+    }
+    let (computed, depends_on_viewport_metrics) = absolutize_registered_custom_property_value(
+        registry.unwrap(),
+        parsed,
+        length.unwrap(),
+        environment,
+        &random_base_values,
+        scheme,
+    );
+    if !contains_attr_tainted_values {
+        return (computed, depends_on_viewport_metrics);
+    }
+
+    let source = crate::css::serialize::serialize_resolved_style_value_to_utf16(computed.data()).unwrap_or_default();
+    let mut wrapped = crate::css::parser::value_parser::unresolved_value(
+        &source,
+        &[],
+        crate::css::parser::arbitrary_substitution::SubstitutionFunctionsPresence::default(),
+    );
+    let StyleValueData::Unresolved {
+        contains_attr_tainted_values,
+        parsed_value,
+        ..
+    } = &mut wrapped
+    else {
+        unreachable!();
+    };
+    *contains_attr_tainted_values = true;
+    *parsed_value = computed;
+    (RetainedStyleValueData::from_owned(wrapped), depends_on_viewport_metrics)
+}
+
 impl CustomPropertyStore {
+    /// Filter one store layer over an already filtered parent. The returned pointer owns
+    /// one reference, including when the result is the source or the parent itself.
+    unsafe fn inheritable_layer(source: *const Self, parent: *const c_void, excluded: &[usize]) -> *const c_void {
+        let store = unsafe { &*source };
+        if store.own_values.is_empty() {
+            return unsafe { Self::retained_parent(parent) }.map_or(std::ptr::null(), |p| Arc::into_raw(p).cast());
+        }
+        if excluded.is_empty()
+            && parent
+                == store
+                    .parent
+                    .as_ref()
+                    .map_or(std::ptr::null(), |p| Arc::as_ptr(p).cast())
+        {
+            unsafe { Arc::increment_strong_count(source) };
+            return source.cast();
+        }
+        let mut names = store.declared_names.clone();
+        let mut absorbed: Vec<_> = store
+            .own_values
+            .keys()
+            .filter(|name| !names.contains(name))
+            .copied()
+            .collect();
+        absorbed.sort_unstable();
+        names.extend(absorbed);
+        let entries: Vec<_> = names
+            .into_iter()
+            .filter(|name| !excluded.contains(name))
+            .filter(|name| {
+                // A child store may absorb entries from its parent for lookup speed. Filtering
+                // the child's own non-inheriting declarations must not redeclare those entries
+                // in a new layer: they already belong to the filtered parent.
+                store.declared_names.contains(name)
+                    || unsafe { parent.cast::<Self>().as_ref() }.is_none_or(|parent| {
+                        parent.get(*name).is_none_or(|inherited| {
+                            let entry = &store.own_values[name];
+                            inherited.value.pointer() != entry.value.pointer() || inherited.important != entry.important
+                        })
+                    })
+            })
+            .map(|name| (name, store.own_values[&name].clone()))
+            .collect();
+        if entries.is_empty() {
+            return unsafe { Self::retained_parent(parent) }.map_or(std::ptr::null(), |p| Arc::into_raw(p).cast());
+        }
+        Self::child(unsafe { Self::retained_parent(parent) }, entries)
+    }
+
+    /// The environment inherited by a child, with non-inheriting registrations removed.
+    /// Registration generations are part of the caller's memo key.
+    pub(crate) unsafe fn inheritable(source: *const Self, registry: &CustomPropertyRegistry) -> *const c_void {
+        let store = unsafe { &*source };
+        let parent = store.parent.as_ref().map_or(std::ptr::null(), |parent| unsafe {
+            Self::inheritable(Arc::as_ptr(parent), registry)
+        });
+        let excluded: Vec<_> = store
+            .own_values
+            .iter()
+            .filter_map(|(&name, entry)| {
+                registry
+                    .registrations
+                    .get(entry.name.as_ref())
+                    .is_some_and(|registration| !registration.inherits)
+                    .then_some(name)
+            })
+            .collect();
+        let result = unsafe { Self::inheritable_layer(source, parent, &excluded) };
+        if !parent.is_null() {
+            unsafe { Arc::decrement_strong_count(parent.cast::<Self>()) };
+        }
+        result
+    }
+
+    /// Whether this store resolves every custom property to the same value as `other`, such as an
+    /// environment the engine minted again for the same declarations.
+    pub(crate) fn resolves_like(&self, other: &Self) -> bool {
+        let mut names = std::collections::HashSet::new();
+        for mut store in [self, other] {
+            loop {
+                names.extend(store.own_values.keys().copied());
+                let Some(parent) = store.parent.as_deref() else {
+                    break;
+                };
+                store = parent;
+            }
+        }
+        names.into_iter().all(|name| match (self.get(name), other.get(name)) {
+            (Some(ours), Some(theirs)) => ours.value == theirs.value && ours.important == theirs.important,
+            (None, None) => true,
+            _ => false,
+        })
+    }
+
     pub(crate) fn get(&self, name_raw: usize) -> Option<&CustomPropertyEntry> {
         self.own_values
             .get(&name_raw)
@@ -241,6 +669,18 @@ impl CustomPropertyStore {
         self.own_names
             .get(name)
             .and_then(|name_raw| self.own_values.get(name_raw))
+    }
+
+    /// The value this store answers for a name, retained for a caller that outlives the borrow.
+    pub(crate) fn retained_value(&self, name_raw: usize) -> Option<RetainedStyleValueData> {
+        self.get(name_raw).map(|entry| entry.value.clone_retained())
+    }
+
+    /// Whether the element this store belongs to declares `name_raw` itself, with `!important`.
+    /// Only the declared prefix counts: the rest of `own_values` is what structural sharing
+    /// absorbed from ancestors, which the element did not declare.
+    pub(crate) fn declares_important(&self, name_raw: usize) -> bool {
+        self.declared_names.contains(&name_raw) && self.own_values.get(&name_raw).is_some_and(|entry| entry.important)
     }
 
     pub(crate) fn value_matches(&self, name_raw: usize, value: &StyleValueData) -> bool {
@@ -371,6 +811,101 @@ impl CustomPropertyStore {
             .collect();
         Self::child(unsafe { Self::retained_parent(parent) }, entries)
     }
+
+    /// The store an element's animations compose custom properties into: `base` with the animated
+    /// values over its own, as `rust_custom_property_store_create_animation_overlay` composes it.
+    /// Returns one strong reference.
+    ///
+    /// # Safety
+    /// `base` must be null or a live store.
+    pub(crate) unsafe fn animation_overlay_over(
+        base: *const c_void,
+        animated: &[(RetainedUtf16FlyString, RetainedStyleValueData)],
+    ) -> *const c_void {
+        let base = unsafe { base.cast::<Self>().as_ref() };
+        let (mut own_values, mut own_names, parent, inheritance_parent, ancestor_count) = match base {
+            Some(base) => (
+                base.own_values.clone(),
+                base.own_names.clone(),
+                base.parent.clone(),
+                base.inheritance_parent.clone(),
+                base.ancestor_count,
+            ),
+            None => (HashMap::new(), HashMap::new(), None, None, 0),
+        };
+        let mut declared_names = Vec::with_capacity(animated.len());
+        for (name, value) in animated {
+            let text: Arc<[u16]> = match unsafe { ak::utf16_string_units(name.raw_word()) } {
+                ak::Utf16StringUnits::Ascii(bytes) => bytes.iter().map(|&unit| u16::from(unit)).collect(),
+                ak::Utf16StringUnits::Utf16(units) => units.into(),
+            };
+            declared_names.push(name.raw());
+            own_names.insert(text.clone(), name.raw());
+            own_values.insert(
+                name.raw(),
+                CustomPropertyEntry {
+                    _name: name.clone(),
+                    name: text,
+                    value: value.clone_retained(),
+                    important: false,
+                },
+            );
+        }
+        Arc::into_raw(Arc::new(Self {
+            own_values,
+            declared_names,
+            own_names,
+            ancestor_count,
+            parent,
+            inheritance_parent,
+        }))
+        .cast()
+    }
+
+    /// Whether what `store` composes over its base is exactly `animated`, name for name and value
+    /// for value.
+    ///
+    /// # Safety
+    /// `store` must be a live store.
+    pub(crate) unsafe fn composes_exactly(
+        store: *const c_void,
+        animated: &[(RetainedUtf16FlyString, RetainedStyleValueData)],
+    ) -> bool {
+        let store = unsafe { &*store.cast::<Self>() };
+        store.declared_names.len() == animated.len()
+            && animated.iter().all(|(name, value)| {
+                store.declared_names.contains(&name.raw())
+                    && store
+                        .own_values
+                        .get(&name.raw())
+                        .is_some_and(|entry| entry.value == *value)
+            })
+    }
+
+    /// Whether two environments resolve every custom property alike, a null store being none.
+    ///
+    /// # Safety
+    /// Each of `first` and `second` must be null or a live store.
+    pub(crate) unsafe fn resolve_alike(first: *const c_void, second: *const c_void) -> bool {
+        match unsafe { (first.cast::<Self>().as_ref(), second.cast::<Self>().as_ref()) } {
+            (None, None) => true,
+            (Some(first), Some(second)) => std::ptr::eq(first, second) || first.resolves_like(second),
+            _ => false,
+        }
+    }
+
+    /// Whether `store` holds values of its own over exactly `parent`, a null `parent` being none.
+    ///
+    /// # Safety
+    /// `store` must be a live store.
+    pub(crate) unsafe fn is_composed_over(store: *const c_void, parent: *const c_void) -> bool {
+        let store = unsafe { &*store.cast::<CustomPropertyStore>() };
+        store
+            .parent
+            .as_ref()
+            .map_or(std::ptr::null(), |store_parent| Arc::as_ptr(store_parent).cast())
+            == parent
+    }
 }
 
 const MAX_SUBSTITUTED_TOKEN_COUNT: usize = 16384;
@@ -457,13 +992,6 @@ impl GuardedSubstitutionContexts {
         true
     }
 
-    fn contains_property(&self, name: &[u16], custom_function: Option<CustomFunctionIdentity>) -> bool {
-        self.contexts
-            .borrow()
-            .iter()
-            .any(|context| context.dependency.is_property(name, custom_function))
-    }
-
     fn innermost_function(&self) -> Option<CustomFunctionIdentity> {
         self.contexts
             .borrow()
@@ -485,12 +1013,12 @@ struct ASFResolutionContext<'a> {
     attribute_names_are_ascii_case_insensitive: bool,
     contains_attr_tainted_values: bool,
     custom_functions: Option<&'a CustomFunctionRegistry>,
-    resolve_custom_function: Option<unsafe extern "C" fn(usize, FfiUtf16View) -> CustomFunctionIdentity>,
     parse_context: Option<&'a ParseContext>,
     media_environment: Option<&'a FfiMediaEnvironment>,
-    load_media_environment: Option<unsafe extern "C" fn(*mut c_void) -> *const c_void>,
-    callback_context: *mut c_void,
-    evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, FfiUtf16View) -> u8>,
+    style_query_length_resolution_context: Option<&'a crate::css::style_compute::FfiLengthResolutionContext>,
+    style_query_color_resolution_input: Option<crate::css::color_resolution::ColorResolutionInput<'a>>,
+    style_query_tree_counting: Option<(u64, u64)>,
+    style_query_dependencies: Option<&'a mut crate::css::cascaded_properties::StyleQueryDependencies>,
     final_custom_properties: Option<&'a HashMap<Vec<u16>, *const c_void>>,
     function_local_scopes: Vec<FunctionLocalScope>,
     token_cache: Option<&'a mut CustomPropertyTokenCache>,
@@ -499,16 +1027,6 @@ struct ASFResolutionContext<'a> {
 
 impl ASFResolutionContext<'_> {
     fn media_environment(&mut self) -> Option<&FfiMediaEnvironment> {
-        if self.media_environment.is_none()
-            && let Some(load_media_environment) = self.load_media_environment
-        {
-            crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::MediaEnvironmentCallback);
-            self.media_environment = unsafe {
-                load_media_environment(self.callback_context)
-                    .cast::<FfiMediaEnvironment>()
-                    .as_ref()
-            };
-        }
         self.media_environment
     }
 }
@@ -729,6 +1247,8 @@ unsafe fn custom_function_registry_from_ffi(
     definitions: *const FfiSubstitutionFunctionDefinition,
     definition_count: usize,
     caller_scope_identity: usize,
+    visibilities: *const FfiSubstitutionFunctionVisibility,
+    visibility_count: usize,
 ) -> Option<CustomFunctionRegistry> {
     let definitions = if definition_count == 0 {
         &[]
@@ -772,9 +1292,28 @@ unsafe fn custom_function_registry_from_ffi(
             declarations: parsed_declarations,
         });
     }
+    let visibilities = if visibility_count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(visibilities, visibility_count) }
+    };
+    let mut visible_definitions = HashMap::with_capacity(visibilities.len());
+    for visibility in visibilities {
+        let definition = parsed_definitions
+            .iter()
+            .find(|definition| definition.identity == visibility.function_identity)?;
+        visible_definitions.insert(
+            (
+                visibility.caller_scope_identity,
+                definition.signature.name.units().to_vec(),
+            ),
+            definition.identity,
+        );
+    }
     Some(CustomFunctionRegistry {
         caller_scope_identity,
         definitions: parsed_definitions,
+        visible_definitions,
     })
 }
 
@@ -788,6 +1327,8 @@ pub(crate) unsafe fn prepare_var_resolution_environment(
     custom_functions: *const FfiSubstitutionFunctionDefinition,
     custom_function_count: usize,
     custom_function_scope_identity: usize,
+    custom_function_visibilities: *const FfiSubstitutionFunctionVisibility,
+    custom_function_visibility_count: usize,
 ) -> Option<VarResolutionEnvironment> {
     let attributes = if attribute_count == 0 {
         &[]
@@ -803,7 +1344,13 @@ pub(crate) unsafe fn prepare_var_resolution_environment(
         })
         .collect();
     let custom_functions = unsafe {
-        custom_function_registry_from_ffi(custom_functions, custom_function_count, custom_function_scope_identity)
+        custom_function_registry_from_ffi(
+            custom_functions,
+            custom_function_count,
+            custom_function_scope_identity,
+            custom_function_visibilities,
+            custom_function_visibility_count,
+        )
     }?;
     Some(VarResolutionEnvironment {
         attributes,
@@ -1519,6 +2066,9 @@ fn registered_style_query_values_are_equal(
     syntax: &SyntaxNode,
     computed_tokens: &[OwnedToken],
     query_tokens: &[OwnedToken],
+    length_resolution_context: Option<&crate::css::style_compute::FfiLengthResolutionContext>,
+    tree_counting: Option<(u64, u64)>,
+    color_resolution_input: Option<crate::css::color_resolution::ColorResolutionInput<'_>>,
 ) -> bool {
     let mut random_function_index = 0;
     let context = registry.parse_context(&mut random_function_index);
@@ -1528,16 +2078,325 @@ fn registered_style_query_values_are_equal(
     let Some(query) = parse_with_syntax(&context, &serialize_tokens(query_tokens), syntax) else {
         return false;
     };
-    let computed_color = crate::css::color_resolution::to_color(&computed, &crate::css::color_resolution::EMPTY_INPUT);
-    let query_color = crate::css::color_resolution::to_color(&query, &crate::css::color_resolution::EMPTY_INPUT);
+    let color_resolution_input = color_resolution_input
+        .as_ref()
+        .unwrap_or(&crate::css::color_resolution::EMPTY_INPUT);
+    let computed_color = crate::css::color_resolution::to_color(&computed, color_resolution_input);
+    let query_color = crate::css::color_resolution::to_color(&query, color_resolution_input);
     if computed_color.is_some() || query_color.is_some() {
         return computed_color.is_some() && computed_color == query_color;
+    }
+    if let (Some(computed), Some(query)) = (
+        style_value_range_comparable(&computed, length_resolution_context, tree_counting),
+        style_value_range_comparable(&query, length_resolution_context, tree_counting),
+    ) {
+        return computed.kind == query.kind && computed.value == query.value;
     }
     computed == query
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StyleRangeComparison {
+    Equal,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StyleRangeNumericType {
+    Number,
+    Percentage,
+    Length,
+    Angle,
+    Time,
+    Frequency,
+    Resolution,
+}
+
+#[derive(Clone, Copy)]
+struct StyleRangeComparableValue {
+    kind: StyleRangeNumericType,
+    value: f64,
+}
+
+fn style_value_range_comparable(
+    parsed: &StyleValueData,
+    length_resolution_context: Option<&crate::css::style_compute::FfiLengthResolutionContext>,
+    tree_counting: Option<(u64, u64)>,
+) -> Option<StyleRangeComparableValue> {
+    if matches!(parsed, StyleValueData::Calculated { .. })
+        && let Some(length_resolution_context) = length_resolution_context
+        && let Some(crate::css::calc::AbsolutizedCalculation::Value(value)) =
+            crate::css::calc::absolutize_calculation_value(
+                parsed,
+                std::ptr::from_ref(length_resolution_context).cast(),
+                tree_counting,
+                &[],
+            )
+    {
+        return style_value_range_comparable(&value, Some(length_resolution_context), None);
+    }
+    let length_resolution = crate::css::calc::LengthResolution {
+        context: length_resolution_context,
+        fallback: None,
+    };
+    let comparable = match parsed {
+        StyleValueData::Number { value } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Number,
+            value: *value,
+        },
+        StyleValueData::Integer { value } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Number,
+            value: f64::from(*value),
+        },
+        StyleValueData::Length { value, unit } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Length,
+            value: crate::css::calc::CalcNumericValue::Length {
+                value: *value,
+                unit: *unit,
+            }
+            .to_canonical_number(length_resolution),
+        },
+        StyleValueData::Percentage { value } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Percentage,
+            value: *value,
+        },
+        StyleValueData::Angle { value, unit } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Angle,
+            value: crate::css::calc::CalcNumericValue::Angle {
+                value: *value,
+                unit: *unit,
+            }
+            .to_canonical_number(length_resolution),
+        },
+        StyleValueData::Time { value, unit } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Time,
+            value: crate::css::calc::CalcNumericValue::Time {
+                value: *value,
+                unit: *unit,
+            }
+            .to_canonical_number(length_resolution),
+        },
+        StyleValueData::Frequency { value, unit } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Frequency,
+            value: crate::css::calc::CalcNumericValue::Frequency {
+                value: *value,
+                unit: *unit,
+            }
+            .to_canonical_number(length_resolution),
+        },
+        StyleValueData::Resolution { value, unit } => StyleRangeComparableValue {
+            kind: StyleRangeNumericType::Resolution,
+            value: crate::css::calc::CalcNumericValue::Resolution {
+                value: *value,
+                unit: *unit,
+            }
+            .to_canonical_number(length_resolution),
+        },
+        calculated @ StyleValueData::Calculated { .. } => {
+            let (kind, value) =
+                crate::css::calc::resolve_calculated_style_range_value(calculated, length_resolution_context)?;
+            StyleRangeComparableValue {
+                kind: match kind {
+                    0 => StyleRangeNumericType::Number,
+                    1 => StyleRangeNumericType::Percentage,
+                    2 => StyleRangeNumericType::Length,
+                    3 => StyleRangeNumericType::Angle,
+                    4 => StyleRangeNumericType::Time,
+                    5 => StyleRangeNumericType::Frequency,
+                    6 => StyleRangeNumericType::Resolution,
+                    _ => return None,
+                },
+                value,
+            }
+        }
+        _ => return None,
+    };
+    comparable.value.is_finite().then_some(comparable)
+}
+
+fn style_range_comparisons(tokens: &[OwnedToken]) -> Option<Vec<(usize, usize, StyleRangeComparison)>> {
+    let mut comparisons = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        if matching_close(&tokens[index].kind).is_some() {
+            index = find_matching_close(tokens, index)? + 1;
+            continue;
+        }
+        let comparison = if tokens[index].source.equals_ascii(b"=") {
+            Some((1, StyleRangeComparison::Equal))
+        } else if tokens[index].source.equals_ascii(b"<") {
+            if tokens
+                .get(index + 1)
+                .is_some_and(|token| token.source.equals_ascii(b"="))
+            {
+                Some((2, StyleRangeComparison::LessThanOrEqual))
+            } else {
+                Some((1, StyleRangeComparison::LessThan))
+            }
+        } else if tokens[index].source.equals_ascii(b">") {
+            if tokens
+                .get(index + 1)
+                .is_some_and(|token| token.source.equals_ascii(b"="))
+            {
+                Some((2, StyleRangeComparison::GreaterThanOrEqual))
+            } else {
+                Some((1, StyleRangeComparison::GreaterThan))
+            }
+        } else {
+            None
+        };
+        if let Some((length, comparison)) = comparison {
+            comparisons.push((index, length, comparison));
+            index += length;
+        } else {
+            index += 1;
+        }
+    }
+    (comparisons.len() <= 2).then_some(comparisons)
+}
+
+fn style_range_comparable_value(
+    registry: Option<&CustomPropertyRegistry>,
+    tokens: &[OwnedToken],
+    context: &ASFResolutionContext,
+) -> Option<StyleRangeComparableValue> {
+    let source = serialize_tokens(tokens);
+    let mut random_function_index = 0;
+    let owned_parse_context;
+    let parse_context = if let Some(parse_context) = context.parse_context {
+        parse_context
+    } else {
+        owned_parse_context = registry?.parse_context(&mut random_function_index);
+        &owned_parse_context
+    };
+    let syntax_types = [
+        SyntaxType::Number,
+        SyntaxType::Length,
+        SyntaxType::Percentage,
+        SyntaxType::Angle,
+        SyntaxType::Time,
+        SyntaxType::Frequency,
+        SyntaxType::Resolution,
+    ];
+    let parsed = syntax_types
+        .into_iter()
+        .find_map(|syntax_type| parse_with_syntax(parse_context, &source, &SyntaxNode::Type(syntax_type)))?;
+    style_value_range_comparable(
+        &parsed,
+        context.style_query_length_resolution_context,
+        context.style_query_tree_counting,
+    )
+}
+
+fn compare_style_range_values(
+    left: StyleRangeComparableValue,
+    comparison: StyleRangeComparison,
+    right: StyleRangeComparableValue,
+) -> bool {
+    let dimension = |kind| !matches!(kind, StyleRangeNumericType::Number | StyleRangeNumericType::Percentage);
+    if left.kind != right.kind
+        && !(left.kind == StyleRangeNumericType::Number && left.value == 0.0 && dimension(right.kind))
+        && !(right.kind == StyleRangeNumericType::Number && right.value == 0.0 && dimension(left.kind))
+    {
+        return false;
+    }
+    match comparison {
+        StyleRangeComparison::Equal => left.value == right.value,
+        StyleRangeComparison::LessThan => left.value < right.value,
+        StyleRangeComparison::LessThanOrEqual => left.value <= right.value,
+        StyleRangeComparison::GreaterThan => left.value > right.value,
+        StyleRangeComparison::GreaterThanOrEqual => left.value >= right.value,
+    }
+}
+
+fn evaluate_style_range_value(
+    store: Option<&CustomPropertyStore>,
+    registry: Option<&CustomPropertyRegistry>,
+    tokens: &[OwnedToken],
+    context: &mut ASFResolutionContext,
+    recursion_depth: u32,
+) -> Result<Option<StyleRangeComparableValue>, ConditionEvaluation> {
+    let tokens = trim_whitespace(tokens);
+    let resolved = if let [
+        OwnedToken {
+            kind: OwnedTokenKind::Ident(name),
+            ..
+        },
+    ] = tokens
+        && name.starts_with_ascii("--")
+    {
+        if let Some(dependencies) = context.style_query_dependencies.as_deref_mut() {
+            dependencies.note(name);
+        }
+        match resolve_custom_property(store, registry, name, context, recursion_depth + 1) {
+            TokenResolution::Resolved(tokens) => tokens,
+            TokenResolution::Invalid => return Ok(None),
+            TokenResolution::Cyclic => return Err(ConditionEvaluation::Cyclic),
+            TokenResolution::NotHandled => return Err(ConditionEvaluation::NotHandled),
+        }
+    } else {
+        match substitute_arbitrary_substitution_functions(store, registry, tokens, context, recursion_depth + 1, None) {
+            TokenResolution::Resolved(tokens) => tokens,
+            TokenResolution::Invalid => return Ok(None),
+            TokenResolution::Cyclic => return Err(ConditionEvaluation::Cyclic),
+            TokenResolution::NotHandled => return Err(ConditionEvaluation::NotHandled),
+        }
+    };
+    Ok(style_range_comparable_value(registry, &resolved, context))
+}
+
+fn evaluate_style_range(
+    store: Option<&CustomPropertyStore>,
+    registry: Option<&CustomPropertyRegistry>,
+    tokens: &[OwnedToken],
+    comparisons: &[(usize, usize, StyleRangeComparison)],
+    context: &mut ASFResolutionContext,
+    recursion_depth: u32,
+) -> ConditionEvaluation {
+    if comparisons.is_empty() || comparisons.len() > 2 {
+        return ConditionEvaluation::Invalid;
+    }
+    let (first_index, first_length, first_comparison) = comparisons[0];
+    let middle_end = comparisons.get(1).map_or(tokens.len(), |comparison| comparison.0);
+    let values = [
+        &tokens[..first_index],
+        &tokens[first_index + first_length..middle_end],
+        comparisons
+            .get(1)
+            .map_or(&tokens[tokens.len()..], |(index, length, _)| &tokens[index + length..]),
+    ];
+    let left = match evaluate_style_range_value(store, registry, values[0], context, recursion_depth + 1) {
+        Ok(Some(value)) => value,
+        Ok(None) => return ConditionEvaluation::Match(false),
+        Err(result) => return result,
+    };
+    let middle = match evaluate_style_range_value(store, registry, values[1], context, recursion_depth + 1) {
+        Ok(Some(value)) => value,
+        Ok(None) => return ConditionEvaluation::Match(false),
+        Err(result) => return result,
+    };
+    if !compare_style_range_values(left, first_comparison, middle) {
+        return ConditionEvaluation::Match(false);
+    }
+    let Some((_, _, second_comparison)) = comparisons.get(1).copied() else {
+        return ConditionEvaluation::Match(true);
+    };
+    let right = match evaluate_style_range_value(store, registry, values[2], context, recursion_depth + 1) {
+        Ok(Some(value)) => value,
+        Ok(None) => return ConditionEvaluation::Match(false),
+        Err(result) => return result,
+    };
+    ConditionEvaluation::Match(compare_style_range_values(middle, second_comparison, right))
+}
+
 fn validate_style_feature(tokens: &[OwnedToken]) -> ConditionValidation {
     let tokens = trim_whitespace(tokens);
+    if find_top_level_source(tokens, b"!").is_some() {
+        return ConditionValidation::Invalid;
+    }
     if tokens.iter().any(|token| {
         token.source.equals_ascii(b"<") || token.source.equals_ascii(b">") || token.source.equals_ascii(b"=")
     }) {
@@ -1573,34 +2432,16 @@ fn evaluate_style_feature(
     recursion_depth: u32,
 ) -> ConditionEvaluation {
     let tokens = trim_whitespace(tokens);
-    if tokens.iter().any(|token| {
-        token.source.equals_ascii(b"<") || token.source.equals_ascii(b">") || token.source.equals_ascii(b"=")
-    }) {
-        // FIXME: Range style queries are evaluated in C++ without access to the Rust guarded-context stack. The cyclic
-        //        result does not identify the context that began the cycle, so marking the innermost context could mark
-        //        a caller outside the cycle and cannot mark the complete cycle suffix. Share the guarded contexts across
-        //        the callback instead.
-        let Some(evaluate) = context.evaluate_style_query else {
-            return ConditionEvaluation::NotHandled;
-        };
-        let source = serialize_tokens(tokens);
-        crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::EvaluateConditionCallback);
-        return match unsafe {
-            evaluate(
-                context.callback_context,
-                FfiUtf16View {
-                    ascii: std::ptr::null(),
-                    utf16: source.as_ptr(),
-                    length: source.len(),
-                },
-            )
-        } {
-            0 => ConditionEvaluation::Match(false),
-            1 => ConditionEvaluation::Match(true),
-            2 => ConditionEvaluation::Invalid,
-            3 => ConditionEvaluation::Cyclic,
-            _ => ConditionEvaluation::NotHandled,
-        };
+    let comparisons = style_range_comparisons(tokens);
+    if comparisons.as_ref().is_some_and(|comparisons| !comparisons.is_empty()) {
+        return evaluate_style_range(
+            store,
+            registry,
+            tokens,
+            comparisons.as_ref().expect("checked non-empty comparisons"),
+            context,
+            recursion_depth + 1,
+        );
     }
     let colon = find_top_level_source(tokens, b":");
     let name_tokens = trim_whitespace(&tokens[..colon.unwrap_or(tokens.len())]);
@@ -1627,37 +2468,15 @@ fn evaluate_style_feature(
         .is_empty()
         .then(|| registry.and_then(|registry| registry.registrations.get(name)))
         .flatten();
+    if let Some(dependencies) = context.style_query_dependencies.as_deref_mut() {
+        dependencies.note(name);
+    }
     let computed = resolve_custom_property(store, registry, name, context, recursion_depth + 1);
     let computed = match computed {
         TokenResolution::Resolved(tokens) => Some(tokens),
         TokenResolution::Invalid | TokenResolution::Cyclic => None,
         TokenResolution::NotHandled => return ConditionEvaluation::NotHandled,
     };
-    if registration.is_some()
-        // NB: `registration` is only populated when there is no function-local scope, so this property context has no
-        //     custom function identity.
-        && !context.guarded_contexts.contains_property(name, None)
-        && let Some(evaluate) = context.evaluate_style_query
-    {
-        let source = serialize_tokens(tokens);
-        crate::css::ffi_stats::bump_cpp_callback(crate::css::ffi_stats::FfiOp::EvaluateConditionCallback);
-        return match unsafe {
-            evaluate(
-                context.callback_context,
-                FfiUtf16View {
-                    ascii: std::ptr::null(),
-                    utf16: source.as_ptr(),
-                    length: source.len(),
-                },
-            )
-        } {
-            0 => ConditionEvaluation::Match(false),
-            1 => ConditionEvaluation::Match(true),
-            2 => ConditionEvaluation::Invalid,
-            3 => ConditionEvaluation::Cyclic,
-            _ => ConditionEvaluation::NotHandled,
-        };
-    }
     let Some(colon) = colon else {
         return ConditionEvaluation::Match(computed.is_some());
     };
@@ -1703,6 +2522,9 @@ fn evaluate_style_feature(
                         .unwrap_or_else(|| &registration.expect("registered property").syntax),
                     &computed,
                     &expected,
+                    context.style_query_length_resolution_context,
+                    context.style_query_tree_counting,
+                    context.style_query_color_resolution_input,
                 )
             }
             (Some(computed), Some(expected)) => trim_whitespace(&computed) == trim_whitespace(&expected),
@@ -1721,10 +2543,101 @@ fn evaluate_style_feature(
             .or_else(|| registration.map(|registration| &registration.syntax)),
     ) {
         return ConditionEvaluation::Match(registered_style_query_values_are_equal(
-            registry, syntax, &computed, query,
+            registry,
+            syntax,
+            &computed,
+            query,
+            context.style_query_length_resolution_context,
+            context.style_query_tree_counting,
+            context.style_query_color_resolution_input,
         ));
     }
     ConditionEvaluation::Match(serialize_tokens(trim_whitespace(&computed)) == serialize_tokens(query))
+}
+
+pub(crate) unsafe fn evaluate_retained_container_style_feature(
+    store: *const c_void,
+    registry: &CustomPropertyRegistry,
+    feature: crate::css::parser::query_parser::FfiContainerStyleFeature,
+    length_resolution_context: &crate::css::style_compute::FfiLengthResolutionContext,
+    dependencies: &mut crate::css::cascaded_properties::StyleQueryDependencies,
+    tree_counting: (u64, u64),
+    color_resolution_input: crate::css::color_resolution::ColorResolutionInput<'_>,
+) -> crate::css::parser::query_parser::MatchResult {
+    use crate::css::parser::query_parser::{FfiContainerStyleFeatureKind, FfiStyleRangeValueKind, MatchResult};
+    let values = if feature.value_count == 0 {
+        &[][..]
+    } else {
+        if feature.values.is_null() {
+            return MatchResult::Unknown;
+        }
+        unsafe { std::slice::from_raw_parts(feature.values, feature.value_count) }
+    };
+    let mut source = Vec::new();
+    let append_value = |source: &mut Vec<u16>, index: usize| -> bool {
+        let Some(value) = values.get(index) else {
+            return false;
+        };
+        let Some(units) = (unsafe { value.value.to_utf16() }) else {
+            return false;
+        };
+        source.extend_from_slice(&units);
+        true
+    };
+    let append_comparison = |source: &mut Vec<u16>, comparison: u8| -> bool {
+        let text = match comparison {
+            0 => "=",
+            1 => "<",
+            2 => "<=",
+            3 => ">",
+            4 => ">=",
+            _ => return false,
+        };
+        source.extend(text.encode_utf16());
+        true
+    };
+    let valid = match feature.kind {
+        FfiContainerStyleFeatureKind::Boolean => append_value(&mut source, 0),
+        FfiContainerStyleFeatureKind::Plain => {
+            append_value(&mut source, 0) && {
+                source.push(u16::from(b':'));
+                append_value(&mut source, 1)
+            }
+        }
+        FfiContainerStyleFeatureKind::Range => {
+            append_value(&mut source, 0)
+                && append_comparison(&mut source, feature.first_comparison)
+                && append_value(&mut source, 1)
+                && (values.len() == 2
+                    || append_comparison(&mut source, feature.second_comparison) && append_value(&mut source, 2))
+        }
+    };
+    if !valid
+        || values.iter().any(|value| {
+            !matches!(
+                value.kind,
+                FfiStyleRangeValueKind::Property | FfiStyleRangeValueKind::Components
+            )
+        })
+    {
+        return MatchResult::Unknown;
+    }
+    let store = unsafe { store.cast::<CustomPropertyStore>().as_ref() };
+    let mut context = ASFResolutionContext {
+        inheritance_store: store.and_then(|store| store.inheritance_parent.as_deref()),
+        style_query_length_resolution_context: Some(length_resolution_context),
+        style_query_dependencies: Some(dependencies),
+        style_query_tree_counting: Some(tree_counting),
+        style_query_color_resolution_input: Some(color_resolution_input),
+        ..Default::default()
+    };
+    match evaluate_style_feature(store, Some(registry), &tokenize_owned(&source), &mut context, 0) {
+        ConditionEvaluation::Match(true) => MatchResult::True,
+        ConditionEvaluation::Match(false) => MatchResult::False,
+        ConditionEvaluation::Invalid | ConditionEvaluation::NotHandled | ConditionEvaluation::Cyclic => {
+            MatchResult::Unknown
+        }
+    }
 }
 
 fn evaluate_style_query(
@@ -2144,30 +3057,16 @@ fn replace_a_dashed_function(
                 .map(|definition| definition.scope_identity)
         })
         .unwrap_or(functions.caller_scope_identity);
-    let resolved_identity = context.resolve_custom_function.map(|resolve| unsafe {
-        resolve(
-            caller_scope_identity,
-            FfiUtf16View {
-                ascii: std::ptr::null(),
-                utf16: name.as_ptr(),
-                length: name.len(),
-            },
-        )
+    let resolved_identity = functions
+        .visible_definitions
+        .get(&(caller_scope_identity, name.to_vec()))
+        .copied();
+    let definition = resolved_identity.and_then(|identity| {
+        functions
+            .definitions
+            .iter()
+            .find(|definition| definition.identity == identity)
     });
-    let definition = resolved_identity
-        .and_then(|identity| {
-            functions
-                .definitions
-                .iter()
-                .find(|definition| definition.identity == identity)
-        })
-        .or_else(|| {
-            resolved_identity.is_none().then(|| {
-                functions.definitions.iter().find(|definition| {
-                    definition.signature.name.units() == name && definition.scope_identity == caller_scope_identity
-                })
-            })?
-        });
     let Some(function) = definition else {
         return TokenResolution::Invalid;
     };
@@ -2642,15 +3541,13 @@ pub(crate) unsafe fn resolve_vars(
     registry: *const c_void,
     parse_context: Option<&ParseContext>,
     media_environment: Option<&FfiMediaEnvironment>,
-    load_media_environment: Option<unsafe extern "C" fn(*mut c_void) -> *const c_void>,
     property_id: u16,
     root_custom_property_name: FfiUtf16View,
     value_data: *const c_void,
     environment: &mut VarResolutionEnvironment,
     attribute_names_are_ascii_case_insensitive: bool,
-    resolve_custom_function: Option<unsafe extern "C" fn(usize, FfiUtf16View) -> u64>,
-    callback_context: *mut c_void,
-    evaluate_style_query: Option<unsafe extern "C" fn(*mut c_void, FfiUtf16View) -> u8>,
+    style_query_length_resolution_context: *const crate::css::style_compute::FfiLengthResolutionContext,
+    style_query_dependencies: *mut c_void,
     final_custom_properties: Option<&HashMap<Vec<u16>, *const c_void>>,
 ) -> NativeVarResolution {
     let store = if store.is_null() {
@@ -2693,12 +3590,14 @@ pub(crate) unsafe fn resolve_vars(
         attribute_names_are_ascii_case_insensitive,
         contains_attr_tainted_values: false,
         custom_functions: Some(custom_functions),
-        resolve_custom_function,
         parse_context,
         media_environment,
-        load_media_environment,
-        callback_context,
-        evaluate_style_query,
+        style_query_length_resolution_context: unsafe { style_query_length_resolution_context.as_ref() },
+        style_query_dependencies: unsafe {
+            style_query_dependencies
+                .cast::<crate::css::cascaded_properties::StyleQueryDependencies>()
+                .as_mut()
+        },
         final_custom_properties,
         token_cache: Some(token_cache),
         resolution_stats: Some(resolution_stats),
@@ -2895,6 +3794,7 @@ mod tests {
                 parameter_defaults: vec![None],
                 declarations: vec![(utf16("result"), tokenize_owned(b"var(--value)"), true)],
             }],
+            visible_definitions: HashMap::from([((1, utf16("--echo")), 2)]),
         };
         let mut context = ASFResolutionContext {
             custom_functions: Some(&functions),
@@ -2984,14 +3884,20 @@ mod tests {
     }
 }
 
+impl CustomPropertyRegistry {
+    /// The registry of a document that registers no custom property.
+    pub(crate) fn empty() -> Self {
+        Self {
+            registrations: HashMap::new(),
+            document_url: Vec::new(),
+            document_base_url: Vec::new(),
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_custom_property_registry_create() -> *mut c_void {
-    Box::into_raw(Box::new(CustomPropertyRegistry {
-        registrations: HashMap::new(),
-        document_url: Vec::new(),
-        document_base_url: Vec::new(),
-    }))
-    .cast()
+    Box::into_raw(Box::new(CustomPropertyRegistry::empty())).cast()
 }
 
 /// Replaces the effective registered custom-property names for one document.
@@ -3037,12 +3943,20 @@ pub unsafe extern "C" fn rust_custom_property_registry_update(
         let Some(syntax) = (unsafe { clone_syntax_handle(registration.syntax) }) else {
             continue;
         };
+        // SAFETY: a published computed initial value is a live style value for the call; the
+        //         registry holds one reference of its own for as long as it names the registration.
+        let computed_initial = (!registration.computed_initial_value.is_null()).then(|| unsafe {
+            RetainedStyleValueData::from_retained_pointer(crate::css::style_value::retain_style_value(
+                registration.computed_initial_value.cast(),
+            ))
+        });
         registry.registrations.insert(
             name,
             RegisteredCustomProperty {
                 syntax,
                 inherits: registration.inherits,
                 initial_source,
+                computed_initial,
             },
         );
     }
@@ -3194,6 +4108,90 @@ pub unsafe extern "C" fn rust_custom_property_store_create_animation_overlay(
 pub unsafe extern "C" fn rust_custom_property_store_destroy(store: *const c_void) {
     crate::css::ffi_stats::bump(crate::css::ffi_stats::FfiOp::CustomPropertyStoreLifecycleEntry);
     drop(unsafe { Arc::from_raw(store.cast::<CustomPropertyStore>()) });
+}
+
+/// Retains one strong reference to a custom-property store.
+///
+/// # Safety
+/// `store` must be a live store pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_custom_property_store_retain(store: *const c_void) -> *const c_void {
+    unsafe { Arc::increment_strong_count(store.cast::<CustomPropertyStore>()) };
+    store
+}
+
+/// Filter the host's layer using its published registration decisions, sharing the engine's
+/// inheritance operation. The result transfers one store reference, or is null when empty.
+///
+/// # Safety
+/// `store` is live; `parent` is null or live; `excluded` holds `excluded_count` name atoms.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_custom_property_store_inheritable_layer(
+    store: *const c_void,
+    parent: *const c_void,
+    excluded: *const usize,
+    excluded_count: usize,
+) -> *const c_void {
+    let excluded = if excluded_count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(excluded, excluded_count) }
+    };
+    unsafe { CustomPropertyStore::inheritable_layer(store.cast(), parent, excluded) }
+}
+
+/// Flatten a store for a host wrapper without promoting inherited names into its declared
+/// prefix or losing the original inheritance parent used by explicit inheritance.
+///
+/// # Safety
+/// `store` must be live. The result transfers one strong store reference.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_custom_property_store_flatten(store: *const c_void) -> *const c_void {
+    let source = unsafe { &*store.cast::<CustomPropertyStore>() };
+    let mut own_values = source.own_values.clone();
+    let mut own_names = source.own_names.clone();
+    let mut parent = source.parent.as_deref();
+    while let Some(current) = parent {
+        for (&name, entry) in &current.own_values {
+            if let std::collections::hash_map::Entry::Vacant(slot) = own_values.entry(name) {
+                own_names.insert(entry.name.clone(), name);
+                slot.insert(entry.clone());
+            }
+        }
+        parent = current.parent.as_deref();
+    }
+    Arc::into_raw(Arc::new(CustomPropertyStore {
+        own_values,
+        own_names,
+        declared_names: source.declared_names.clone(),
+        inheritance_parent: source.inheritance_parent.clone(),
+        parent: None,
+        ancestor_count: 0,
+    }))
+    .cast()
+}
+
+/// Hands every effective custom property to `callback`, with nearer entries shadowing ancestors.
+///
+/// # Safety
+/// `store` must be a live store pointer, and `callback` must not retain a value past the call
+/// without retaining it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_custom_property_store_for_each_effective_entry(
+    store: *const c_void,
+    context: *mut c_void,
+    callback: unsafe extern "C" fn(*mut c_void, usize, bool, *const c_void),
+) {
+    let mut seen = std::collections::HashSet::new();
+    let mut current = Some(unsafe { &*store.cast::<CustomPropertyStore>() });
+    while let Some(store) = current {
+        for (&name_raw, entry) in &store.own_values {
+            if seen.insert(name_raw) {
+                unsafe { callback(context, name_raw, entry.important, entry.value.pointer().cast()) };
+            }
+        }
+        current = store.parent.as_deref();
+    }
 }
 
 /// Hands every custom property a store declares itself to `callback`, in declaration order, with

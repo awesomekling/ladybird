@@ -95,20 +95,41 @@ impl RetainedState {
             counters: &mut Counters,
         ) {
             use crate::css::property_metadata::{longhands_for_shorthand, property_is_shorthand};
-            // Element declarations decide longhands. Presentation attributes can name shorthands
-            // whose children are themselves shorthands, so expand the complete property inventory.
-            if property_is_shorthand(property) && !matches!(&*declaration.value, StyleValueData::Unresolved { .. }) {
+            if property_is_shorthand(property) && matches!(&*declaration.value, StyleValueData::Unresolved { .. }) {
+                crate::css::style_compute::expand_shorthands_with(
+                    property,
+                    Arc::as_ptr(&declaration.value).cast(),
+                    false,
+                    &mut |property_id, value, _| {
+                        let value = unsafe {
+                            Arc::increment_strong_count(value.cast::<StyleValueData>());
+                            Arc::from_raw(value.cast::<StyleValueData>())
+                        };
+                        let expanded = declaration_block::DeclaredProperty {
+                            property_id,
+                            important: declaration.important,
+                            value,
+                        };
+                        declared.push(engine.intern_declared_property(&expanded, counters));
+                        written.push(unsafe {
+                            RetainedStyleValueData::from_retained_pointer(Arc::into_raw(expanded.value))
+                        });
+                    },
+                );
+                return;
+            }
+            if property_is_shorthand(property) {
                 for &longhand in longhands_for_shorthand(property) {
                     append(engine, longhand, declaration, declared, written, counters);
                 }
-            } else {
-                let mut value = engine.intern_declared_property(declaration, counters);
-                value.property = property;
-                declared.push(value);
-                written.push(unsafe {
-                    RetainedStyleValueData::from_retained_pointer(Arc::into_raw(declaration.value.clone()))
-                });
+                return;
             }
+            let mut value = engine.intern_declared_property(declaration, counters);
+            value.property = property;
+            declared.push(value);
+            written.push(unsafe {
+                RetainedStyleValueData::from_retained_pointer(Arc::into_raw(declaration.value.clone()))
+            });
         }
         let mut declared = Vec::with_capacity(declarations.len());
         let mut written = Vec::with_capacity(declarations.len());
@@ -166,11 +187,6 @@ impl RetainedState {
         id
     }
 
-    pub(super) unsafe fn intern_exact_specified_value(&mut self, value: *const StyleValueData) -> SpecifiedValueID {
-        debug_assert!(!value.is_null());
-        unsafe { self.specified_values.intern(value, &mut self.memory).0 }
-    }
-
     /// Register an authored spelling as an alias of its context-free canonical value.
     ///
     /// # Safety
@@ -183,6 +199,7 @@ impl RetainedState {
     /// dependencies are unchanged remain interned for one invalidation generation, preserving the
     /// dispatch and prefix work shared by unaffected scopes.
     pub(super) fn invalidate_scope_programs(&mut self) {
+        self.end_matching_traversal_over_dropped_scope_programs();
         for index in 0..self.scope_programs.len() {
             if !self.scope_programs[index]
                 .as_ref()
@@ -225,7 +242,18 @@ impl RetainedState {
         else {
             return;
         };
+        self.end_matching_traversal_over_dropped_scope_programs();
         self.release_scope_program(program);
+    }
+
+    /// A retained matching traversal was prepared against the scope programs being dropped: its prefix contexts and
+    /// ancestor requirements name them. A style update's traversal outlives its pass when the pass is submitted, and
+    /// script beside the pass can drop programs (a published layer order), so the traversal ends here rather than let
+    /// the update's next wave or a demand reuse it over programs that are gone.
+    fn end_matching_traversal_over_dropped_scope_programs(&mut self) {
+        if self.batch_matching_traversal.is_some() {
+            self.end_published_match_answer_completion_batch();
+        }
     }
 
     /// Drop only concrete scope programs that consume `sheet`. The key contains the effective
@@ -498,7 +526,6 @@ impl StyleEngineState {
         written_values: Vec<RetainedStyleValueData>,
         custom_declarations: Vec<CustomDeclaration>,
         custom_written_values: Vec<RetainedStyleValueData>,
-        complete: bool,
     ) {
         if !self.staged_rule_is_arriving(rule) {
             let program_version = self.retained.program.version();
@@ -513,14 +540,12 @@ impl StyleEngineState {
                 written_values: self.retained.program.written_values_of(rule).to_vec(),
                 custom_declarations: self.retained.program.custom_declarations_of(rule).to_vec(),
                 custom_written_values: self.retained.program.custom_written_values_of(rule).to_vec(),
-                complete: self.retained.program.declarations_are_complete_for(rule),
             },
             PendingRuleDeclarations {
                 declared,
                 written_values,
                 custom_declarations,
                 custom_written_values,
-                complete,
             },
         );
     }
@@ -548,7 +573,7 @@ impl StyleEngineState {
             .program_staging
             .rule_declarations
             .after(rule)
-            .map(|pending| pending.complete && pending.custom_declarations.is_empty())
+            .map(|pending| pending.custom_declarations.is_empty())
             .unwrap_or_else(|| self.retained.program.declarations_are_complete_for(rule))
     }
 
@@ -689,10 +714,13 @@ impl StyleEngineState {
     /// position. The parsed CSSOM objects are new, but an unchanged semantic rule does not become a
     /// departure followed by an arrival merely because the whole sheet was reparsed.
     pub fn begin_sheet_rules_replacement(&mut self, sheet: SheetID, counters: &mut Counters) {
-        assert!(
-            self.host.sheet_rule_replacement.is_none(),
-            "stylesheet replacements do not nest"
-        );
+        // The host replaces a sheet's rules as one unit, so one that is still open here lost its end on the way:
+        // it ends now, before the next one begins.
+        if let Some(open) = self.host.sheet_rule_replacement.as_ref() {
+            debug_assert!(false, "stylesheet replacements do not nest");
+            let (open, declaration_block) = (open.sheet, self.retained.next_declaration_block_version());
+            self.finish_sheet_rules_replacement(open, declaration_block, counters);
+        }
         if let Some(slot) = self
             .host
             .program_staging
@@ -793,7 +821,7 @@ impl StyleEngineState {
         replacement.reused += 1;
 
         self.set_rule_conditions_hold(rule, true, counters);
-        self.stage_rule_declared_properties(rule, Vec::new(), Vec::new(), Vec::new(), Vec::new(), false);
+        self.stage_rule_declared_properties(rule, Vec::new(), Vec::new(), Vec::new(), Vec::new());
         self.stage_rule_in_a_layer(rule, false);
         self.stage_rule_gated_by_container_query(rule, false);
         let mut version = RuleVersion::new(rule, RuleKind::Style);
@@ -909,7 +937,6 @@ impl StyleEngineState {
                 pending.written_values,
                 pending.custom_declarations,
                 pending.custom_written_values,
-                pending.complete,
             );
         }
 
@@ -1152,7 +1179,6 @@ impl StyleEngineState {
         written_values: Vec<RetainedStyleValueData>,
         custom_declarations: Vec<CustomDeclaration>,
         custom_written_values: Vec<RetainedStyleValueData>,
-        declarations_are_complete: bool,
     ) {
         self.record_rule_declaration_change(rule, declared, &custom_declarations);
         self.stage_rule_declared_properties(
@@ -1161,7 +1187,6 @@ impl StyleEngineState {
             written_values,
             custom_declarations,
             custom_written_values,
-            declarations_are_complete,
         );
     }
 
@@ -1319,11 +1344,14 @@ impl StyleEngineState {
     }
 
     pub(super) fn discard_style_transaction_outputs(&mut self, counters: &mut Counters) {
+        self.abandon_suspended_style_pass();
         self.clear_ffi_style_transaction_output();
         self.discard_engine_computed_records(counters);
+        self.discard_transition_steps_decided_in_pass();
+        self.discard_environment_moves_in_flight();
         self.retain_prefix_states();
         self.discard_prepared_batch_matching_traversal();
-        self.discard_published_match_answers(counters);
+        self.discard_published_match_answers();
         // Published matching scratch is the last owner that may name a retired identity.
         self.retained.tree.release_retired_identities(&mut self.retained.memory);
     }
@@ -1331,20 +1359,8 @@ impl StyleEngineState {
 
 impl StyleEngineState {
     /// Record already decoded cascade operators beside canonical specified values.
-    pub fn set_rule_declared_properties_with_operators(
-        &mut self,
-        rule: RuleID,
-        declared: &[DeclaredProperty],
-        declarations_are_complete: bool,
-    ) {
-        self.set_rule_declared_properties_with_written_values(
-            rule,
-            declared,
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            declarations_are_complete,
-        );
+    pub fn set_rule_declared_properties_with_operators(&mut self, rule: RuleID, declared: &[DeclaredProperty]) {
+        self.set_rule_declared_properties_with_written_values(rule, declared, Vec::new(), Vec::new(), Vec::new());
     }
 
     /// Drop every rule of a sheet.
@@ -1382,12 +1398,7 @@ impl StyleEngineState {
 impl StyleEngineState {
     /// Record which longhand properties a rule declares, and which of them it marks important.
     #[cfg(test)]
-    pub(super) fn set_rule_declared_properties(
-        &mut self,
-        rule: RuleID,
-        declared: &[(u16, bool)],
-        declarations_are_complete: bool,
-    ) {
+    pub(super) fn set_rule_declared_properties(&mut self, rule: RuleID, declared: &[(u16, bool)]) {
         let block = self
             .program
             .rule_version(rule)
@@ -1403,14 +1414,7 @@ impl StyleEngineState {
             })
             .collect();
         self.record_rule_declaration_change(rule, &declared, &[]);
-        self.stage_rule_declared_properties(
-            rule,
-            declared,
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            declarations_are_complete,
-        );
+        self.stage_rule_declared_properties(rule, declared, Vec::new(), Vec::new(), Vec::new());
     }
 
     /// Record the canonical specified value beside every declared longhand.
@@ -1419,7 +1423,6 @@ impl StyleEngineState {
         &mut self,
         rule: RuleID,
         declared: &[(u16, bool, SpecifiedValueID)],
-        declarations_are_complete: bool,
     ) {
         let declared: Vec<DeclaredProperty> = declared
             .iter()
@@ -1431,14 +1434,7 @@ impl StyleEngineState {
             })
             .collect();
         self.record_rule_declaration_change(rule, &declared, &[]);
-        self.stage_rule_declared_properties(
-            rule,
-            declared,
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            declarations_are_complete,
-        );
+        self.stage_rule_declared_properties(rule, declared, Vec::new(), Vec::new(), Vec::new());
     }
 
     /// Take the pending transaction for the style consumer that immediately follows this call.
@@ -1459,7 +1455,25 @@ impl StyleEngineState {
             nodes: Vec::new(),
             scoped: true,
         });
-        let _ = self.take_style_transaction(root, |_, _, _| {}, counters);
+        let timeline_samples = self.animation_timeline_samples().clone();
+        let _ = self.take_style_transaction(
+            root,
+            |_, _, _| {},
+            counters,
+            super::animations::CommittedTransformReferenceBoxes::NONE,
+            &timeline_samples,
+        );
+        // A pass the host would install in waves reports every wave, as the host's diagnostic
+        // take does.
+        while self.host.suspended_style_pass.is_some() {
+            let _ = self.take_style_transaction(
+                root,
+                |_, _, _| {},
+                counters,
+                super::animations::CommittedTransformReferenceBoxes::NONE,
+                &timeline_samples,
+            );
+        }
         let capture = self
             .diagnostic_plan_capture
             .take()

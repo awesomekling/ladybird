@@ -1148,6 +1148,19 @@ impl RetainedCounterDefinition {
     pub(crate) fn value(&self) -> &RetainedStyleValueData {
         &self.value
     }
+
+    /// The counter's integer, or none when the definition leaves it out. A computed value only
+    /// ever holds an integer or a calculation that resolves to one.
+    pub(crate) fn integer(&self) -> Option<i32> {
+        match self.value.optional_data()? {
+            StyleValueData::Integer { value } => Some(*value),
+            calculated @ StyleValueData::Calculated { .. } => Some(
+                crate::css::calc::resolve_calculated_integer_without_context(calculated)
+                    .expect("a computed counter value resolves to an integer"),
+            ),
+            _ => panic!("a computed counter value is an integer"),
+        }
+    }
 }
 
 impl RetainedImageSetOption {
@@ -2325,6 +2338,25 @@ pub unsafe extern "C" fn rust_style_value_computed_number(value: *const c_void) 
     match unsafe { &*(value as *const StyleValueData) } {
         StyleValueData::Number { value } => *value,
         _ => unreachable!("computed value must be a number"),
+    }
+}
+
+/// Resolves a calculation that needs no context to a number into `output`, and says whether it
+/// resolved. It reads the value only, so any thread may call it.
+///
+/// # Safety
+/// `value` must point at live Calculated StyleValueData and `output` at a writable f64.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_style_value_resolve_calculated_number_without_context(
+    value: *const c_void,
+    output: *mut f64,
+) -> bool {
+    match crate::css::calc::resolve_calculated_number_without_context(unsafe { &*(value as *const StyleValueData) }) {
+        Some(number) => {
+            unsafe { output.write(number) };
+            true
+        }
+        None => false,
     }
 }
 
@@ -3549,8 +3581,12 @@ pub unsafe extern "C" fn rust_style_value_create_unresolved_from_source(
     } else {
         &value_comparison_text
     };
+    let components = RetainedComponentValueList::from_source(component_source);
+    if presence_attr {
+        crate::css::parser::arbitrary_substitution::note_attr_names_read_by(components.as_slice());
+    }
     Arc::into_raw(Arc::new(StyleValueData::Unresolved {
-        components: RetainedComponentValueList::from_source(component_source),
+        components,
         source_text: CssString::from_utf16(&source_text),
         value_comparison_text: CssString::from_utf16(&value_comparison_text),
         presence_attr,

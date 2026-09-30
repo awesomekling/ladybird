@@ -28,39 +28,60 @@ fn assert_member_is_sync<T: Sync + ?Sized>(_member: &T) {}
 /// below. That is what keeps `assert_sync::<RetainedState>()` -- which this becomes, unchanged in
 /// meaning, once the exemptions are gone -- from being a list somebody forgets to update.
 ///
-/// Both exemptions are one thing: the prefix caches, which a single `Rc<RefCell<PrefixCaches>>`
+/// Both exemptions are one thing: the prefix caches, which a single `Arc<SharedPrefixCaches>`
 /// shares between the engine and every matching traversal that borrows it -- so
-/// `batch_matching_traversal` fails the bound for exactly the reason `prefix_caches` does.
-/// Giving a walk prefix caches of its own is what removes both. A lock here would not: the
-/// borrows nest, so it would only turn a loud re-entrant panic into a silent deadlock.
+/// `batch_matching_traversal` is exempt for exactly the reason `prefix_caches` is. Both are
+/// `Sync` by type: their borrows are checked atomically, so the engine can move to the thread its
+/// stages run on. That is not shareable in the sense meant here: two workers borrowing the caches
+/// at once would panic, and a lock that waited instead would deadlock, since the borrows nest.
+/// Giving a walk prefix caches of its own is what removes both.
 #[expect(dead_code, reason = "a compile-time witness, never called")]
 fn every_retained_member_is_shareable(state: &RetainedState) {
     let RetainedState {
         memory,
         admission,
         deferred_pseudo_element,
+        latent_deferred_pseudo_element,
+        deferred_pseudo_element_observable_nodes,
         tree,
         program,
         native_rules,
+        container_effects_for_host,
+        published_container_verdicts,
+        container_gates_unheld,
+        container_input_nodes,
+        size_container_queries,
+        anchor_names,
         declaration_block_version,
         last_transaction_only_derived_child_reactions,
         sheets_excluded_from_routing,
         routing_needs_detachment_sweep,
         match_workspace,
-        query_match_workspace,
-        selector_query_generation,
-        query_settled_transaction_version,
-        query_sorted_candidates,
-        query_sorted_candidates_stamp,
-        query_preorder_ranks,
-        query_preorder_ranks_stamp,
-        query_workspace_generation,
         exact_covered_scratch,
         cascade_compaction_scratch,
         cascade_compaction_scratch_memory,
+        top_layer_elements,
         next_style_transaction_version,
         document_style_computation_inputs,
+        document_media_snapshot,
+        document_function_snapshot,
+        driven_viewport,
+        document_resource_contexts,
+        custom_property_registry,
+        element_custom_property_data,
+        pseudo_element_custom_property_data,
+        sampled_custom_property_environments,
+        sampled_pseudo_element_custom_property_environments,
+        environment_move_recompute_nodes,
         font_resolution,
+        font_face_snapshot,
+        font_cascade_memo,
+        root_font_request,
+        monospace_font_family,
+        random_base_values,
+        random_base_requests,
+        layout_style_snapshots,
+        container_query_inputs,
         layer_topology_version,
         sheet_order_version,
         specified_values,
@@ -68,16 +89,44 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         computed_group_sets,
         custom_property_environments,
         nodes_with_substituted_records,
+        nodes_with_tree_counting_records,
+        nodes_owing_a_transition_registration,
+        nodes_owing_explicit_inheritance,
+        children_explicitly_inherit_marks,
+        engine_row_child_facts,
+        batch_pinned_compositions,
+        nodes_owing_an_animation_sample,
+        pseudo_settles_owed,
+        rows_sampled_in_pass,
+        pseudo_elements_sampled_in_pass,
+        pseudo_element_environments_named_in_settle,
+        next_engine_animation_overlay_identity,
+        transition_baselines,
+        element_transitions,
+        transition_steps_decided_in_pass,
+        pseudo_element_transition_steps_decided_in_pass,
+        counter_style_environment_identities,
+        nodes_owing_animation_definitions,
+        css_defined_animations,
+        animation_timing_rows,
+        animation_effect_descriptions,
+        animation_timeline_samples,
+        root_element_font_metrics,
+        animation_keyframes,
         custom_property_registrations_changed,
-        pending_element_style_computation_selections,
-        pending_pseudo_style_computation_selections,
         engine_computed_records_pending,
+        demand_pseudo_records,
         flush_stamp,
         style_input_nodes_for_cpp,
+        tree_counting_input_nodes,
         parent_inputs_moved_nodes,
         engine_pseudo_record_cache,
+        batch_answers_complete_but_for_custom_properties,
+        batch_custom_property_matches,
+        batch_backing_pseudo_matches,
         engine_cold_record_cache,
         engine_cold_record_donors,
+        engine_warm_record_cohorts,
         computed_group_set_memory,
         custom_property_environment_memory,
         computed_fixed_metadata_memory,
@@ -87,7 +136,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         computed_pseudo_assignment_memory,
         style_invalidation_cache,
         match_answers,
-        selector_truth_sets,
         retained_match_answers,
         retained_selector_incidences,
         selector_incidence_is_current,
@@ -102,8 +150,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         transaction_fact_view,
         facts,
         programs,
-        attribute_value_text_names,
-        attribute_value_text_requirements_version,
         selector_programs_need_sweep,
         routing,
         selector_truth_changes,
@@ -130,42 +176,89 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(memory);
     assert_member_is_sync(admission);
     assert_member_is_sync(deferred_pseudo_element);
+    assert_member_is_sync(latent_deferred_pseudo_element);
+    assert_member_is_sync(deferred_pseudo_element_observable_nodes);
     assert_member_is_sync(tree);
     assert_member_is_sync(program);
     assert_member_is_sync(native_rules);
+    assert_member_is_sync(container_effects_for_host);
+    assert_member_is_sync(published_container_verdicts);
+    assert_member_is_sync(container_gates_unheld);
+    assert_member_is_sync(container_input_nodes);
+    assert_member_is_sync(size_container_queries);
+    assert_member_is_sync(anchor_names);
     assert_member_is_sync(declaration_block_version);
     assert_member_is_sync(last_transaction_only_derived_child_reactions);
     assert_member_is_sync(sheets_excluded_from_routing);
     assert_member_is_sync(routing_needs_detachment_sweep);
     assert_member_is_sync(match_workspace);
-    assert_member_is_sync(query_match_workspace);
-    assert_member_is_sync(selector_query_generation);
-    assert_member_is_sync(query_settled_transaction_version);
-    assert_member_is_sync(query_sorted_candidates);
-    assert_member_is_sync(query_sorted_candidates_stamp);
-    assert_member_is_sync(query_preorder_ranks);
-    assert_member_is_sync(query_preorder_ranks_stamp);
-    assert_member_is_sync(query_workspace_generation);
     assert_member_is_sync(exact_covered_scratch);
     assert_member_is_sync(cascade_compaction_scratch);
     assert_member_is_sync(cascade_compaction_scratch_memory);
+    assert_member_is_sync(top_layer_elements);
     assert_member_is_sync(next_style_transaction_version);
     assert_member_is_sync(document_style_computation_inputs);
+    assert_member_is_sync(document_media_snapshot);
+    assert_member_is_sync(document_function_snapshot);
+    assert_member_is_sync(driven_viewport);
+    assert_member_is_sync(document_resource_contexts);
+    assert_member_is_sync(custom_property_registry);
+    assert_member_is_sync(element_custom_property_data);
+    assert_member_is_sync(pseudo_element_custom_property_data);
+    assert_member_is_sync(sampled_custom_property_environments);
+    assert_member_is_sync(sampled_pseudo_element_custom_property_environments);
+    assert_member_is_sync(environment_move_recompute_nodes);
+    // The published `@font-face` table is the one piece of document state a font resolution reads,
+    // so it has to be shareable for the stage's own thread to resolve from it.
+    assert_member_is_sync(font_face_snapshot);
+    assert_member_is_sync(font_cascade_memo);
+    assert_member_is_sync(layout_style_snapshots);
+    assert_member_is_sync(container_query_inputs);
+    assert_member_is_sync(random_base_values);
+    assert_member_is_sync(random_base_requests);
     assert_member_is_sync(layer_topology_version);
     assert_member_is_sync(sheet_order_version);
     assert_member_is_sync(specified_values);
     assert_member_is_sync(winner_groups);
     assert_member_is_sync(nodes_with_substituted_records);
+    assert_member_is_sync(nodes_with_tree_counting_records);
+    assert_member_is_sync(nodes_owing_a_transition_registration);
+    assert_member_is_sync(nodes_owing_explicit_inheritance);
+    assert_member_is_sync(children_explicitly_inherit_marks);
+    assert_member_is_sync(engine_row_child_facts);
+    assert_member_is_sync(batch_pinned_compositions);
+    assert_member_is_sync(nodes_owing_an_animation_sample);
+    assert_member_is_sync(pseudo_settles_owed);
+    assert_member_is_sync(rows_sampled_in_pass);
+    assert_member_is_sync(pseudo_elements_sampled_in_pass);
+    assert_member_is_sync(pseudo_element_environments_named_in_settle);
+    assert_member_is_sync(next_engine_animation_overlay_identity);
+    assert_member_is_sync(transition_baselines);
+    assert_member_is_sync(element_transitions);
+    assert_member_is_sync(transition_steps_decided_in_pass);
+    assert_member_is_sync(pseudo_element_transition_steps_decided_in_pass);
+    assert_member_is_sync(counter_style_environment_identities);
+    assert_member_is_sync(nodes_owing_animation_definitions);
+    assert_member_is_sync(css_defined_animations);
+    assert_member_is_sync(animation_timing_rows);
+    assert_member_is_sync(animation_effect_descriptions);
+    assert_member_is_sync(animation_timeline_samples);
+    assert_member_is_sync(root_element_font_metrics);
+    assert_member_is_sync(animation_keyframes);
     assert_member_is_sync(custom_property_registrations_changed);
-    assert_member_is_sync(pending_element_style_computation_selections);
-    assert_member_is_sync(pending_pseudo_style_computation_selections);
     assert_member_is_sync(engine_computed_records_pending);
+    assert_member_is_sync(demand_pseudo_records);
     assert_member_is_sync(flush_stamp);
     assert_member_is_sync(style_input_nodes_for_cpp);
+    assert_member_is_sync(tree_counting_input_nodes);
     assert_member_is_sync(parent_inputs_moved_nodes);
     assert_member_is_sync(engine_pseudo_record_cache);
+    assert_member_is_sync(batch_answers_complete_but_for_custom_properties);
+    assert_member_is_sync(batch_custom_property_matches);
+    assert_member_is_sync(batch_backing_pseudo_matches);
     assert_member_is_sync(engine_cold_record_cache);
     assert_member_is_sync(engine_cold_record_donors);
+    assert_member_is_sync(engine_warm_record_cohorts);
     assert_member_is_sync(computed_group_set_memory);
     assert_member_is_sync(custom_property_environment_memory);
     assert_member_is_sync(computed_fixed_metadata_memory);
@@ -175,7 +268,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(computed_pseudo_assignment_memory);
     assert_member_is_sync(style_invalidation_cache);
     assert_member_is_sync(match_answers);
-    assert_member_is_sync(selector_truth_sets);
     assert_member_is_sync(retained_match_answers);
     assert_member_is_sync(retained_selector_incidences);
     assert_member_is_sync(selector_incidence_is_current);
@@ -188,8 +280,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(transaction_fact_view);
     assert_member_is_sync(facts);
     assert_member_is_sync(programs);
-    assert_member_is_sync(attribute_value_text_names);
-    assert_member_is_sync(attribute_value_text_requirements_version);
     assert_member_is_sync(selector_programs_need_sweep);
     assert_member_is_sync(routing);
     assert_member_is_sync(selector_truth_changes);
@@ -212,6 +302,8 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(fold_id_and_class_name_case);
     assert_member_is_sync(custom_property_environments);
     assert_member_is_sync(font_resolution);
+    assert_member_is_sync(root_font_request);
+    assert_member_is_sync(monospace_font_family);
     assert_member_is_sync(computed_group_sets);
     #[cfg(test)]
     assert_member_is_sync(diagnostic_plan_capture);

@@ -102,12 +102,12 @@ mod tests {
         use crate::css::media_list::MediaList;
         use crate::css::property_metadata::property_id;
         use crate::css::rule::{rust_rule_list_clear, rust_rule_retain};
-        use crate::css::style::StyleEngine;
         use crate::css::style::bridge::{
             FfiNativeRuleTarget, style_engine_native_rule_declarations_changed, style_engine_native_rule_target,
         };
         use crate::css::style::memory::DeviceClass;
         use crate::css::style::program::{CascadeOrigin, RuleKind, StyleSheetObjectID};
+        use crate::css::style::{OwnedStyleEngine, StyleEngine};
         use crate::css::style_sheet::NativeStyleSheet;
 
         let rules = rules(".文字 { width: 13px; --幅: 19px; }");
@@ -120,11 +120,11 @@ mod tests {
         let rule_lifetime = Rc::downgrade(&retained_rule);
         drop(retained_rule);
         let style = rule.style_rule();
-        let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
-        let sheet = engine.add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
-        let id = engine.add_non_matching_rule(sheet, None, RuleKind::Style);
+        let mut engine = OwnedStyleEngine::new(Box::new(StyleEngine::new(DeviceClass::ForegroundDesktop)));
+        let sheet = engine.engine().add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
+        let id = engine.engine().add_non_matching_rule(sheet, None, RuleKind::Style);
         unsafe {
-            engine.register_native_rule(
+            engine.engine().register_native_rule(
                 id,
                 crate::css::rule::rust_rule_identity(rule),
                 rule.cascade_declarations(),
@@ -135,7 +135,7 @@ mod tests {
         };
         // All fields are integers, nullable pointers, booleans, or enums whose zero variant is valid.
         let mut target: FfiNativeRuleTarget = unsafe { std::mem::zeroed() };
-        assert!(unsafe { style_engine_native_rule_target((&raw const engine).cast(), id.0 + 1, &mut target) });
+        assert!(unsafe { style_engine_native_rule_target(engine.handle(), id.0 + 1, &mut target,) });
         let snapshot = unsafe { Arc::from_raw(target.declarations.cast::<DeclarationBlockData>()) };
         assert_eq!(target.source_identity, source_identity);
         assert!(style.declarations.is_immutable());
@@ -145,16 +145,16 @@ mod tests {
 
         let mut declarations = style.declarations.clone();
         assert!(declarations.remove(property_id::WIDTH));
-        unsafe extern "C" fn notify(_: *mut c_void, _: u32) {}
+        unsafe extern "C" fn notify(_: *mut c_void) {}
         unsafe {
             style_engine_native_rule_declarations_changed(
-                (&raw mut engine).cast(),
+                engine.input_handle(),
                 std::ptr::from_ref(rule).cast(),
                 std::ptr::null_mut(),
                 notify,
             );
         }
-        assert!(unsafe { style_engine_native_rule_target((&raw const engine).cast(), id.0 + 1, &mut target) });
+        assert!(unsafe { style_engine_native_rule_target(engine.handle(), id.0 + 1, &mut target,) });
         let edited_snapshot = unsafe { Arc::from_raw(target.declarations.cast::<DeclarationBlockData>()) };
         assert_eq!(target.identity, identity);
         assert_ne!(target.declaration_version, version);
@@ -166,13 +166,13 @@ mod tests {
         assert!(source_lifetime.upgrade().is_none());
         assert!(rule_lifetime.upgrade().is_none());
         // The program reads its published snapshot, not a live document-local rule record.
-        assert!(unsafe { style_engine_native_rule_target((&raw const engine).cast(), id.0 + 1, &mut target) });
+        assert!(unsafe { style_engine_native_rule_target(engine.handle(), id.0 + 1, &mut target,) });
         let surviving_snapshot = unsafe { Arc::from_raw(target.declarations.cast::<DeclarationBlockData>()) };
         assert!(Arc::ptr_eq(&edited_snapshot, &surviving_snapshot));
         assert_eq!(target.identity, identity);
         assert_eq!(target.source_identity, source_identity);
-        engine.remove_style_rule(id);
-        assert!(!unsafe { style_engine_native_rule_target((&raw const engine).cast(), id.0 + 1, &mut target) });
+        engine.engine().remove_style_rule(id);
+        assert!(!unsafe { style_engine_native_rule_target(engine.handle(), id.0 + 1, &mut target,) });
         drop(engine);
         assert!(
             snapshot

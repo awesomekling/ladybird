@@ -216,9 +216,12 @@ impl RetainedState {
             .reserve_required(MemoryCategory::BatchScratch, charged_bytes as u64);
 
         while let Some(node) = pending.pop() {
-            if node.element_index().is_some() {
-                visit(node);
+            // A text node holds a place among a slot's assigned nodes, but it has no style of its
+            // own and owns no child sequence the flat tree descends into.
+            if node.element_index().is_none() {
+                continue;
             }
+            visit(node);
 
             let previous_capacity = pending.capacity();
             pending.extend(self.tree.flat_tree_children(node));
@@ -1109,11 +1112,6 @@ impl SequenceChanges {
     }
 }
 
-thread_local! {
-    static SHARED_SIBLING_ENTRY_MAPS: RefCell<SharedVectorPool<u32>> =
-        RefCell::new(SharedVectorPool::new(MemoryCategory::RoutingRegistry));
-}
-
 pub(super) struct SiblingCandidateWorkspace {
     entry_by_route: SharedVector<u32>,
     pub(super) candidate_epochs: EpochColumn,
@@ -1122,7 +1120,7 @@ pub(super) struct SiblingCandidateWorkspace {
 }
 
 impl SiblingCandidateWorkspace {
-    pub(super) fn new(entries: &[SiblingEntry]) -> Self {
+    pub(super) fn new(entries: &[SiblingEntry], entry_map_pool: &mut SharedVectorPool<u32>) -> Self {
         let route_count = entries.iter().map(|entry| entry.route.index() + 1).max().unwrap_or(0);
         let mut entry_by_route: SharedVector<u32> = (0..route_count).map(|_| u32::MAX).collect();
         for (index, entry) in entries.iter().enumerate() {
@@ -1130,7 +1128,7 @@ impl SiblingCandidateWorkspace {
             assert_ne!(index, u32::MAX, "sibling entry space exhausted");
             entry_by_route.make_mut()[entry.route.index()] = index;
         }
-        entry_by_route.share(&SHARED_SIBLING_ENTRY_MAPS);
+        entry_by_route.share(entry_map_pool);
         Self {
             entry_by_route,
             candidate_epochs: {

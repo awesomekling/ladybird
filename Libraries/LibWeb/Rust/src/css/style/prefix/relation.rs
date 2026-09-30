@@ -18,7 +18,7 @@ use super::super::selector::RoutingKey;
 use super::super::tree::TreeScopeID;
 use super::{
     Column, Counter, Counters, DispatchKey, EntryID, HashMap, PrefixAutomaton, PrefixEvaluation, PrefixOutputKind,
-    PrefixPredicate, PrefixStates, PrefixStepID, PrefixTransitionLookup, StyleNodeID, StyleNodeTree, matches_feature,
+    PrefixPredicate, PrefixStates, PrefixStepID, StyleNodeID, StyleNodeTree, matches_feature,
 };
 
 // This is derived only from the immutable automaton. Memberships and pending edits stay in
@@ -34,11 +34,6 @@ pub(super) struct PrefixRelationProgram {
     keyed_compounds: Vec<u32>,
     terminal_steps: HashMap<EntryID, SmallVec<[usize; 1]>>,
     memory: super::super::memory::MemoryLease,
-}
-
-thread_local! {
-    static RELATION_PROGRAM_MEMORY: std::cell::RefCell<super::super::memory::MemoryController> =
-        std::cell::RefCell::new(super::super::memory::MemoryController::new(super::super::memory::DeviceClass::ForegroundDesktop));
 }
 
 /// A step in dependency order, with what an update reads of it as it runs: how it is reached, its compound and its
@@ -313,10 +308,10 @@ pub(in crate::css::style) struct PrefixRelation {
 }
 
 impl PrefixRelation {
+    /// Unit tests check every maintained answer against scalar prefix matching.
+    #[cfg(test)]
     fn verify_answers(&self, evaluation: &mut PrefixEvaluation<'_, '_>) {
-        if !cfg!(test) && !super::super::verification::prefix_relation_is_enabled() {
-            return;
-        }
+        use super::PrefixTransitionLookup;
         assert_eq!(self.nested_capacity_bytes, self.measure_nested_capacity_bytes());
         let mut scalar = PrefixStates::new();
         let mut counters = Counters::default();
@@ -785,7 +780,7 @@ impl PrefixRelation {
                                         ..
                                     } => automaton
                                         .features_for(*feature_start, *feature_len)
-                                        .all(|feature| matches_feature(row.facts, row.row, feature)),
+                                        .all(|feature| matches_feature(row, feature)),
                                     PrefixPredicate::Program { program, local, .. } => evaluation
                                         .evaluator
                                         .matches_prefix_local(
@@ -1156,6 +1151,7 @@ impl PrefixRelation {
         }
         self.walk_truth = walk_truth;
         self.refresh_capacity_bytes();
+        #[cfg(test)]
         self.verify_answers(evaluation);
     }
 }
@@ -1173,6 +1169,7 @@ impl PrefixAutomaton {
         &self,
         evaluation: &mut PrefixEvaluation<'_, '_>,
         root: StyleNodeID,
+        relation_program_memory: &mut super::super::memory::MemoryController,
         counters: &mut Counters,
     ) -> PrefixRelation {
         counters.bump(Counter::PrefixRelationBuilds);
@@ -1289,7 +1286,7 @@ impl PrefixAutomaton {
                                 ..
                             } => self
                                 .features_for(*feature_start, *feature_len)
-                                .all(|feature| matches_feature(row.facts, row.row, feature)),
+                                .all(|feature| matches_feature(row, feature)),
                             PrefixPredicate::Program { program, local, .. } => evaluation
                                 .evaluator
                                 .matches_prefix_local(
@@ -1462,9 +1459,9 @@ impl PrefixAutomaton {
                 terminal_steps,
                 memory: super::super::memory::MemoryLease::new(super::super::memory::MemoryCategory::RuleProgram),
             };
-            RELATION_PROGRAM_MEMORY.with_borrow_mut(|memory| {
-                program.memory.resize_required_to(memory, program.capacity_bytes());
-            });
+            program
+                .memory
+                .resize_required_to(relation_program_memory, program.capacity_bytes());
             std::sync::Arc::new(program)
         }));
         let mut relation = PrefixRelation {
@@ -1502,6 +1499,7 @@ impl PrefixAutomaton {
         };
         relation.nested_capacity_bytes = relation.measure_nested_capacity_bytes();
         relation.refresh_capacity_bytes();
+        #[cfg(test)]
         relation.verify_answers(evaluation);
         relation
     }

@@ -407,6 +407,10 @@ impl RetainedState {
             regions.add(ImpactRegion::Node(node));
             for slot in [old.assigned_slot, new.assigned_slot].into_iter().flatten() {
                 for assigned in self.tree.assigned_nodes_of(slot) {
+                    // A text slottable holds a place in the list but answers no selector.
+                    if assigned.is_text() {
+                        continue;
+                    }
                     regions.add(ImpactRegion::Node(*assigned));
                 }
             }
@@ -3171,7 +3175,7 @@ impl RetainedState {
             if !all_inputs_accounted {
                 return PrefixConvergenceOutcome::default();
             }
-            let prefix_caches = Rc::clone(&self.prefix_caches);
+            let prefix_caches = std::sync::Arc::clone(&self.prefix_caches);
             let mut caches = prefix_caches.borrow_mut();
             if !caches.states.is_retained() {
                 return PrefixConvergenceOutcome::default();
@@ -3350,7 +3354,7 @@ impl RetainedState {
                 as u64;
 
         if had_retained_prefix_states {
-            let prefix_caches = Rc::clone(&self.prefix_caches);
+            let prefix_caches = std::sync::Arc::clone(&self.prefix_caches);
             let mut caches = prefix_caches.borrow_mut();
             let PrefixCaches {
                 states: retained,
@@ -3808,6 +3812,7 @@ impl RetainedState {
                     return false;
                 };
                 let changed_priority = self.cascade_priority_of(
+                    None,
                     rule,
                     TreeScopeID::DOCUMENT,
                     entry.specificity,
@@ -4570,7 +4575,7 @@ impl StyleEngineState {
                         }
                     });
                 }
-                Some((state, self.retained.tree.tree_scope(node)))
+                Some((state, self.retained.tree.tree_scope(node), node))
             }
             RetainedWinnerProbe::AllResident { resident_count } => {
                 if !matches!(
@@ -4592,7 +4597,7 @@ impl StyleEngineState {
                 InputValue::Flag(false)
             ) if changed == rule
         ) {
-            let Some((state, _)) = node_state else {
+            let Some((state, _, _)) = node_state else {
                 return false;
             };
             return self
@@ -4618,7 +4623,7 @@ impl StyleEngineState {
             _ => return false,
         }
 
-        let declarations_are_inert = |state, tree_scope| {
+        let declarations_are_inert = |state, tree_scope, node: Option<StyleNodeID>| {
             self.retained
                 .program
                 .declared_properties_of(rule)
@@ -4637,17 +4642,23 @@ impl StyleEngineState {
                     if self.retained.programs.get(previous_program).can_leave_its_scope() {
                         return false;
                     }
-                    let priority =
-                        self.cascade_priority_of(rule, tree_scope, entry.specificity, u32::MAX, declared.important);
+                    let priority = self.cascade_priority_of(
+                        node,
+                        rule,
+                        tree_scope,
+                        entry.specificity,
+                        u32::MAX,
+                        declared.important,
+                    );
                     priority <= previous.priority
                 })
         };
         match node_state {
-            Some((state, tree_scope)) => declarations_are_inert(state, tree_scope),
+            Some((state, tree_scope, node)) => declarations_are_inert(state, tree_scope, Some(node)),
             None => self
                 .winner_groups
                 .active_states()
-                .all(|state| declarations_are_inert(state, TreeScopeID::DOCUMENT)),
+                .all(|state| declarations_are_inert(state, TreeScopeID::DOCUMENT, None)),
         }
     }
 }

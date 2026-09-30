@@ -8,7 +8,7 @@ use super::bridge::{
     FfiElementArrival, FfiElementDeclarationDelta, FfiElementStyleInput, FfiLocalFeatureDelta, FfiStateDelta,
     FfiTreeDelta,
 };
-use super::matching::{SelectorQueryCache, SelectorQueryContext};
+#[cfg(any(test, feature = "style-recording"))]
 use super::publication::ExactCascadeDonor;
 use super::*;
 use crate::css::declaration_block;
@@ -30,6 +30,20 @@ impl std::ops::Deref for StyleEngine {
 impl std::ops::DerefMut for StyleEngine {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.state
+    }
+}
+
+impl StyleEngine {
+    pub(crate) fn box_type_parent_display(
+        &self,
+        node: StyleNodeID,
+        is_pseudo_element: bool,
+    ) -> Option<crate::css::display::FfiDisplay> {
+        self.state.box_type_parent_display_for_target(node, is_pseudo_element)
+    }
+
+    pub(crate) fn document_style_computation_inputs(&self) -> bridge::FfiDocumentStyleComputationInputs {
+        self.state.retained.document_style_computation_inputs
     }
 }
 
@@ -200,11 +214,43 @@ impl StyleEngine {
             .record_rule_declarations_changed(rule, block_version, &mut self.counters);
     }
 
-    /// Mint `out.len()` element identities in one call. Identity allocation is batched because a
-    /// call per element is exactly the boundary shape this design rules out.
+    /// Grant and mint `out.len()` element identities in one call, for an engine with no host.
+    #[cfg(test)]
     #[inline]
     pub fn allocate_style_nodes(&mut self, out: &mut [u32]) {
         self.state.allocate_style_nodes(out, &mut self.counters);
+    }
+
+    /// Grant and mint `out.len()` text identities in one call, for an engine with no host.
+    #[cfg(test)]
+    #[inline]
+    pub fn allocate_text_style_nodes(&mut self, out: &mut [u32]) {
+        self.state.allocate_text_style_nodes(out, &mut self.counters);
+    }
+
+    /// Hand the host `out.len()` element identities to mint on its own. Identities are granted in
+    /// batches because a call per element is exactly the boundary shape this design rules out.
+    #[inline]
+    pub fn grant_style_nodes(&mut self, out: &mut [u32]) {
+        self.state.grant_style_nodes(out);
+    }
+
+    /// Hand the host `out.len()` text identities to mint on its own.
+    #[inline]
+    pub fn grant_text_style_nodes(&mut self, out: &mut [u32]) {
+        self.state.grant_text_style_nodes(out);
+    }
+
+    /// Bring element identities the host minted into the tree.
+    #[inline]
+    pub fn mint_style_nodes(&mut self, nodes: &[StyleNodeID]) {
+        self.state.mint_style_nodes(nodes, &mut self.counters);
+    }
+
+    /// Bring text identities the host minted into the tree.
+    #[inline]
+    pub fn mint_text_style_nodes(&mut self, nodes: &[StyleNodeID]) {
+        self.state.mint_text_style_nodes(nodes, &mut self.counters);
     }
 
     /// Stage a structural change. The normalized transaction installs the final relation rows at
@@ -275,6 +321,25 @@ impl StyleEngine {
     #[inline]
     pub fn set_element_heading_level(&mut self, node: StyleNodeID, level: u8) {
         self.state.set_element_heading_level(node, level, &mut self.counters);
+    }
+
+    #[inline]
+    pub fn set_element_custom_property_names(
+        &mut self,
+        node: StyleNodeID,
+        environment: u64,
+        name_atoms: &[u32],
+        uses_unnamed: bool,
+        uses_custom_functions: bool,
+    ) {
+        self.state.set_element_custom_property_names(
+            node,
+            environment,
+            name_atoms,
+            uses_unnamed,
+            uses_custom_functions,
+            &mut self.counters,
+        );
     }
 
     /// Record what a language atom spells, so `:lang()` can compare its ranges against the tag.
@@ -365,7 +430,6 @@ impl StyleEngine {
         written_values: Vec<RetainedStyleValueData>,
         custom_declarations: Vec<CustomDeclaration>,
         custom_written_values: Vec<RetainedStyleValueData>,
-        declarations_are_complete: bool,
     ) {
         self.state.set_element_declared_properties(
             node,
@@ -374,7 +438,6 @@ impl StyleEngine {
             written_values,
             custom_declarations,
             custom_written_values,
-            declarations_are_complete,
             &mut self.counters,
         );
     }
@@ -457,6 +520,12 @@ impl StyleEngine {
     }
 
     #[inline]
+    pub(super) fn settle_atom_sweep_of_submitted_pass(&mut self, host_named_atoms_beside_pass: bool) {
+        self.state
+            .settle_atom_sweep_of_submitted_pass(host_named_atoms_beside_pass, &mut self.counters);
+    }
+
+    #[inline]
     #[cfg(test)]
     pub(super) fn sweep_style_atoms(&mut self) {
         self.state.sweep_style_atoms(&mut self.counters);
@@ -468,7 +537,28 @@ impl StyleEngine {
         root: StyleNodeID,
         emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
     ) -> bool {
-        self.state.take_style_transaction(root, emit, &mut self.counters)
+        let timeline_samples = self.state.animation_timeline_samples().clone();
+        self.state.take_style_transaction(
+            root,
+            emit,
+            &mut self.counters,
+            super::animations::CommittedTransformReferenceBoxes::NONE,
+            &timeline_samples,
+        )
+    }
+
+    /// Take the pending style transaction with the committed boxes and timeline samples its pass
+    /// samples against.
+    #[inline]
+    pub(crate) fn take_style_transaction_with_committed_boxes(
+        &mut self,
+        root: StyleNodeID,
+        committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
+        emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
+    ) -> bool {
+        self.state
+            .take_style_transaction(root, emit, &mut self.counters, committed_boxes, timeline_samples)
     }
 
     #[inline]
@@ -579,6 +669,9 @@ impl StyleEngine {
 
     #[inline]
     pub(super) fn discard_style_transaction_outputs(&mut self) {
+        if self.state.host.update_cold_matching_batch.take() == Some(true) {
+            self.end_cold_matching_batch();
+        }
         self.state.discard_style_transaction_outputs(&mut self.counters);
     }
 
@@ -650,57 +743,6 @@ impl StyleEngine {
     }
 
     #[inline]
-    pub fn prepare_selector_query(&mut self) {
-        self.state.prepare_selector_query(&mut self.counters);
-    }
-
-    #[inline]
-    pub(crate) fn selector_query_matches(
-        &mut self,
-        program: &SelectorProgram,
-        node: StyleNodeID,
-        scope_root: Option<StyleNodeID>,
-        shadow_root: Option<StyleNodeID>,
-        has_document_root: bool,
-    ) -> Result<bool, Incomplete> {
-        self.state.selector_query_matches(
-            program,
-            node,
-            scope_root,
-            shadow_root,
-            has_document_root,
-            &mut self.counters,
-        )
-    }
-
-    #[inline]
-    pub(crate) fn selector_query_all(
-        &mut self,
-        program: &SelectorProgram,
-        cache: &mut SelectorQueryCache,
-        context: SelectorQueryContext,
-    ) -> Result<Vec<StyleNodeID>, Incomplete> {
-        self.state
-            .selector_query_all(program, cache, context, &mut self.counters)
-    }
-
-    /// The first match in tree order, or None. One engine call serves a whole querySelector:
-    /// candidate enumeration, evaluation, and tree ordering all stay on this side of the
-    /// boundary — instead of one boundary crossing per walked element.
-    ///
-    /// When every entry's subject carries posting-backed dispatch keys, only posted candidates
-    /// are evaluated, in tree order, stopping at the first hit. Otherwise, the subtree is walked
-    /// in tree order, and each element evaluated — still one boundary crossing for the query.
-    #[inline]
-    pub(crate) fn selector_query_first(
-        &mut self,
-        program: &SelectorProgram,
-        context: SelectorQueryContext,
-    ) -> Result<Option<StyleNodeID>, Incomplete> {
-        self.state.selector_query_first(program, context, &mut self.counters)
-    }
-
-    #[inline]
     #[cfg(test)]
     pub(super) fn materialize_cold_matching_batch(
         &mut self,
@@ -759,14 +801,13 @@ impl StyleEngine {
 
     #[inline]
     #[cfg(test)]
-    pub(super) fn remember_prepared_retained_match_answer_with_truth(
+    pub(super) fn remember_prepared_retained_match_answer(
         &mut self,
         node: StyleNodeID,
         answer: Vec<RetainedRuleMatch>,
-        selector_truth: Option<Vec<SelectorTruth>>,
     ) {
         self.state
-            .remember_prepared_retained_match_answer_with_truth(node, answer, selector_truth, &mut self.counters);
+            .remember_prepared_retained_match_answer(node, answer, &mut self.counters);
     }
 
     /// Materialize selector incidence from current facts when no active retained answer names it.
@@ -911,22 +952,41 @@ impl StyleEngine {
 
     #[inline]
     #[cfg(test)]
+    pub(super) fn compact_matches_from_updated_winners(&mut self, node: StyleNodeID, all: &mut Vec<RuleMatch>) -> bool {
+        let mut effects = AnswerEffects::default();
+        self.state
+            .retained
+            .compact_matches_from_updated_winners(&mut effects, node, all, &mut self.counters)
+    }
+
+    /// Whether `node`'s winner inventory over `matches` is complete in a transaction that moves
+    /// the answers of `moving` and nothing else.
+    #[cfg(test)]
+    pub(super) fn cascade_winner_inventory_is_complete_in_transaction(
+        &mut self,
+        matches: &[RuleMatch],
+        node: StyleNodeID,
+        moving: &[StyleNodeID],
+    ) -> bool {
+        let mut effects = AnswerEffects::default();
+        for &moved in moving {
+            let input = self.state.retained.intern_cascade_input(&[], &mut self.counters);
+            self.state
+                .retained
+                .publish_cascade_input_with_effects(&mut effects, moved, input);
+        }
+        self.state
+            .retained
+            .cascade_winner_inventory_is_complete_in_transaction(&effects, matches, node)
+    }
+
+    #[inline]
+    #[cfg(test)]
     pub(super) fn retained_closure_cascade_input(&self, node: StyleNodeID) -> Option<MatchAnswerID> {
         let empty = AnswerEffects::default();
         let traversal = self.state.retained.batch_matching_traversal.as_ref();
         let effects = traversal.map_or(&empty, |traversal| &traversal.answer_effects);
         self.state.retained.retained_closure_cascade_input(effects, node)
-    }
-
-    #[inline]
-    #[cfg(test)]
-    pub(super) fn verify_retained_cascade_input(&mut self, node: StyleNodeID, cascade_input: MatchAnswerID) {
-        let traversal = self.state.retained.batch_matching_traversal.take();
-        let empty = AnswerEffects::default();
-        let effects = traversal.as_ref().map_or(&empty, |traversal| &traversal.answer_effects);
-        self.state
-            .verify_retained_cascade_input(effects, node, cascade_input, &mut self.counters);
-        self.state.retained.batch_matching_traversal = traversal;
     }
 
     #[inline]
@@ -942,19 +1002,6 @@ impl StyleEngine {
     #[inline]
     pub fn consume_published_match_answer(&mut self, node: StyleNodeID) -> Option<Vec<RuleMatch>> {
         self.state.consume_published_match_answer(node, &mut self.counters)
-    }
-
-    /// Stream a published answer into its consumer. A materialized payload needs no copy; an
-    /// identity-only payload is restored in cascade order before it crosses the bridge.
-    #[inline]
-    pub(super) fn consume_published_match_answer_with(
-        &mut self,
-        node: StyleNodeID,
-        capacity: usize,
-        consume: impl FnMut(usize, StyleNodeID, RuleID, SemanticDeclarationID, Option<tree::PseudoElementTarget>, u32, u32),
-    ) -> Option<usize> {
-        self.state
-            .consume_published_match_answer_with(node, capacity, consume, &mut self.counters)
     }
 
     /// Read the shareable identity of one answer from the immediately preceding style transaction.
@@ -980,25 +1027,6 @@ impl StyleEngine {
 
     #[inline]
     #[cfg(test)]
-    pub(super) fn exact_match_answer_for_verification(
-        &mut self,
-        node: StyleNodeID,
-    ) -> Result<Vec<RuleMatch>, Incomplete> {
-        self.state.exact_match_answer_for_verification(node, &mut self.counters)
-    }
-
-    #[inline]
-    #[cfg(test)]
-    pub(super) fn exact_cascade_answer_for_verification(
-        &mut self,
-        node: StyleNodeID,
-    ) -> Result<(Vec<RuleMatch>, WinnerGroups), Incomplete> {
-        self.state
-            .exact_cascade_answer_for_verification(node, &mut self.counters)
-    }
-
-    #[inline]
-    #[cfg(test)]
     pub(super) fn match_element_for_purpose_with_compact_answer(
         &mut self,
         node: StyleNodeID,
@@ -1017,18 +1045,6 @@ impl StyleEngine {
         )
     }
 
-    #[inline]
-    pub(crate) fn lookup_shared_style_record(
-        &mut self,
-        node: StyleNodeID,
-        parent_record: u64,
-        environment: u64,
-        shape: [u64; 4],
-    ) -> Option<u64> {
-        self.state
-            .lookup_shared_style_record(node, parent_record, environment, shape, &mut self.counters)
-    }
-
     /// C++ installed the record the engine derived for `node`: the winner state it was computed
     /// from becomes the node's cascade state, and the answer counts as consumed.
     #[inline]
@@ -1036,12 +1052,91 @@ impl StyleEngine {
         self.state.acknowledge_engine_computed_record(node, &mut self.counters);
     }
 
-    /// Retry a record after C++ has installed earlier records in the same preorder batch. A record
-    /// rejected while the batch was planned may become computable once its inheritance parent is
-    /// authoritative.
+    pub(crate) fn answer_record_demand(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        exclude_inline_style: bool,
+        targeted: bool,
+        read_only: bool,
+        parent_highlight: u64,
+    ) -> publication::RecordDemandAnswer {
+        self.state.answer_record_demand(
+            node,
+            pseudo,
+            exclude_inline_style,
+            targeted,
+            read_only,
+            parent_highlight,
+            &mut self.counters,
+        )
+    }
+
+    pub(crate) fn declared_only_record(
+        &mut self,
+        subject: StyleNodeID,
+        facts: u32,
+        declarations: &[(
+            super::transaction::ElementDeclarationKind,
+            &crate::css::declaration_block::DeclaredProperty,
+        )],
+    ) -> Option<super::computed::FinalStyleRecordID> {
+        self.state
+            .declared_only_record(subject, facts, declarations, &mut self.counters)
+    }
+
+    /// Settle the pseudo-element records of an element whose record the host installed.
     #[inline]
-    pub(crate) fn retry_engine_record_after_ancestor(&mut self, node: StyleNodeID) -> publication::RetriedEngineRecord {
-        self.state.retry_engine_record_after_ancestor(node, &mut self.counters)
+    #[cfg(test)]
+    pub(crate) fn settle_pseudo_records_after_host_record(
+        &mut self,
+        node: StyleNodeID,
+        old_is_list_item: bool,
+    ) -> (publication::RetriedEngineRecord, bool) {
+        self.state
+            .settle_pseudo_records_after_host_record(node, old_is_list_item, &mut self.counters)
+    }
+
+    /// Decide the transition step of an element or pseudo-element over the record the host installed.
+    #[inline]
+    pub(crate) fn decide_installed_record_transition_step(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        before_change_style_record: u64,
+        installed_style_record: u64,
+        layout_arena: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
+    ) -> Result<Option<super::engine_sample::SettledRowPublication>, String> {
+        self.state.decide_installed_record_transition_step(
+            node,
+            pseudo,
+            before_change_style_record,
+            installed_style_record,
+            layout_arena,
+            timeline_samples,
+            &mut self.counters,
+        )
+    }
+
+    /// Sample the animations of an element or pseudo-element over the record the host holds.
+    #[inline]
+    pub(crate) fn sample_installed_record(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        style_record: u64,
+        layout_arena: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
+    ) -> Result<super::engine_sample::SettledRowPublication, String> {
+        self.state.sample_installed_record(
+            node,
+            pseudo,
+            style_record,
+            layout_arena,
+            timeline_samples,
+            &mut self.counters,
+        )
     }
 
     /// Publish the immutable computed-group payloads of one element's base style. This assigns
@@ -1062,33 +1157,6 @@ impl StyleEngine {
             inherited_group_count,
             custom_property_environment,
             metadata_input,
-            &mut self.counters,
-        )
-    }
-
-    /// Keep the style record already assigned to a target whose recomputation its input record
-    /// answered.
-    #[inline]
-    pub(crate) fn reaffirm_style_record(
-        &mut self,
-        target: computed::ComputedStyleTarget,
-    ) -> Option<computed::FinalStyleRecordID> {
-        self.state.reaffirm_style_record(target, &mut self.counters)
-    }
-
-    #[inline]
-    pub(crate) fn assign_shared_style_record(
-        &mut self,
-        target: computed::ComputedStyleTarget,
-        style_record: u64,
-        inherited_group_count: usize,
-        inherited_group_swap_eligible: bool,
-    ) -> computed::ComputedGroupPublication {
-        self.state.assign_shared_style_record(
-            target,
-            style_record,
-            inherited_group_count,
-            inherited_group_swap_eligible,
             &mut self.counters,
         )
     }
@@ -1114,35 +1182,6 @@ impl StyleEngine {
     #[inline]
     pub(crate) fn end_style_record_view_epoch(&mut self) {
         self.state.end_style_record_view_epoch(&mut self.counters);
-    }
-
-    #[inline]
-    pub(super) fn publish_animation_overlay_impl(
-        &mut self,
-        target: computed::ComputedStyleTarget,
-        source_identity: u64,
-        animated_overlay: crate::css::host_shared::HostShared<crate::css::animated_overlay::AnimatedOverlay>,
-        payloads: &[crate::css::host_shared::SharedPayload],
-    ) -> Option<computed::AnimationOverlayUpdate> {
-        self.state.publish_animation_overlay_impl(
-            target,
-            source_identity,
-            animated_overlay,
-            payloads,
-            &mut self.counters,
-        )
-    }
-
-    #[inline]
-    pub(crate) fn publish_exact_cascade_state(
-        &mut self,
-        target: computed::ComputedStyleTarget,
-        store: &CascadedPropertyStore,
-        inherited_style_groups: u8,
-        donor: Option<ExactCascadeDonor>,
-    ) -> (bridge::FfiExactCascadePublication, Vec<(u16, SpecifiedWinnerKey)>, bool) {
-        self.state
-            .publish_exact_cascade_state(target, store, inherited_style_groups, donor, &mut self.counters)
     }
 
     #[cfg(feature = "style-recording")]

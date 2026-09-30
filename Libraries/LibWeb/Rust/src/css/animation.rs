@@ -242,20 +242,6 @@ pub struct FfiAnimationValueInput {
     pub keyframe_count: usize,
 }
 
-#[repr(C)]
-pub struct FfiAnimationBatch {
-    pub declarations: *const FfiAnimationDeclaration,
-    pub declaration_count: usize,
-    pub effects: *const FfiAnimationEffect,
-    pub effect_count: usize,
-    pub keyframes: *const FfiAnimationKeyframe,
-    pub keyframe_count: usize,
-    pub writing_mode: u8,
-    pub direction: u8,
-    pub important_property_bitmap: *const u8,
-    pub important_property_bitmap_length: usize,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct FfiAnimationPreparationEffect {
@@ -497,6 +483,10 @@ pub struct FfiResolvedAnimationProperties {
     pub needs_document_base_url: bool,
     pub unfixed_random_sharings: *const FfiAnimationUnfixedRandomSharing,
     pub unfixed_random_sharing_count: usize,
+    /// What the batch's custom-property declarations need from outside the element, which the four
+    /// terms above do not cover; see `CustomDeclarationDependencies`. The host answers all of them
+    /// from its computation context and ignores this.
+    pub custom_dependencies: CustomDeclarationDependencies,
     pub storage: *mut std::ffi::c_void,
 }
 
@@ -636,11 +626,9 @@ fn resolve_animation_declarations(
     let mut container_relative_length_unit_mask = 0;
     let mut needs_document_base_url = false;
     let mut random_sharing_sources = Vec::new();
+    let mut custom_dependencies = CustomDeclarationDependencies::default();
     for property in &properties {
         if property.value_source != FfiAnimationSpecifiedValueSource::Value {
-            continue;
-        }
-        if property.custom_name_id != 0 {
             continue;
         }
         let value = unsafe { &*property.value };
@@ -651,6 +639,16 @@ fn resolve_animation_declarations(
             continue;
         }
         let dependencies = crate::css::style_compute::external_value_dependencies(value);
+        // A custom property's declaration is computed against the registered syntax rather than
+        // driven with the longhands, so what it needs from outside the element is summarized
+        // separately: the three terms below are the host's, and the host counts longhands alone.
+        if property.custom_name_id != 0 {
+            custom_dependencies.uses_tree_counting_function |= dependencies.uses_tree_counting_function;
+            custom_dependencies.container_relative_length_unit_mask |= dependencies.container_relative_length_unit_mask;
+            custom_dependencies.needs_document_base_url |= dependencies.needs_document_base_url;
+            custom_dependencies.has_unfixed_random_sharing |= dependencies.has_unfixed_random_sharing;
+            continue;
+        }
         uses_tree_counting_function |= dependencies.uses_tree_counting_function;
         container_relative_length_unit_mask |= dependencies.container_relative_length_unit_mask;
         needs_document_base_url |= dependencies.needs_document_base_url;
@@ -687,6 +685,7 @@ fn resolve_animation_declarations(
         container_relative_length_unit_mask,
         needs_document_base_url,
         unfixed_random_sharings,
+        custom_dependencies,
     }
 }
 
@@ -699,6 +698,21 @@ struct ResolvedAnimationDeclarations {
     container_relative_length_unit_mask: u8,
     needs_document_base_url: bool,
     unfixed_random_sharings: Vec<FfiAnimationUnfixedRandomSharing>,
+    custom_dependencies: CustomDeclarationDependencies,
+}
+
+/// What a batch's *custom* property declarations need from outside the element. The host's three
+/// terms beside them count longhands alone, because a custom property's declaration is not driven
+/// with the longhands: the host computes it against the registered syntax in a computation context
+/// that answers these questions on demand. The stage has no such context, so it summarizes them
+/// here and either answers them or leaves the element to the host.
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub struct CustomDeclarationDependencies {
+    pub(crate) uses_tree_counting_function: bool,
+    pub(crate) container_relative_length_unit_mask: u8,
+    pub(crate) needs_document_base_url: bool,
+    pub(crate) has_unfixed_random_sharing: bool,
 }
 
 struct AnimationValuePlan {
@@ -6869,56 +6883,759 @@ fn evaluate_animation_value(
     }
 }
 
-/// Resolve an element's keyframe declarations into one owned batch for C++ computation.
-///
-/// # Safety
-/// `batch` must point to a live value whose declaration and bitmap ranges remain live for the call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_resolve_animation_declarations(
-    batch: *const FfiAnimationBatch,
-) -> FfiResolvedAnimationProperties {
-    let batch = unsafe { &*batch };
-    let declarations = unsafe { std::slice::from_raw_parts(batch.declarations, batch.declaration_count) };
-    let effects = unsafe { std::slice::from_raw_parts(batch.effects, batch.effect_count) };
-    let keyframes = unsafe { std::slice::from_raw_parts(batch.keyframes, batch.keyframe_count) };
-    let important_property_bitmap =
-        unsafe { std::slice::from_raw_parts(batch.important_property_bitmap, batch.important_property_bitmap_length) };
-    let resolved = resolve_animation_declarations(
-        declarations,
-        effects,
-        keyframes,
-        batch.writing_mode,
-        batch.direction,
-        important_property_bitmap,
-    );
+#[must_use]
+fn no_resolved_animation_properties() -> FfiResolvedAnimationProperties {
+    FfiResolvedAnimationProperties {
+        properties: std::ptr::null(),
+        count: 0,
+        animation_value_count: 0,
+        uses_tree_counting_function: false,
+        container_relative_length_unit_mask: 0,
+        needs_document_base_url: false,
+        unfixed_random_sharings: std::ptr::null(),
+        unfixed_random_sharing_count: 0,
+        custom_dependencies: CustomDeclarationDependencies::default(),
+        storage: std::ptr::null_mut(),
+    }
+}
+
+#[must_use]
+fn finish_resolved_animation_properties(resolved: ResolvedAnimationDeclarations) -> FfiResolvedAnimationProperties {
     if resolved.properties.is_empty() {
-        return FfiResolvedAnimationProperties {
-            properties: std::ptr::null(),
-            count: 0,
-            animation_value_count: 0,
-            uses_tree_counting_function: false,
-            container_relative_length_unit_mask: 0,
-            needs_document_base_url: false,
-            unfixed_random_sharings: std::ptr::null(),
-            unfixed_random_sharing_count: 0,
-            storage: std::ptr::null_mut(),
-        };
+        return no_resolved_animation_properties();
     }
     let resolved = Box::new(resolved);
-    let properties = resolved.properties.as_ptr();
-    let count = resolved.properties.len();
-    let animation_value_count = resolved.value_plans.len();
     FfiResolvedAnimationProperties {
-        properties,
-        count,
-        animation_value_count,
+        properties: resolved.properties.as_ptr(),
+        count: resolved.properties.len(),
+        animation_value_count: resolved.value_plans.len(),
         uses_tree_counting_function: resolved.uses_tree_counting_function,
         container_relative_length_unit_mask: resolved.container_relative_length_unit_mask,
         needs_document_base_url: resolved.needs_document_base_url,
         unfixed_random_sharings: resolved.unfixed_random_sharings.as_ptr(),
         unfixed_random_sharing_count: resolved.unfixed_random_sharings.len(),
+        custom_dependencies: resolved.custom_dependencies,
         storage: Box::into_raw(resolved).cast(),
     }
+}
+
+/// Order one element's animation timing rows in composite order, as indices into the list the host
+/// packed. The order is decided from the rows alone: every number
+/// `KeyframeEffect::composite_order()` compares travels on the row, so the list a stage reads is in
+/// the order it composes in without the stage holding any of the animations.
+///
+/// # Safety
+/// `words` must name `row_count * TIMING_ROW_WORDS` readable words and `order_out` `row_count`
+/// writable ones.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_animation_timing_rows_composite_order(
+    words: *const u32,
+    row_count: usize,
+    order_out: *mut u32,
+) {
+    use crate::css::style::animations;
+
+    if row_count == 0 {
+        return;
+    }
+    let words = unsafe { std::slice::from_raw_parts(words, row_count * animations::TIMING_ROW_WORDS) };
+    let rows: Vec<animations::AnimationTimingRow> = (0..row_count)
+        .map(|index| {
+            animations::AnimationTimingRow::from_words(
+                &words[index * animations::TIMING_ROW_WORDS..][..animations::TIMING_ROW_WORDS],
+            )
+        })
+        .collect();
+    let mut order: Vec<u32> = (0..row_count as u32).collect();
+    order.sort_by(|&a, &b| animations::composite_order(&rows[a as usize], &rows[b as usize]));
+    unsafe { std::slice::from_raw_parts_mut(order_out, row_count) }.copy_from_slice(&order);
+}
+
+/// Substitute one keyframe value written as a token stream against an element's custom-property
+/// store, for the compositor, which offloads only what the main thread would sample the same way.
+/// Returns a retained value, or null where the engine declines the substitution.
+///
+/// # Safety
+/// `style_engine` must point to a live style engine, `custom_property_store` must be null or a live
+/// store, and `value` must be a live style value.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_substitute_compositor_keyframe_value(
+    style_engine: crate::css::style::StyleEngineHandle,
+    custom_property_store: *const std::ffi::c_void,
+    property_id: u16,
+    value: *const crate::css::style_value::StyleValueData,
+) -> *const crate::css::style_value::StyleValueData {
+    crate::css::style::owner_calls::ask(
+        style_engine,
+        "rust_substitute_compositor_keyframe_value",
+        crate::css::style::owner_calls::StyleQuery::SubstituteCompositorKeyframeValue {
+            custom_property_store,
+            property_id,
+            value,
+        },
+    )
+    .pointer()
+    .cast::<crate::css::style_value::StyleValueData>()
+}
+
+/// Answers [`rust_substitute_compositor_keyframe_value`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`rust_substitute_compositor_keyframe_value`].
+pub(crate) unsafe fn owner_substitute_compositor_keyframe_value(
+    engine: &mut crate::css::style::StyleEngine,
+    custom_property_store: *const std::ffi::c_void,
+    property_id: u16,
+    value: *const crate::css::style_value::StyleValueData,
+) -> *const crate::css::style_value::StyleValueData {
+    let written = unsafe {
+        crate::css::style_value::RetainedStyleValueData::from_retained_pointer(
+            crate::css::style_value::retain_style_value(value),
+        )
+    };
+    let mut substitution =
+        KeyframeSubstitutionContext::new(custom_property_store, engine.document_style_computation_inputs());
+    let Some(substituted) = substitution.substitute(property_id, &written) else {
+        return std::ptr::null();
+    };
+    let pointer = substituted.pointer();
+    std::mem::forget(substituted);
+    pointer
+}
+
+/// One effect the stage is about to sample: its description, how far along it is, and - for a
+/// description taken from a `@keyframes` rule rather than from an effect the host holds - what the
+/// animation running it contributes to the two holes such a description keeps.
+pub(crate) struct SelectedEffect<'a> {
+    pub(crate) effect: &'a crate::css::style::animations::PublishedEffect,
+    pub(crate) current_key: f64,
+    pub(crate) easing_from_animation: Option<&'a crate::css::style::animations::PublishedEasing>,
+    pub(crate) composite_from_animation: u8,
+}
+
+/// The custom properties the effect stack the stage is sampling declares, and what the element's
+/// own environment answers about each of them.
+///
+/// A name is minted into a number the way `StyleComputer.cpp`'s `custom_name_id_for` mints one -
+/// the animation core keys a value plan by that number, and `rust_evaluate_animations` indexes the
+/// underlying and initial buffers by it - and the two things the host reads off the element for a
+/// name come from the same two environments the host reads them from: its underlying value from
+/// the element's own environment with this frame's animation overlay peeled off, and whether the
+/// element declares the name `!important`, which suppresses animating it.
+///
+/// A registered name is carried too: the registration decides whether the name inherits, what its
+/// initial value is - the computed one the host publishes with the registration - and whether its
+/// specified value has to be computed against the registered syntax, which is what gives it a typed
+/// interpolation. The whole element still goes back to the host where a registration arrived
+/// without a published initial value.
+pub(crate) struct AnimatedCustomProperties<'a> {
+    base_store: *const std::ffi::c_void,
+    inheritance_store: *const std::ffi::c_void,
+    element_declares_own: bool,
+    registry: &'a crate::css::custom_properties::CustomPropertyRegistry,
+    /// Set where the channel cannot answer for a minted name.
+    refuses_a_name: bool,
+    names: Vec<crate::css::retained_fly_string::RetainedUtf16FlyString>,
+    /// The UTF-16 units of each minted name, which is how the registry is keyed and what the
+    /// finalization of a registered value takes.
+    name_units: Vec<Vec<u16>>,
+    /// What the registry said about each minted name, and `None` for an unregistered one.
+    registrations: Vec<Option<crate::css::custom_properties::RegistrationFacts>>,
+    important: Vec<bool>,
+    /// What the element's own cascade says about each name's importance, where the engine answered:
+    /// one for a normal declaration and two for an important one. An engine environment may
+    /// flatten its ancestors' declarations into its store, so the store cannot answer for those.
+    own_importance: Option<std::collections::HashMap<usize, u8>>,
+}
+
+/// The element context a registered name's specified value is computed in: exactly the inputs the
+/// host's `get_computation_context_for_property(PropertyID::Custom, ...)` carries, which for a
+/// custom property is the same generic context the keyframe drive resolves `color` in.
+pub(crate) struct CustomPropertyComputationContext<'a> {
+    pub(crate) length: &'a crate::css::style_compute::FfiLengthResolutionContext,
+    pub(crate) environment: &'a crate::css::style_compute::FfiStyleComputationEnvironment,
+    pub(crate) scheme: u8,
+}
+
+impl<'a> AnimatedCustomProperties<'a> {
+    pub(crate) fn new(
+        base_store: *const std::ffi::c_void,
+        inheritance_store: *const std::ffi::c_void,
+        element_declares_own: bool,
+        registry: &'a crate::css::custom_properties::CustomPropertyRegistry,
+    ) -> Self {
+        Self {
+            base_store,
+            inheritance_store,
+            element_declares_own,
+            registry,
+            refuses_a_name: false,
+            names: Vec::new(),
+            name_units: Vec::new(),
+            registrations: Vec::new(),
+            important: Vec::new(),
+            own_importance: None,
+        }
+    }
+
+    /// Answer importance from the element's own cascade where it names a name; see
+    /// `own_importance`.
+    pub(crate) fn with_own_importance(mut self, own_importance: std::collections::HashMap<usize, u8>) -> Self {
+        self.own_importance = Some(own_importance);
+        self
+    }
+
+    fn store(store: *const std::ffi::c_void) -> Option<&'static crate::css::custom_properties::CustomPropertyStore> {
+        // SAFETY: both stores are the host's, handed over for the computation and kept alive by
+        // the `CustomPropertyData` nodes the element and its inheritance parent hold.
+        unsafe {
+            store
+                .cast::<crate::css::custom_properties::CustomPropertyStore>()
+                .as_ref()
+        }
+    }
+
+    /// The number this name animates under, minting one where it is new.
+    fn name_id(&mut self, name: &crate::css::retained_fly_string::RetainedUtf16FlyString) -> u32 {
+        if let Some(index) = self.names.iter().position(|minted| minted.raw() == name.raw()) {
+            return index as u32 + 1;
+        }
+        // SAFETY: the name owns one reference to a live fly string for as long as it is held.
+        let units = match unsafe { ak::utf16_string_units(name.raw_word()) } {
+            ak::Utf16StringUnits::Ascii(bytes) => bytes.iter().map(|&unit| u16::from(unit)).collect::<Vec<_>>(),
+            ak::Utf16StringUnits::Utf16(units) => units.to_vec(),
+        };
+        let registration = self.registry.registration_facts(&units);
+        // A registration the host published without a computed initial value is one the channel
+        // cannot answer the fallbacks from, so the element goes back to the host.
+        self.refuses_a_name |= registration
+            .as_ref()
+            .is_some_and(|registration| registration.initial_value.is_none());
+        self.registrations.push(registration);
+        self.name_units.push(units);
+        self.names.push(name.clone());
+        let own_importance = self
+            .own_importance
+            .as_ref()
+            .and_then(|own_importance| own_importance.get(&name.raw()).copied());
+        self.important.push(match own_importance {
+            Some(answer) => answer == 2,
+            None => {
+                self.element_declares_own
+                    && Self::store(self.base_store).is_some_and(|store| store.declares_important(name.raw()))
+            }
+        });
+        self.names.len() as u32
+    }
+
+    fn is_important(&self, name_id: u32) -> bool {
+        self.important[name_id as usize - 1]
+    }
+
+    fn name_raw(&self, name_id: u32) -> usize {
+        self.names[name_id as usize - 1].raw()
+    }
+
+    fn registration(&self, name_id: u32) -> Option<&crate::css::custom_properties::RegistrationFacts> {
+        self.registrations[name_id as usize - 1].as_ref()
+    }
+
+    /// Whether an animation of this name inherits, which decides what a keyframe saying `unset`
+    /// takes. Only a registration can say no; an unregistered custom property always inherits.
+    fn is_inherited(&self, name_id: u32) -> bool {
+        self.registration(name_id)
+            .is_none_or(|registration| registration.inherits)
+    }
+
+    /// A registered name's initial value is what its registration computed to, published with it.
+    /// An unregistered one's is the guaranteed-invalid value.
+    fn initial_value(&self, name_id: u32) -> crate::css::style_value::RetainedStyleValueData {
+        self.registration(name_id)
+            .and_then(|registration| registration.initial_value.clone())
+            .unwrap_or_else(Self::guaranteed_invalid)
+    }
+
+    fn guaranteed_invalid() -> crate::css::style_value::RetainedStyleValueData {
+        crate::css::style_value::RetainedStyleValueData::from_owned(
+            crate::css::style_value::StyleValueData::GuaranteedInvalid,
+        )
+    }
+
+    /// The value an animation of this name composes over: what the element's environment says
+    /// without this frame's overlay, and otherwise the initial value.
+    fn underlying_value(&self, name_id: u32) -> crate::css::style_value::RetainedStyleValueData {
+        Self::store(self.base_store)
+            .and_then(|store| store.retained_value(self.name_raw(name_id)))
+            .unwrap_or_else(|| self.initial_value(name_id))
+    }
+
+    /// What a keyframe that says `inherit` takes: the value the environment the element inherits
+    /// from answers, and otherwise the initial value. That environment is the inheritance parent's
+    /// *whole* store, not the inheritable part of it, which is what makes `inherit` on a name
+    /// registered `inherits: false` take the parent's value the way the host's
+    /// `inherited_custom_property_value` does.
+    fn inherited_value(&self, name_id: u32) -> crate::css::style_value::RetainedStyleValueData {
+        Self::store(self.inheritance_store)
+            .and_then(|store| store.retained_value(self.name_raw(name_id)))
+            .unwrap_or_else(|| self.initial_value(name_id))
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    pub(crate) fn name(&self, name_id: u32) -> crate::css::retained_fly_string::RetainedUtf16FlyString {
+        self.names[name_id as usize - 1].clone()
+    }
+
+    /// The buffers `rust_evaluate_animations` indexes by name id: what an animation of each name
+    /// composes over, and what a keyframe that says `initial` takes.
+    pub(crate) fn underlying_and_initial_values(
+        &self,
+    ) -> (
+        Vec<crate::css::style_value::RetainedStyleValueData>,
+        Vec<crate::css::style_value::RetainedStyleValueData>,
+    ) {
+        (1..=self.names.len() as u32)
+            .map(|name_id| (self.underlying_value(name_id), self.initial_value(name_id)))
+            .unzip()
+    }
+
+    /// The computed value of one resolved custom-property declaration. A mirror of the
+    /// `value_source` switch in `StyleComputer.cpp`'s `compute_animation_values` followed by
+    /// `compute_animated_custom_property_value`, which is the identity for an unregistered name
+    /// and for a registration whose syntax is universal, and a parse against the registered syntax
+    /// in the element's computation context otherwise. That parse is what gives a registered name
+    /// its typed interpolation: the animation core interpolates the typed value as it does a
+    /// longhand's.
+    pub(crate) fn specified_value(
+        &self,
+        property: &FfiResolvedAnimationProperty,
+        context: &CustomPropertyComputationContext<'_>,
+    ) -> crate::css::style_value::RetainedStyleValueData {
+        let name_id = property.custom_name_id;
+        let value = match property.value_source {
+            FfiAnimationSpecifiedValueSource::Inherited => self.inherited_value(name_id),
+            FfiAnimationSpecifiedValueSource::Initial => self.initial_value(name_id),
+            FfiAnimationSpecifiedValueSource::Underlying => self.underlying_value(name_id),
+            // SAFETY: a resolved declaration's value is retained by the resolution's storage,
+            //         which outlives the keyframe drive this value feeds.
+            FfiAnimationSpecifiedValueSource::Value => unsafe {
+                crate::css::style_value::RetainedStyleValueData::from_retained_pointer(
+                    crate::css::style_value::retain_style_value(property.value),
+                )
+            },
+        };
+        if !self
+            .registration(name_id)
+            .is_some_and(|registration| registration.computes_a_specified_value)
+        {
+            return value;
+        }
+        // The host takes the viewport dependency of an animated element's style from the longhand
+        // keyframe batch alone, so the one this reports is dropped here as it is there.
+        crate::css::custom_properties::finalize_custom_property_value(
+            Some(self.registry),
+            Self::store(self.inheritance_store),
+            self.name_raw(name_id),
+            &self.name_units[name_id as usize - 1],
+            value,
+            None,
+            Some(context.length),
+            Some(context.environment),
+            context.scheme,
+            None,
+        )
+        .0
+    }
+}
+
+/// What a keyframe declaration written as a token stream substitutes against on the element being
+/// sampled: the element's own custom-property store and the document inputs the parse needs, which
+/// together are what the host's `resolve_unresolved_style_value` resolves such a value against.
+pub(crate) struct KeyframeSubstitutionContext<'a> {
+    custom_property_store: *const std::ffi::c_void,
+    inputs: Option<crate::css::style::bridge::FfiDocumentStyleComputationInputs>,
+    /// Where the host's sampling asked for the whole substitution: the engine resolves every
+    /// arbitrary-substitution function against the element, and nothing is declined.
+    host: Option<HostKeyframeSubstitution<'a>>,
+    /// Set where a substituted value included a `var()` reference: the element records that the
+    /// same way it records one its own cascade substituted.
+    pub(crate) substituted_var: bool,
+    /// Every arbitrary-substitution function a substituted value held, as `SUBSTITUTION_MARK_*` bits.
+    pub(crate) substitution_marks: u8,
+}
+
+/// The element the host's sampling substitutes keyframes against, and the environment it inherits.
+pub(crate) struct HostKeyframeSubstitution<'a> {
+    pub(crate) engine: &'a mut crate::css::style::StyleEngineState,
+    pub(crate) node: crate::css::style::tree::StyleNodeID,
+    pub(crate) pseudo: Option<u8>,
+    pub(crate) inheritance_store: *const std::ffi::c_void,
+}
+
+impl<'a> KeyframeSubstitutionContext<'a> {
+    pub(crate) fn new(
+        custom_property_store: *const std::ffi::c_void,
+        inputs: crate::css::style::bridge::FfiDocumentStyleComputationInputs,
+    ) -> Self {
+        Self {
+            custom_property_store,
+            inputs: Some(inputs),
+            host: None,
+            substituted_var: false,
+            substitution_marks: 0,
+        }
+    }
+
+    pub(crate) fn for_host(custom_property_store: *const std::ffi::c_void, host: HostKeyframeSubstitution<'a>) -> Self {
+        Self {
+            custom_property_store,
+            inputs: None,
+            host: Some(host),
+            substituted_var: false,
+            substitution_marks: 0,
+        }
+    }
+
+    /// Whether the table the keyframes are sampled over holds every longhand, so that a keyframe
+    /// wanting the element's own value can always take it.
+    fn table_is_complete(&self) -> bool {
+        self.host.is_some()
+    }
+
+    fn note_substitution(&mut self, written: &crate::css::style_value::RetainedStyleValueData) {
+        let crate::css::style_value::StyleValueData::Unresolved {
+            presence_attr,
+            presence_dashed_function,
+            presence_if,
+            presence_inherit,
+            presence_var,
+            ..
+        } = written.data()
+        else {
+            return;
+        };
+        self.substituted_var |= *presence_var;
+        for (present, mark) in [
+            (*presence_var, crate::css::style_compute::SUBSTITUTION_MARK_VAR),
+            (*presence_attr, crate::css::style_compute::SUBSTITUTION_MARK_ATTR),
+            (*presence_if, crate::css::style_compute::SUBSTITUTION_MARK_IF),
+            (*presence_inherit, crate::css::style_compute::SUBSTITUTION_MARK_INHERIT),
+            (
+                *presence_dashed_function,
+                crate::css::style_compute::SUBSTITUTION_MARK_DASHED_FUNCTION,
+            ),
+        ] {
+            if present {
+                self.substitution_marks |= mark;
+            }
+        }
+    }
+
+    /// What `written` substitutes to for `property`, or `None` where the stage declines it.
+    fn substitute(
+        &mut self,
+        property: u16,
+        written: &crate::css::style_value::RetainedStyleValueData,
+    ) -> Option<crate::css::style_value::RetainedStyleValueData> {
+        let substituted = match &mut self.host {
+            Some(host) => host.engine.substitute_keyframe_value(
+                host.node,
+                host.pseudo,
+                self.custom_property_store,
+                host.inheritance_store,
+                property,
+                &[],
+                written,
+            ),
+            None => {
+                let inputs = self.inputs?;
+                crate::css::style::custom_property_cascade::substitute_written_value_against_store(
+                    self.custom_property_store,
+                    inputs,
+                    property,
+                    written,
+                )?
+            }
+        };
+        self.note_substitution(written);
+        Some(substituted)
+    }
+
+    /// What a custom property's written value substitutes to, or `None` where the stage declines
+    /// it: a custom property substitutes as a name rather than as a longhand, which only the host's
+    /// sampling resolves.
+    fn substitute_custom(
+        &mut self,
+        name: &[u16],
+        written: &crate::css::style_value::RetainedStyleValueData,
+    ) -> Option<crate::css::style_value::RetainedStyleValueData> {
+        let host = self.host.as_mut()?;
+        let substituted = host.engine.substitute_keyframe_value(
+            host.node,
+            host.pseudo,
+            self.custom_property_store,
+            host.inheritance_store,
+            crate::css::property_metadata::property_id::CUSTOM,
+            name,
+            written,
+        );
+        self.note_substitution(written);
+        Some(substituted)
+    }
+
+    /// The easing a keyframe's own `animation-timing-function` resolves to on the element, where it
+    /// was written as a value the element has to substitute: the outer `None` where the stage
+    /// declines it, and the inner one where it resolves to no easing and the keyframe runs its
+    /// animation's.
+    fn easing(
+        &mut self,
+        written: &crate::css::style_value::RetainedStyleValueData,
+    ) -> Option<Option<crate::css::style::animations::PublishedEasing>> {
+        use crate::css::style_value::StyleValueData;
+        let substituted;
+        let mut value = written.data();
+        if matches!(value, StyleValueData::Unresolved { .. }) {
+            substituted = self.substitute(
+                crate::css::property_metadata::property_id::ANIMATION_TIMING_FUNCTION,
+                written,
+            )?;
+            value = substituted.data();
+        }
+        if let StyleValueData::ValueList { values, .. } = value {
+            let Some(first) = values.as_slice().first() else {
+                return Some(None);
+            };
+            return Some(crate::css::style::animations::PublishedEasing::from_computed_timing_function(first.data()));
+        }
+        Some(crate::css::style::animations::PublishedEasing::from_computed_timing_function(value))
+    }
+}
+
+/// Turn the selected descriptions, in composite order, into the flat buffers the animation core
+/// resolves declarations from. `None` where a keyframe wants the element's own computed value for a
+/// longhand the drive did not compute, or holds a token stream the stage cannot substitute.
+///
+/// The fourth member keeps the substituted values alive, and the fifth the easings a keyframe's own
+/// substituted `animation-timing-function` resolved to, whose `linear()` stops the keyframe
+/// descriptors borrow: `resolve_animation_declarations` retains every value it keeps, so they only
+/// have to outlive that call.
+type DescribedEffects = (
+    Vec<FfiAnimationEffect>,
+    Vec<FfiAnimationKeyframe>,
+    Vec<FfiAnimationDeclaration>,
+    Vec<crate::css::style_value::RetainedStyleValueData>,
+    Vec<crate::css::style::animations::PublishedEasing>,
+);
+
+fn describe_selected_effects(
+    selected: &[SelectedEffect<'_>],
+    table: &crate::css::computed_longhand_table::ComputedLonghandTable,
+    substitution: &mut KeyframeSubstitutionContext,
+    mut custom: Option<&mut AnimatedCustomProperties<'_>>,
+) -> Option<DescribedEffects> {
+    let mut ffi_keyframes = Vec::new();
+    let mut ffi_declarations = Vec::new();
+    let mut ffi_effects = Vec::with_capacity(selected.len());
+    let mut substituted_values = Vec::new();
+    let mut substituted_easings = Vec::new();
+    for selection in selected {
+        let effect = selection.effect;
+        let first_keyframe_index = ffi_keyframes.len();
+        let style_sheet_resource_context = effect.resource_context();
+        let is_transition = effect.flags & crate::css::style::animations::effect_flag::IS_TRANSITION != 0;
+        for keyframe in &effect.keyframes {
+            let keyframe_index = ffi_keyframes.len();
+            let easing = match selection.easing_from_animation {
+                Some(animation) => keyframe.easing_from(animation),
+                None => &keyframe.easing,
+            };
+            // A keyframe's own easing written as a value is resolved on the element being sampled,
+            // and one that resolves to no easing runs the animation's.
+            let easing = match keyframe.easing_value.optional_data() {
+                None => easing.descriptor(),
+                Some(_) => match substitution.easing(&keyframe.easing_value)? {
+                    None => easing.descriptor(),
+                    Some(resolved) => {
+                        let descriptor = resolved.descriptor();
+                        substituted_easings.push(resolved);
+                        descriptor
+                    }
+                },
+            };
+            ffi_keyframes.push(FfiAnimationKeyframe {
+                key: keyframe.key,
+                easing,
+                composite: match keyframe.composite_from(selection.composite_from_animation) {
+                    1 => FfiCompositeOperation::Add,
+                    2 => FfiCompositeOperation::Accumulate,
+                    _ => FfiCompositeOperation::Replace,
+                },
+            });
+            for declaration in effect.declarations_of(keyframe) {
+                let value = match declaration.use_initial {
+                    // The element's own computed value, which is not known until it is sampled.
+                    true if substitution.table_is_complete() => {
+                        table.effective_value(None, declaration.property_id, false).value.cast()
+                    }
+                    true => table.get(declaration.property_id)?.pointer(),
+                    false => declaration.value.pointer(),
+                };
+                // A keyframe written as a token stream is substituted against the element being
+                // sampled, exactly where the host's `collect_animation_effects_into` substitutes it.
+                // A `use_initial` declaration carries no value of its own to look at.
+                let substituted = match declaration.use_initial {
+                    true => None,
+                    false => match declaration.value.data() {
+                        crate::css::style_value::StyleValueData::Unresolved { presence_var, .. } => {
+                            let substituted = substitution.substitute(declaration.property_id, &declaration.value)?;
+                            substitution.substituted_var |= *presence_var;
+                            Some(substituted)
+                        }
+                        _ => None,
+                    },
+                };
+                let value = match &substituted {
+                    // https://drafts.csswg.org/css-values-5/#invalid-at-computed-value-time
+                    // A substitution that came out guaranteed-invalid leaves the keyframe without
+                    // the declaration at all, which is what the host does with it.
+                    Some(substituted)
+                        if matches!(
+                            substituted.data(),
+                            crate::css::style_value::StyleValueData::GuaranteedInvalid
+                        ) =>
+                    {
+                        continue;
+                    }
+                    Some(substituted) => substituted.pointer(),
+                    None => value,
+                };
+                substituted_values.extend(substituted);
+                ffi_declarations.push(FfiAnimationDeclaration {
+                    keyframe_index,
+                    property_id: declaration.property_id,
+                    custom_name_id: 0,
+                    custom_is_inherited: false,
+                    custom_is_important: false,
+                    value,
+                    style_sheet_resource_context,
+                    use_initial: declaration.use_initial,
+                    is_transition,
+                });
+            }
+            // The custom properties the same keyframe declares, in the range of their own. A
+            // caller that resolves longhands alone - the host's fast path through this very
+            // description - passes no collector and refuses such an effect outright, above.
+            let Some(custom) = custom.as_deref_mut() else {
+                continue;
+            };
+            for declaration in effect.custom_declarations_of(keyframe) {
+                let custom_name_id = custom.name_id(&declaration.name);
+                // The element's own underlying value for the name, which is not known until the
+                // element is sampled - the same hole `use_initial` leaves for a longhand.
+                let synthesized = declaration.use_initial.then(|| custom.underlying_value(custom_name_id));
+                // A value that holds an arbitrary-substitution function substitutes against the
+                // element being sampled, exactly where the host's walk substitutes it; the token
+                // stream of one that holds none travels as it stands.
+                let substituted =
+                    match (&synthesized, declaration.value.optional_data()) {
+                        (
+                            None,
+                            Some(crate::css::style_value::StyleValueData::Unresolved {
+                                presence_attr,
+                                presence_dashed_function,
+                                presence_env,
+                                presence_if,
+                                presence_inherit,
+                                presence_var,
+                                ..
+                            }),
+                        ) if *presence_attr
+                            || *presence_dashed_function
+                            || *presence_env
+                            || *presence_if
+                            || *presence_inherit
+                            || *presence_var =>
+                        {
+                            Some(substitution.substitute_custom(
+                                &custom.name_units[custom_name_id as usize - 1],
+                                &declaration.value,
+                            )?)
+                        }
+                        _ => None,
+                    };
+                let value = match (&synthesized, &substituted) {
+                    (Some(underlying), _) => underlying.pointer(),
+                    (None, Some(substituted)) => substituted.pointer(),
+                    (None, None) => declaration.value.pointer(),
+                };
+                substituted_values.extend(synthesized);
+                substituted_values.extend(substituted);
+                ffi_declarations.push(FfiAnimationDeclaration {
+                    keyframe_index,
+                    // A custom property has no longhand of its own; the number it was minted
+                    // into is its whole identity here, and the animation core composes and
+                    // interpolates it under `PropertyID::Custom` as the host's walk does.
+                    property_id: crate::css::property_metadata::property_id::CUSTOM,
+                    custom_name_id,
+                    // What a keyframe saying `unset` takes: a registration can say the name does
+                    // not inherit, and an unregistered custom property always does.
+                    custom_is_inherited: custom.is_inherited(custom_name_id),
+                    custom_is_important: custom.is_important(custom_name_id),
+                    value,
+                    style_sheet_resource_context,
+                    use_initial: declaration.use_initial,
+                    is_transition,
+                });
+            }
+        }
+        ffi_effects.push(FfiAnimationEffect {
+            first_keyframe_index,
+            keyframe_count: ffi_keyframes.len() - first_keyframe_index,
+            current_key: selection.current_key,
+            result_of_transition: is_transition,
+        });
+    }
+    Some((
+        ffi_effects,
+        ffi_keyframes,
+        ffi_declarations,
+        substituted_values,
+        substituted_easings,
+    ))
+}
+
+/// Resolve the animation declarations of the effect stack a computation selected, in composite
+/// order.
+///
+/// The stack may mix effects the host described with ones taken from a `@keyframes` rule directly,
+/// for the animations the computation is about to start and that the host has not created yet. Such
+/// a rule's description keeps two holes only an animation can fill - a keyframe's own easing and
+/// `composite: auto` - and both come from the definition the computation just computed.
+pub(crate) fn resolve_selected_animation_declarations(
+    selected: &[SelectedEffect<'_>],
+    table: &crate::css::computed_longhand_table::ComputedLonghandTable,
+    writing_mode: u8,
+    direction: u8,
+    important_property_bitmap: &[u8],
+    substitution: &mut KeyframeSubstitutionContext,
+    custom: Option<&mut AnimatedCustomProperties<'_>>,
+) -> Option<FfiResolvedAnimationProperties> {
+    if selected.iter().any(|selection| selection.effect.keyframes.len() < 2) {
+        return None;
+    }
+    let (ffi_effects, ffi_keyframes, ffi_declarations, _substituted_values, _substituted_easings) =
+        describe_selected_effects(selected, table, substitution, custom)?;
+    Some(finish_resolved_animation_properties(resolve_animation_declarations(
+        &ffi_declarations,
+        &ffi_effects,
+        &ffi_keyframes,
+        writing_mode,
+        direction,
+        important_property_bitmap,
+    )))
 }
 
 struct AnimationPreparationKey {
@@ -6974,6 +7691,19 @@ pub unsafe extern "C" fn rust_animation_preparation_matches(
         .animation_preparation
         .as_ref()
         .is_some_and(|preparation| unsafe { preparation.key.matches_ffi(key) })
+}
+
+/// Drops the resolved-declaration storage a resolve handed out without evaluating it, for a caller
+/// that resolved the declarations and then found the batch was not one it could compute.
+///
+/// # Safety
+/// `storage` must be the `storage` of an `FfiResolvedAnimationProperties` that was not passed to
+/// `rust_evaluate_animations`, and must not be used again.
+pub(crate) unsafe fn release_resolved_animation_declarations(storage: *mut std::ffi::c_void) {
+    if storage.is_null() {
+        return;
+    }
+    drop(unsafe { Box::from_raw(storage.cast::<ResolvedAnimationDeclarations>()) });
 }
 
 /// Complete the Rust-owned animation plan and compose every interval without

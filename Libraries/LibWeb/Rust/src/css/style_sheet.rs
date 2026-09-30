@@ -239,18 +239,6 @@ impl NativeStyleSheet {
         evaluation.result
     }
 
-    pub(crate) fn publish_conditions(
-        &self,
-        engine: &mut crate::css::style::StyleEngine,
-        environment: MediaEnvironment<'_>,
-    ) {
-        self.visit_conditions(environment, true, &mut |identity, holds| {
-            if let Some(rule) = engine.native_rule_id(identity) {
-                crate::css::style::bridge::operations::set_rule_conditions_hold(engine, rule.0 + 1, holds);
-            }
-        });
-    }
-
     pub(crate) fn visit_conditions(
         &self,
         environment: MediaEnvironment<'_>,
@@ -521,22 +509,24 @@ pub extern "C" fn rust_style_sheet_reset_media_state(sheet: &NativeStyleSheet) {
     sheet.media_state.set(NativeStyleSheetMediaState::Unevaluated);
 }
 
-/// Evaluate media queries throughout the sheet graph from one document environment snapshot.
+/// Evaluate media queries throughout the sheet graph from one document environment snapshot, and
+/// hand `flipped(context, rule identity, holds)` each rule whose conditions flipped, for the host to
+/// publish to the document's engine (recorded as `FfiHostFactKind::RuleConditionsHold` writes).
 ///
 /// # Safety
-/// Engine must be exclusively available and the environment must contain valid media feature data.
+/// The environment must contain valid media feature data, and `flipped` must be safe to call with
+/// `context`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_style_sheet_evaluate_media_queries(
     sheet: &NativeStyleSheet,
     environment: FfiMediaEnvironment,
     state: &mut NativeMediaEvaluationState,
-    engine: *mut c_void,
+    context: *mut c_void,
+    flipped: unsafe extern "C" fn(*mut c_void, u64, bool),
 ) -> NativeStyleSheetMediaEvaluation {
-    let engine: &mut crate::css::style::StyleEngine = unsafe { &mut *engine.cast() };
     sheet.evaluate_media_queries(unsafe { environment.borrow() }, state, &mut |identity, holds| {
-        if let Some(rule) = engine.native_rule_id(identity) {
-            crate::css::style::bridge::operations::set_rule_conditions_hold(engine, rule.0 + 1, holds);
-        }
+        // SAFETY: Guaranteed by the caller.
+        unsafe { flipped(context, identity, holds) };
     })
 }
 
@@ -547,10 +537,19 @@ pub unsafe extern "C" fn rust_style_sheet_evaluate_media_queries(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_style_sheet_publish_conditions(
     sheet: &NativeStyleSheet,
-    engine: *mut c_void,
+    engine: crate::css::style::StyleEngineInputHandle,
     environment: FfiMediaEnvironment,
 ) {
-    sheet.publish_conditions(unsafe { &mut *engine.cast() }, unsafe { environment.borrow() });
+    // Which rules' conditions hold is the sheet's and the environment's, the main thread's to read: the owner takes the
+    // answers, by rule identity.
+    let mut conditions = Vec::new();
+    sheet.visit_conditions(unsafe { environment.borrow() }, true, &mut |identity, holds| {
+        conditions.push((identity, holds));
+    });
+    crate::css::style::owner_calls::send(
+        engine,
+        crate::css::style::owner_calls::EngineChange::RuleConditionsHold(conditions),
+    );
 }
 
 // Keep first-seen sibling order and emit descendants before their parent, including the
@@ -601,19 +600,27 @@ fn cascade_layer_order<'a>(sheets: impl IntoIterator<Item = &'a NativeStyleSheet
 
 /// Publish the layer order of the host's ordered, active author sheets.
 ///
+/// The host keeps its own copy of the order it published: record_layer receives every named layer
+/// in rank order, so a host lookup of a rule's layer asks no engine state.
+///
 /// # Safety
 /// Sheets and engine must be live. prepare must flush host changes without destroying them.
-/// The engine is not borrowed during prepare.
+/// The engine is not borrowed during prepare or record_layer.
 #[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn rust_style_sheet_publish_layer_order(
     sheets: *const *const NativeStyleSheet,
     count: usize,
-    engine: *mut c_void,
+    engine: crate::css::style::StyleEngineInputHandle,
     tree_scope: u32,
     previously_had_layers: bool,
     context: *mut c_void,
     prepare: unsafe extern "C" fn(*mut c_void),
+    layer_context: *mut c_void,
+    record_layer: unsafe extern "C" fn(*mut c_void, *const u16, usize),
 ) -> bool {
+    // The handle the document's render inputs gave out, to write the engine through.
+    let input_engine = engine;
     let sheets = if count == 0 {
         &[][..]
     } else {
@@ -625,18 +632,16 @@ pub unsafe extern "C" fn rust_style_sheet_publish_layer_order(
     // must clear the engine's old ranks.
     if has_layers || previously_had_layers {
         unsafe { prepare(context) };
-        let engine = unsafe { &mut *engine.cast::<crate::css::style::StyleEngine>() };
-        let layers: Vec<_> = names
-            .iter()
-            .map(|name| {
-                if name.is_empty() {
-                    0
-                } else {
-                    crate::css::style::bridge::intern_native_text(engine, name).0
-                }
-            })
-            .collect();
-        crate::css::style::bridge::operations::set_layer_order(engine, tree_scope, &layers);
+        crate::css::style::owner_calls::send(
+            input_engine,
+            crate::css::style::owner_calls::EngineChange::LayerOrder {
+                tree_scope,
+                names: names.clone(),
+            },
+        );
+    }
+    for name in names.iter().filter(|name| !name.is_empty()) {
+        unsafe { record_layer(layer_context, name.as_ptr(), name.len()) };
     }
     has_layers
 }

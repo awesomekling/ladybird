@@ -27,6 +27,11 @@ pub struct ComputedStyleValueHandle {
     pub pointer: *const std::ffi::c_void,
 }
 
+// SAFETY: A non-null handle owns an Arc reference to immutable style value data and only exposes
+// shared access to it, as `RetainedStyleValueData` does.
+unsafe impl Send for ComputedStyleValueHandle where crate::css::style_value::StyleValueData: Send + Sync {}
+unsafe impl Sync for ComputedStyleValueHandle where crate::css::style_value::StyleValueData: Send + Sync {}
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct ComputedSize {
@@ -493,6 +498,10 @@ pub struct FontValues {
     pub font_zero_advance: f32,
     pub first_available_font: *const std::ffi::c_void,
     pub font_cascade_list: libgfx_rust::font::FontCascadeListHandle,
+    /// The same cascade, frozen at publication: what the render pipeline reads. The live
+    /// list beside it is the document's, and only the document thread may look a code point
+    /// up in it.
+    pub frozen_font_list: libgfx_rust::font::FrozenFontListRef,
     pub font_weight: f64,
     pub font_width: f64,
     pub math_shift: u8,
@@ -952,6 +961,7 @@ pub const STYLE_GROUP_INDEX_ANCHOR: usize = 10;
 pub const STYLE_GROUP_INDEX_EFFECTS: usize = 11;
 pub const STYLE_GROUP_INDEX_MASK: usize = 12;
 pub const STYLE_GROUP_INDEX_TEXT_RESET: usize = 13;
+pub const STYLE_GROUP_INDEX_CONTENT: usize = 14;
 pub const STYLE_GROUP_INDEX_TRANSFORM: usize = 15;
 pub const STYLE_GROUP_INDEX_BACKGROUND: usize = 16;
 pub const STYLE_GROUP_INDEX_BORDER: usize = 17;

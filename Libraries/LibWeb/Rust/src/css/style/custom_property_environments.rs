@@ -216,6 +216,19 @@ impl CustomPropertyEnvironments {
             })
     }
 
+    /// Filtering an entire layer can expose a store already named by an ancestor's
+    /// environment. Preserve that identity so sibling environments still share records.
+    pub(super) fn identity_for_store(&self, store: *const c_void) -> Option<u64> {
+        self.engine
+            .iter()
+            .find_map(|(&identity, environment)| (environment.store.pointer() == store).then_some(identity))
+            .or_else(|| {
+                self.stores
+                    .iter()
+                    .find_map(|(&identity, retained)| (retained.pointer() == store).then_some(identity))
+            })
+    }
+
     /// An engine-resolved environment's store and the environment it was resolved over.
     pub(super) fn engine_environment(&self, identity: u64) -> Option<(*const c_void, u64)> {
         self.engine

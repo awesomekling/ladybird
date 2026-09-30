@@ -210,7 +210,7 @@ impl Workload {
             version.selector_program = Some(selector);
             version.declaration_block = Some(DeclarationBlockID(1000 + index as u32));
             engine.replace_rule_version(rule, version);
-            engine.set_rule_declared_properties(rule, &[(1 + index as u16 % 5, index % 7 == 0)], true);
+            engine.set_rule_declared_properties(rule, &[(1 + index as u16 % 5, index % 7 == 0)]);
             rules.push(rule);
         }
 
@@ -720,10 +720,7 @@ fn incomplete_answer_batches_preserve_pending_lookups_and_release_ownership() {
             ));
         }
         if discard {
-            workload
-                .engine
-                .state
-                .discard_published_match_answers(&mut workload.engine.counters);
+            workload.engine.state.discard_published_match_answers();
             assert_eq!(workload.engine.match_answers.pending_reference_count(), 0);
             assert_eq!(workload.engine.winner_groups.pending_reference_count(), 0);
             for &node in &nodes[..2] {

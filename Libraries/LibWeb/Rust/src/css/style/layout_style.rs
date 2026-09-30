@@ -19,7 +19,6 @@ use crate::css::css_enums::{
 use crate::css::display::FfiDisplay;
 use crate::css::host_shared::{HostShared, SharedPayload};
 use crate::css::table_group_builder::group_index;
-use std::ffi::c_void;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AnonymousStyleKind {
@@ -43,10 +42,13 @@ pub(crate) struct AnonymousStyleOverrides {
     pub overflow_y: u8,
 }
 
-#[derive(Clone, Copy)]
+/// A record a layout row holds: pinned in the engine, with the row's own reference on the record as
+/// the engine published it. `published` is `None` only if the record was not live, which leaves the
+/// row without style.
+#[derive(Clone)]
 pub(crate) struct DerivedStyleRecord {
     pub record: u64,
-    pub payloads: *const c_void,
+    pub published: Option<std::sync::Arc<super::published_record::PublishedStyleRecord>>,
 }
 
 trait LayoutStyleGroup: Clone + PartialEq {
@@ -402,24 +404,44 @@ impl LayoutStyle {
             std::ptr::null(),
         )
         .new_style_record;
-        engine.pin_layout_style_record(record);
-        DerivedStyleRecord {
-            record,
-            payloads: engine
-                .style_record_payloads(record)
-                .expect("new layout style must be live")
-                .as_ptr()
-                .cast(),
-        }
+        engine.pin_derived_style_record(record)
     }
 }
 
 impl StyleEngine {
+    /// The document thread's style-record pin table, which the layout arena pins its host's
+    /// records in without entering the engine.
+    pub(crate) fn host_style_record_pins(&self) -> Option<&super::host_pins::HostPinTable> {
+        self.computed_group_sets.host_pin_table()
+    }
+
+    /// Stops lending the host's pins to the engine while it runs beside the main thread (a clock tick, lent the engine
+    /// mid-task or submitted by a rendering update), which pins and unpins records at any moment. Returns how they were
+    /// lent, for [`Self::restore_host_pins`]. What the engine retires meanwhile, the next pass taken back reclaims.
+    pub(crate) fn lend_host_pins_beside(&mut self) -> super::host_pins::HostPinsLend {
+        self.computed_group_sets.lend_host_pins_beside()
+    }
+
+    /// Lends the host's pins as [`Self::lend_host_pins_beside`] found them: a reach beside the main thread may nest in
+    /// another.
+    pub(crate) fn restore_host_pins(&mut self, lend: super::host_pins::HostPinsLend) {
+        self.computed_group_sets.restore_host_pins(lend);
+    }
+
     pub(crate) fn pin_layout_style_record(&mut self, record: u64) {
         self.pin_style_record(record);
         self.record_boundary_call(super::record_replay::EventKind::PinStyleRecord, |payload| {
             payload.write_u64(record);
         });
+    }
+
+    /// Pins a live record for a layout row, and takes the row's reference on the record as the engine
+    /// published it.
+    pub(crate) fn pin_derived_style_record(&mut self, record: u64) -> DerivedStyleRecord {
+        self.pin_layout_style_record(record);
+        let published = self.publish_style_record(record);
+        debug_assert!(published.is_some(), "a record a layout row derives is live");
+        DerivedStyleRecord { record, published }
     }
 
     pub(crate) fn unpin_layout_style_record(&mut self, record: u64) {

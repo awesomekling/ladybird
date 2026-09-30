@@ -20,17 +20,19 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::num::NonZeroU32;
 
-use super::capacity::ShallowCapacityBytes;
 use super::capacity::capacity_bytes;
 use super::cascade::CascadeStateID;
 use super::column::BitColumn;
 use super::fast_hash::FastMap as HashMap;
 use super::fast_hash::fast_hasher;
+use super::host_pins::{HostPins, HostPinsLend};
 use super::intern_table::InternIdentity;
 use super::intern_table::InternTable;
 use super::memory::MemoryCategory;
 use super::memory::MemoryController;
 use super::memory::MemoryLease;
+use super::published_record::PublishedStyleRecord;
+use super::record_payloads::{StylePayloadsHome, StyleRecordPayloads};
 use super::tree::PseudoElementKind;
 use super::tree::PseudoElementTarget;
 use super::tree::StyleNodeID;
@@ -51,19 +53,23 @@ use crate::css::style_value::RetainedStyleValueData;
 use crate::css::style_value::retained_value_depends_on_color_scheme;
 use crate::css::style_value::retained_value_depends_on_current_color;
 use crate::css::style_value::retained_value_may_depend_on_font_metrics;
+use crate::layout::node_data::STYLE_GROUP_COUNT;
+use std::sync::{Arc, OnceLock};
 
 // Bit 3 is a node-local production capability carried with publication and stripped before the
 // semantic fixed metadata is interned or exposed through a style-record view.
 pub(crate) const INHERITED_GROUP_SWAP_ELIGIBLE: u8 = 1 << 3;
 /// The record holds an `<image>` in a property whose images a layout node loads and observes.
 /// Derived from the published payloads; see `style_group_payloads_hold_image_values`.
-pub(crate) const HOLDS_IMAGE_VALUES: u8 = 1 << 4;
+pub const HOLDS_IMAGE_VALUES: u8 = 1 << 4;
 
 /// The inherited style groups lead every group tuple; a node's inherited-group column names them.
-pub(super) const ENGINE_INHERITED_GROUP_COUNT: usize = 7;
+pub(crate) const ENGINE_INHERITED_GROUP_COUNT: usize = 7;
 
 /// Whether a record with this table may take an inherited-group swap: every property inherits
 /// the way its definition says, no marker is generated for it, and no transition runs on it.
+const ALL_GROUPS: u32 = (1 << crate::css::table_group_builder::group_index::COUNT) - 1;
+
 pub(super) fn table_inherited_group_swap_eligible(table: &ComputedLonghandTable) -> bool {
     table.property_inheritance_is_standard()
         && !table.display_is_list_item()
@@ -73,6 +79,9 @@ pub(super) fn table_inherited_group_swap_eligible(table: &ComputedLonghandTable)
 /// What assembling an engine-computed record produced, for the publication counters.
 pub(super) struct EngineComputedAssembly {
     pub(super) delta: (FinalStyleRecordID, FinalStyleRecordID),
+    /// The composition this assembly derived beneath, kept alive for the batch: the host's element
+    /// still names it until the row is applied. The caller drops the pin at that point.
+    pub(super) pinned_composition: Option<u64>,
     /// Rebuilt groups whose payload equalled the old one and kept its identity.
     pub(super) canonicalized_groups: u32,
     /// Whether the node's group tuple identity stayed put, so nothing propagates from it.
@@ -203,10 +212,82 @@ impl StyleRecordView<'_> {
         };
         ComputedLonghandTable::copied_for_partial_drive(source)
     }
+}
 
-    pub(crate) fn longhand_table_seeded_with_values(&self) -> Option<ComputedLonghandTable> {
-        unsafe { self.longhand_table.as_ref() }.map(ComputedLonghandTable::seeded_with_values_from)
+/// What a record's group payloads are built from besides its longhand table: the context its
+/// lengths resolve in and its resolved font. Two tables equal for publication, built against
+/// equal inputs, assemble to equal payloads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct GroupAssemblyInputs([u64; 23]);
+
+impl GroupAssemblyInputs {
+    pub(crate) fn new(
+        length: &crate::css::style_compute::FfiLengthResolutionContext,
+        font: &crate::css::table_group_builder::FfiFontGroupBuildInputs,
+    ) -> Self {
+        let metrics = |metrics: &crate::css::style_compute::FfiFontMetrics| {
+            [
+                metrics.font_size,
+                metrics.x_height,
+                metrics.cap_height,
+                metrics.zero_advance,
+                metrics.line_height,
+            ]
+            .map(f64::to_bits)
+        };
+        let flags = [
+            length.font_metrics_depend_on_viewport_metrics,
+            length.root_font_metrics_depend_on_viewport_metrics,
+            length.has_container_width_basis,
+            length.has_container_height_basis,
+            length.container_width_basis_depends_on_viewport_metrics,
+            length.container_height_basis_depends_on_viewport_metrics,
+            length.subject_inline_axis_is_horizontal,
+        ]
+        .iter()
+        .enumerate()
+        .fold(0_u64, |flags, (bit, &flag)| flags | (u64::from(flag) << bit));
+        let pair = |first: u32, second: u32| (u64::from(first) << 32) | u64::from(second);
+        let [a, b, c, d, e] = metrics(&length.font_metrics);
+        let [f, g, h, i, j] = metrics(&length.root_font_metrics);
+        Self([
+            length.viewport_width.to_bits(),
+            length.viewport_height.to_bits(),
+            a,
+            b,
+            c,
+            d,
+            e,
+            f,
+            g,
+            h,
+            i,
+            j,
+            length.container_width_basis.to_bits(),
+            length.container_height_basis.to_bits(),
+            flags,
+            pair(font.font_size_raw as u32, font.line_height_used_raw as u32),
+            pair(
+                u32::from(font.font_variant_emoji) | u32::from(font.math_shift) << 8 | u32::from(font.math_style) << 16,
+                font.math_depth as u32,
+            ),
+            pair(font.font_ascent.to_bits(), font.font_descent.to_bits()),
+            pair(font.font_x_height.to_bits(), font.font_zero_advance.to_bits()),
+            font.first_available_font as u64,
+            font.font_cascade_list as u64,
+            font.font_weight.to_bits(),
+            font.font_width.to_bits(),
+        ])
     }
+}
+
+/// The groups a published longhand table was assembled to against one set of inputs, as far as
+/// any assembly built them.
+#[derive(Clone, Copy)]
+struct AssembledGroups {
+    groups: [ComputedGroupID; crate::css::table_group_builder::group_index::COUNT],
+    /// The groups built so far, one bit per group index.
+    built: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -271,6 +352,10 @@ impl FinalStyleRecordID {
         self.0
     }
 
+    pub(crate) fn from_raw(raw: u64) -> Option<Self> {
+        (raw != 0).then_some(Self(raw))
+    }
+
     fn base_record(self) -> Option<StyleRecordID> {
         if self.0 & Self::ANIMATION_OVERLAY_TAG != 0 {
             return None;
@@ -286,26 +371,42 @@ impl FinalStyleRecordID {
     }
 }
 
+/// Whether a record someone named by its identity is live, which it is for as long as anyone holds it as published or
+/// pinned; a debug assertion otherwise, and the reader finds no record.
+fn named_record_is_live(live: bool) -> Option<()> {
+    debug_assert!(live, "base style-record is not live");
+    live.then_some(())
+}
+
 struct AnimationOverlayRecord {
     // NB: No sampled value enters a permanent interning table. The current assignment owns one
     //     reference, while detached layout and stabilization baselines can pin an old generation.
     base_style_record: StyleRecordID,
+    effective_custom_property_environment: u64,
     source_identity: u64,
     final_style_record: FinalStyleRecordID,
-    animated_overlay: Box<crate::css::animated_overlay::AnimatedOverlay>,
-    payloads: Box<[SharedPayload]>,
+    /// Shared with the record as the host reads it (see [`super::published_record`]).
+    animated_overlay: Arc<crate::css::animated_overlay::AnimatedOverlay>,
+    /// The record as the host reads it, made the first time it is handed to the host.
+    published: OnceLock<Arc<PublishedStyleRecord>>,
+    payloads: Arc<StyleRecordPayloads>,
     /// Whether the composed payloads hold an `<image>` a layout node loads, which a sampled value
     /// can hold where the base does not.
     holds_image_values: bool,
+    /// The engine's own pins. The document thread's pins are in its table; see
+    /// [`super::host_pins`].
     pin_count: u64,
     is_assigned: bool,
+    /// Whether the slot waits in `retired_animation_overlay_slots` for the host to let go of it.
+    is_retired: bool,
 }
 
-impl Drop for AnimationOverlayRecord {
-    fn drop(&mut self) {
-        for (index, &payload) in self.payloads.iter().enumerate() {
-            release_group_payload(index, payload.as_ptr());
-        }
+impl AnimationOverlayRecord {
+    /// Whether anyone besides the engine holds the record as it was published (a layout row, a publication of the
+    /// rows, a change on its way to the owner), and so may name it to the engine again. Only the engine hands the
+    /// value out, so a count of one cannot grow while the engine decides.
+    fn is_held_as_published(&self) -> bool {
+        self.published.get().is_some_and(|record| Arc::strong_count(record) > 1)
     }
 }
 
@@ -344,9 +445,16 @@ struct ComputedGroup {
 
 struct ComputedGroupSet {
     identity_hash: u64,
-    payloads: Box<[SharedPayload]>,
+    /// `None` only for a retired set.
+    payloads: Option<Arc<StyleRecordPayloads>>,
     groups: Box<[ComputedGroupID]>,
     canonical_longhand_table: Option<ComputedLonghandTableID>,
+}
+
+impl ComputedGroupSet {
+    fn payloads(&self) -> &[SharedPayload] {
+        self.payloads.as_deref().map_or(&[], StyleRecordPayloads::as_slice)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -375,12 +483,23 @@ struct PublishedComputedColumns {
     custom_properties: Vec<u32>,
     fixed_metadata: Vec<u32>,
     animation_overlay_slots: Vec<u32>,
+    sampled_composition_identities: Vec<u64>,
     cascade_versions: Vec<u64>,
     cascade_states: Vec<u32>,
     flags: Vec<u8>,
     /// The element facts the style computation's adjustments read; see
     /// `bridge::element_adjustment_fact`.
     adjustment_facts: Vec<u32>,
+    /// One plus the element-reference pseudo kind this element represents, or zero.
+    associated_pseudo_kinds: Vec<u8>,
+    /// The element facts a layout row built for the element records; see
+    /// `bridge::element_construction_fact`.
+    construction_facts: Vec<u32>,
+    /// Which principal box the element asks for; see `bridge::FfiElementBoxKind`.
+    box_kinds: Vec<u8>,
+    /// The synthetic pseudo-elements the node's last published match answer has rules for, one
+    /// bit per kind; held while `HAS_PSEUDO_STYLE_MASK` is set.
+    pseudo_style_masks: Vec<u64>,
 }
 
 impl PublishedComputedColumns {
@@ -389,6 +508,8 @@ impl PublishedComputedColumns {
     const HAS_CASCADE_STATE: u8 = 1 << 2;
     /// The node's last published match answer declared past its winners.
     const INCOMPLETE_ANSWER: u8 = 1 << 3;
+    /// `pseudo_style_masks` holds the node's mask.
+    const HAS_PSEUDO_STYLE_MASK: u8 = 1 << 4;
 
     fn ensure(&mut self, index: usize) {
         if self.flags.len() > index {
@@ -402,10 +523,15 @@ impl PublishedComputedColumns {
         self.custom_properties.resize(len, 0);
         self.fixed_metadata.resize(len, 0);
         self.animation_overlay_slots.resize(len, 0);
+        self.sampled_composition_identities.resize(len, 0);
         self.cascade_versions.resize(len, 0);
         self.cascade_states.resize(len, 0);
         self.flags.resize(len, 0);
         self.adjustment_facts.resize(len, 0);
+        self.associated_pseudo_kinds.resize(len, 0);
+        self.construction_facts.resize(len, 0);
+        self.box_kinds.resize(len, 0);
+        self.pseudo_style_masks.resize(len, 0);
     }
 
     fn is_assigned(&self, index: usize) -> bool {
@@ -504,7 +630,8 @@ impl PublishedComputedColumns {
         self.custom_properties[index] = inputs.custom_properties.0;
         self.fixed_metadata[index] = inputs.fixed_metadata.0;
         self.set_animation_overlay_slot(index, inputs.animation_overlay_slot);
-        self.flags[index] = (self.flags[index] & (Self::HAS_CASCADE_STATE | Self::INCOMPLETE_ANSWER))
+        self.flags[index] = (self.flags[index]
+            & (Self::HAS_CASCADE_STATE | Self::INCOMPLETE_ANSWER | Self::HAS_PSEUDO_STYLE_MASK))
             | Self::ASSIGNED
             | if inherited_group_swap_eligible {
                 Self::INHERITED_GROUP_SWAP_ELIGIBLE
@@ -629,7 +756,6 @@ struct AnimationOverlayPublication {
 }
 
 pub struct AnimationOverlayUpdate {
-    pub previous_style_record: FinalStyleRecordID,
     pub style_record: FinalStyleRecordID,
     pub slot_allocated: bool,
     pub slot_released: bool,
@@ -694,14 +820,25 @@ pub struct ComputedGroupSets {
     style_records: InternTable<StyleRecordID, StyleRecord>,
     style_record_liveness: BitColumn,
     style_record_generations: Vec<u32>,
+    /// Each live base record as the value the host reads it through, made the first time the record
+    /// is handed to the host; see [`super::published_record`].
+    published_style_records: Vec<OnceLock<Arc<PublishedStyleRecord>>>,
     style_record_column: Vec<Option<StyleRecordID>>,
     base_style_record_pins: HashMap<StyleRecordID, u64>,
+    /// The document thread's pins, as far as the engine may read them now.
+    host_pins: HostPins,
+    /// Where the payloads of records the engine let go of come back to, when a reader dropped them
+    /// on another thread.
+    payloads_home: Arc<StylePayloadsHome>,
     columns: PublishedComputedColumns,
     // Recyclable animation overlays are deliberately separate from the permanent base records
     // above. Dense element assignments and sparse pseudo assignments pin at most one slot each.
     animation_overlay_slots: Vec<Option<AnimationOverlayRecord>>,
     animation_overlay_slots_by_record: HashMap<FinalStyleRecordID, u32>,
     free_animation_overlay_slots: Vec<u32>,
+    /// Overlay slots nothing in the engine assigns or pins, kept because the host pins them or,
+    /// beside a pass in flight, may have pinned them without the engine knowing.
+    retired_animation_overlay_slots: Vec<u32>,
     live_animation_overlay_assignments: usize,
     next_animation_overlay_generation: u64,
     pending_cascade_states: HashMap<StyleNodeID, (u64, CascadeStateID)>,
@@ -713,33 +850,16 @@ pub struct ComputedGroupSets {
     style_records_interned_since_reclamation: usize,
     next_reclamation_after: usize,
     style_record_view_epoch_depth: u32,
-    shared_style_records: HashMap<SharedStyleRecordKey, SharedStyleRecord>,
-    shared_style_record_memory: MemoryLease,
-    shared_computation_contexts: Vec<Option<SharedComputationContext>>,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct SharedStyleRecord {
-    pub record: u64,
-    pub inherited_group_swap_eligible: bool,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct SharedComputationContext {
-    pub parent_record: u64,
-    pub record: u64,
-    pub key: SharedStyleRecordKey,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct SharedStyleRecordKey {
-    pub cascade_input: u32,
-    pub tree_scope: u32,
-    pub inherited_groups: InheritedGroupSetID,
-    pub environment: u64,
-    pub font_environment_generation: u64,
-    pub(super) root_font_inputs: super::publication::RootFontInputs,
-    pub shape: [u64; 4],
+    /// The group set each published longhand table assembled to, by the inputs it assembled
+    /// against: a record whose table is already published takes its payloads from here rather
+    /// than building and interning a second copy of each.
+    table_assemblies: HashMap<(ComputedLonghandTableID, GroupAssemblyInputs), AssembledGroups>,
+    /// The table the last record of each cascade state published: the table an element of the
+    /// same state most likely computes to, asked before any table is hashed.
+    table_candidates: HashMap<(u64, CascadeStateID), ComputedLonghandTableID>,
+    /// The catalog's answer for the table the next publication carries, when the publisher
+    /// already asked for it, by the table's address.
+    known_longhand_table: Option<(usize, Result<ComputedLonghandTableID, u64>)>,
 }
 
 impl Default for ComputedGroupSets {
@@ -757,12 +877,16 @@ impl Default for ComputedGroupSets {
             style_records: InternTable::default(),
             style_record_liveness: BitColumn::default(),
             style_record_generations: Vec::new(),
+            published_style_records: Vec::new(),
             style_record_column: Vec::new(),
             base_style_record_pins: HashMap::default(),
+            host_pins: HostPins::default(),
+            payloads_home: Arc::default(),
             columns: PublishedComputedColumns::default(),
             animation_overlay_slots: Vec::new(),
             animation_overlay_slots_by_record: HashMap::default(),
             free_animation_overlay_slots: Vec::new(),
+            retired_animation_overlay_slots: Vec::new(),
             live_animation_overlay_assignments: 0,
             next_animation_overlay_generation: 0,
             pending_cascade_states: HashMap::default(),
@@ -774,9 +898,9 @@ impl Default for ComputedGroupSets {
             style_records_interned_since_reclamation: 0,
             next_reclamation_after: 1024,
             style_record_view_epoch_depth: 0,
-            shared_style_records: HashMap::default(),
-            shared_style_record_memory: MemoryLease::new(MemoryCategory::BatchScratch),
-            shared_computation_contexts: Vec::new(),
+            table_assemblies: HashMap::default(),
+            table_candidates: HashMap::default(),
+            known_longhand_table: None,
         }
     }
 }
@@ -795,79 +919,20 @@ impl ComputedGroupSets {
             "style-record view epoch underflow"
         );
         self.style_record_view_epoch_depth -= 1;
-        if self.style_record_view_epoch_depth == 0 {
-            self.clear_shared_style_records();
-        }
     }
 
-    pub(super) fn clear_shared_style_records(&mut self) {
-        self.shared_style_records = HashMap::default();
-        self.shared_style_record_memory
-            .shrink_committed(self.shared_style_record_memory.bytes());
-    }
-
-    pub(super) fn inherited_groups_for_shared_style(&self, raw_record: u64) -> Option<InheritedGroupSetID> {
-        if self.style_record_view_epoch_depth == 0 {
-            return None;
-        }
+    /// How many inherited groups a live base record carries, which its assignment to a node takes.
+    pub(super) fn inherited_group_count(&self, raw_record: u64) -> Option<usize> {
         let final_record = FinalStyleRecordID(raw_record);
         let record = final_record.base_record()?;
         if !self.style_record_generation_is_live(record, final_record.base_generation()) {
             return None;
         }
-        Some(self.style_records.get(record).inherited_groups)
-    }
-
-    pub(super) fn shared_style_record(&self, key: SharedStyleRecordKey) -> Option<SharedStyleRecord> {
-        self.shared_style_records.get(&key).copied()
-    }
-
-    pub(super) fn remember_shared_style_record(
-        &mut self,
-        node: StyleNodeID,
-        key: SharedStyleRecordKey,
-        raw_record: u64,
-    ) {
-        // The view epoch keeps base records and inherited-group identities alive. The caller
-        // clears this relation when the published cascade answers change, and ending the epoch
-        // clears it before reclamation can recycle any computed identity.
-        const MAX_SHARED_STYLE_RECORDS: usize = 8192;
-        if self.style_record_view_epoch_depth == 0 || self.shared_style_records.len() >= MAX_SHARED_STYLE_RECORDS {
-            return;
-        }
-        let final_record = FinalStyleRecordID(raw_record);
-        let Some(record) = final_record.base_record() else {
-            return;
-        };
-        if self.style_record_generation_is_live(record, final_record.base_generation()) {
-            self.shared_style_records
-                .entry(key)
-                .or_insert_with(|| SharedStyleRecord {
-                    record: raw_record,
-                    inherited_group_swap_eligible: node
-                        .element_index()
-                        .is_some_and(|index| self.columns.inherited_group_swap_eligible(index as usize)),
-                });
-        }
-    }
-
-    pub(super) fn remember_shared_computation_context(&mut self, node: StyleNodeID, context: SharedComputationContext) {
-        let index = node.element_index().expect("shared computation targets an element") as usize;
-        if self.shared_computation_contexts.len() <= index {
-            self.shared_computation_contexts.resize(index + 1, None);
-        }
-        self.shared_computation_contexts[index] = Some(context);
-    }
-
-    pub(super) fn take_shared_computation_context(&mut self, node: StyleNodeID) -> Option<SharedComputationContext> {
-        self.shared_computation_contexts
-            .get_mut(node.element_index()? as usize)?
-            .take()
-    }
-
-    pub(super) fn inherited_group_count_for_shared_style(&self, raw_record: u64) -> Option<usize> {
-        let groups = self.inherited_groups_for_shared_style(raw_record)?;
-        Some(self.inherited_sets.get(groups).len())
+        Some(
+            self.inherited_sets
+                .get(self.style_records.get(record).inherited_groups)
+                .len(),
+        )
     }
 
     fn group_identities(&self, set: ComputedGroupSetID) -> impl Iterator<Item = ComputedGroupID> {
@@ -876,6 +941,17 @@ impl ComputedGroupSets {
 
     fn pseudo_rows(&self, node: StyleNodeID) -> &[PseudoComputedRow] {
         self.pseudo_rows_by_node.get(&node).map_or(&[], Box::as_ref)
+    }
+
+    /// Whether a composition of the target's animations can be published into an overlay slot of
+    /// its own: an element with a record, or a pseudo-element the engine holds an assignment for.
+    pub(crate) fn owns_animation_overlay_slot(&self, target: ComputedStyleTarget) -> bool {
+        match target.is_pseudo() {
+            true => self
+                .pseudo_row(target.node, target.pseudo_kind)
+                .is_some_and(|row| row.assignment.is_some()),
+            false => self.assigned_style_record(target.node).is_some(),
+        }
     }
 
     fn pseudo_row(&self, node: StyleNodeID, kind: u8) -> Option<&PseudoComputedRow> {
@@ -1024,16 +1100,17 @@ impl ComputedGroupSets {
         let payloads = groups
             .iter()
             .map(|identity| self.groups[*identity].payload)
-            .collect::<Box<[_]>>();
+            .collect::<SmallVec<[_; STYLE_GROUP_COUNT]>>();
+        let payloads = Arc::new(StyleRecordPayloads::retain(&payloads, &self.payloads_home));
         self.group_set_nested_memory
-            .grow_committed((size_of_val(payloads.as_ref()) + size_of_val(groups)) as u64);
+            .grow_committed((size_of_val(payloads.as_slice()) + size_of_val(groups)) as u64);
         self.identity_mints.group_sets += 1;
         self.sets.insert(
             hash,
             identity,
             ComputedGroupSet {
                 identity_hash: hash,
-                payloads,
+                payloads: Some(payloads),
                 groups: groups.into(),
                 canonical_longhand_table: None,
             },
@@ -1082,7 +1159,9 @@ impl ComputedGroupSets {
         });
         if identity.index() == self.style_record_generations.len() {
             self.style_record_generations.push(0);
+            self.published_style_records.push(OnceLock::new());
         } else {
+            self.published_style_records[identity.index()] = OnceLock::new();
             let generation = &mut self.style_record_generations[identity.index()];
             *generation = generation
                 .checked_add(1)
@@ -1151,7 +1230,12 @@ impl ComputedGroupSets {
         canonical: Option<ComputedLonghandTableID>,
         owned: bool,
     ) -> (ComputedLonghandTableID, bool) {
-        let hash = match self.find_longhand_table(table, previous, canonical) {
+        let known = self
+            .known_longhand_table
+            .take()
+            .filter(|&(known, _)| known == std::ptr::from_ref(table).addr())
+            .map(|(_, lookup)| lookup);
+        let hash = match known.unwrap_or_else(|| self.find_longhand_table(table, previous, canonical)) {
             Ok(identity) => return (identity, false),
             Err(hash) => hash,
         };
@@ -1175,6 +1259,128 @@ impl ComputedGroupSets {
         };
         // NB: Only a new unique result materializes; ownership transfers to the catalog.
         self.insert_longhand_table(table.into_raw_shared(), hash)
+    }
+
+    /// The payloads a frozen table assembles to against `inputs`, when the table equals one the
+    /// catalog holds that already assembled against equal inputs. The catalog's answer for the
+    /// table is kept for the publication that carries this very table next.
+    pub(crate) fn assembled_payloads(
+        &mut self,
+        target: Option<ComputedStyleTarget>,
+        cascade_state: Option<(u64, CascadeStateID)>,
+        table: &ComputedLonghandTable,
+        inputs: GroupAssemblyInputs,
+    ) -> Option<Vec<SharedPayload>> {
+        // A verification pass decides no identities, and a replay takes the recorded ones.
+        if self.content_identities_suspended || replaying_style_groups() {
+            return None;
+        }
+        // Past the likely candidates the table is looked for by its content hash, which the
+        // publication of a table the catalog does not hold computes anyway.
+        let lookup = self
+            .find_assembled_table(
+                table,
+                cascade_state,
+                target.and_then(|target| self.target_longhand_table(target)),
+            )
+            .map_or_else(|| self.find_longhand_table(table, None, None), Ok);
+        self.known_longhand_table = Some((std::ptr::from_ref(table).addr(), lookup));
+        let assembled = self.table_assemblies.get(&(lookup.ok()?, inputs))?;
+        (assembled.built == ALL_GROUPS).then(|| {
+            assembled
+                .groups
+                .iter()
+                .map(|&identity| self.groups[identity].payload)
+                .collect()
+        })
+    }
+
+    /// Remembers that `table` assembled `groups` in `built` to `identities` against `inputs`.
+    fn remember_assembled_groups(
+        &mut self,
+        table: ComputedLonghandTableID,
+        inputs: GroupAssemblyInputs,
+        identities: &[ComputedGroupID],
+        built: u32,
+    ) {
+        let assembled = self.table_assemblies.entry((table, inputs)).or_insert(AssembledGroups {
+            groups: [ComputedGroupID(0); crate::css::table_group_builder::group_index::COUNT],
+            built: 0,
+        });
+        for (group, &identity) in identities.iter().enumerate() {
+            if built & (1 << group) != 0 {
+                assembled.groups[group] = identity;
+            }
+        }
+        assembled.built |= built;
+    }
+
+    /// The published table equal to `table` among the one its cascade state last published and
+    /// `candidate`, asked without hashing `table`.
+    fn find_assembled_table(
+        &self,
+        table: &ComputedLonghandTable,
+        cascade_state: Option<(u64, CascadeStateID)>,
+        candidate: Option<ComputedLonghandTableID>,
+    ) -> Option<ComputedLonghandTableID> {
+        [
+            cascade_state.and_then(|state| self.table_candidates.get(&state).copied()),
+            candidate,
+        ]
+        .into_iter()
+        .flatten()
+        .find(|&candidate| {
+            self.computed_longhand_tables[candidate]
+                .table()
+                .publication_equals(table)
+        })
+    }
+
+    /// Remembers the table `record` just published for its cascade state and, when its payloads
+    /// were `assembled` against `inputs` rather than reused, what the table assembled to.
+    pub(crate) fn remember_table_assembly(
+        &mut self,
+        record: FinalStyleRecordID,
+        cascade_state: Option<(u64, CascadeStateID)>,
+        inputs: GroupAssemblyInputs,
+        assembled: bool,
+    ) {
+        if self.content_identities_suspended || replaying_style_groups() {
+            return;
+        }
+        let Some(&StyleRecord {
+            groups,
+            longhand_table: Some(table),
+            ..
+        }) = record
+            .base_record()
+            .and_then(|identity| self.style_records.get_index(identity.index()))
+        else {
+            return;
+        };
+        if let Some(cascade_state) = cascade_state {
+            self.table_candidates.insert(cascade_state, table);
+        }
+        if assembled {
+            let identities = self.sets[groups].groups.clone();
+            self.remember_assembled_groups(table, inputs, &identities, ALL_GROUPS);
+        }
+    }
+
+    /// The longhand table of the record `target` holds now.
+    fn target_longhand_table(&self, target: ComputedStyleTarget) -> Option<ComputedLonghandTableID> {
+        let ComputedStyleTarget { node, pseudo_kind } = target;
+        let style_record = if target.is_pseudo() {
+            self.pseudo_row(node, pseudo_kind)
+                .and_then(|row| row.assignment)
+                .map(|inputs| inputs.style_record)
+        } else {
+            node.element_index()
+                .and_then(|index| self.style_record_column.get(index as usize))
+                .copied()
+                .flatten()
+        }?;
+        self.style_records.get_index(style_record.index())?.longhand_table
     }
 
     fn insert_longhand_table(&mut self, retained: *const ComputedLonghandTable, hash: u64) -> ComputedLonghandTableID {
@@ -1278,13 +1484,13 @@ impl ComputedGroupSets {
         let old_group_set = self.sets.get_index(old_record.groups.0 as usize)?;
         let parent_inherited = self.columns.inherited_groups(parent_index)?;
         let parent_groups = self.inherited_sets.get_index(parent_inherited.0 as usize)?.as_ref();
-        if parent_groups.len() != INHERITED_GROUP_COUNT || old_group_set.payloads.len() < INHERITED_GROUP_COUNT {
+        if parent_groups.len() != INHERITED_GROUP_COUNT || old_group_set.payloads().len() < INHERITED_GROUP_COUNT {
             return None;
         }
 
         if current_color_dependencies & !INHERITED_GROUP_MASK != 0 {
             let inherited_box = unsafe {
-                old_group_set.payloads[crate::css::computed_value_types::STYLE_GROUP_INDEX_INHERITED_BOX]
+                old_group_set.payloads()[crate::css::computed_value_types::STYLE_GROUP_INDEX_INHERITED_BOX]
                     .cast::<crate::css::computed_values::InheritedBoxValues>()
                     .deref()
             };
@@ -1413,7 +1619,6 @@ impl ComputedGroupSets {
             longhand_table,
         };
         let new_style_record = self.intern_style_record(new_record).0;
-        self.take_shared_computation_context(node);
         self.columns.groups[index] = group_set.0;
         self.columns.inherited_groups[index] = parent_inherited.0;
         self.style_record_column[index] = Some(new_style_record);
@@ -1429,11 +1634,9 @@ impl ComputedGroupSets {
     /// follows the table's dependency flags. The font group is never rebuilt here: it needs
     /// platform font resources the table does not hold.
     ///
-    /// This decides only whether the record can be assembled here: the node must hold a retained
-    /// longhand table, must not carry an animation overlay, and must have published under the
-    /// same eligibility the inherited-group swap needs. Its pseudo-elements' records are
-    /// untouched: they inherit from the element, and the caller has proven that nothing they
-    /// inherit moved.
+    /// The node's assigned record is the base the table was driven from; the table it held, if
+    /// any, only seeds the new table's identity. Its pseudo-elements' records are untouched: they
+    /// inherit from the element, and the caller has proven that nothing they inherit moved.
     #[allow(clippy::arc_with_non_send_sync, clippy::too_many_arguments)]
     pub(super) fn replace_engine_computed_table(
         &mut self,
@@ -1446,34 +1649,32 @@ impl ComputedGroupSets {
         font: Option<&crate::css::table_group_builder::FfiFontGroupBuildInputs>,
         parent_in_display_none_subtree: bool,
         environment: Option<u64>,
-    ) -> Option<EngineComputedAssembly> {
-        use crate::css::computed_value_types::STYLE_GROUP_INDEX_FONT;
-        if groups_to_rebuild == 0 || (groups_to_rebuild & (1 << STYLE_GROUP_INDEX_FONT) != 0 && font.is_none()) {
-            return None;
-        }
-        let index = node.element_index()? as usize;
-        if self.columns.animation_overlay_slot(index).is_some() {
-            return None;
-        }
-        let base_style_record_identity = base_style_record.base_record()?;
-        if !self.style_record_generation_is_live(base_style_record_identity, base_style_record.base_generation()) {
-            return None;
-        }
-        let old_record = *self.style_records.get_index(base_style_record_identity.index())?;
-        let old_table = old_record.longhand_table?;
-        let old_group_set = self.sets.get_index(old_record.groups.0 as usize)?;
-        if groups_to_rebuild >> old_group_set.payloads.len() != 0
-            || old_group_set.payloads.len() <= crate::css::computed_value_types::STYLE_GROUP_INDEX_INHERITED_UI
-        {
-            return None;
-        }
-        let Ok(used_color_scheme) = u8::try_from(table.effective_color_scheme()) else {
-            return None;
-        };
+        counter_style_environment_identity: u64,
+        cascade_state: Option<(u64, CascadeStateID)>,
+    ) -> EngineComputedAssembly {
+        let index = node.element_index().expect("an engine-computed record is an element's") as usize;
+        let base_style_record = FinalStyleRecordID(self.base_style_record_of(base_style_record.raw()));
+        let base_style_record_identity = base_style_record
+            .base_record()
+            .expect("the base of a record is a base record");
+        assert!(
+            self.style_record_generation_is_live(base_style_record_identity, base_style_record.base_generation()),
+            "a table is driven from a live record"
+        );
+        let old_record = *self
+            .style_records
+            .get_index(base_style_record_identity.index())
+            .expect("a live record");
+        let old_table = old_record.longhand_table;
+        debug_assert_eq!(
+            self.sets[old_record.groups].payloads().len(),
+            crate::css::table_group_builder::group_index::COUNT,
+            "an element's record holds every style group"
+        );
         // The builders take the element's own color from the caller, so it is resolved from the
         // driven table before any group reads it.
-        let current_color =
-            crate::css::table_group_builder::own_color_from_table(&table, used_color_scheme, Some(length))?;
+        let color_inputs = crate::css::table_group_builder::assembly_color_inputs(&table, length);
+        let (used_color_scheme, current_color) = color_inputs;
         for property in [
             crate::css::property_metadata::property_id::STOP_COLOR,
             crate::css::property_metadata::property_id::FLOOD_COLOR,
@@ -1497,7 +1698,11 @@ impl ComputedGroupSets {
                 length: Some(length),
                 channels: None,
             };
-            let resolved = crate::css::color_resolution::to_color(specified.data(), &input)?;
+            // A value that does not resolve keeps what the drive computed for it.
+            let Some(resolved) = crate::css::color_resolution::to_color(specified.data(), &input) else {
+                debug_assert!(false, "a currentcolor-relative color does not resolve");
+                continue;
+            };
             let resolved = unsafe {
                 RetainedStyleValueData::from_retained_pointer(std::sync::Arc::into_raw(std::sync::Arc::new(
                     crate::css::color_resolution::resolved_srgb_style_value(resolved),
@@ -1512,35 +1717,59 @@ impl ComputedGroupSets {
         table.set_in_display_none_subtree(parent_in_display_none_subtree || display_is_none);
         table.finish_delta();
 
+        // A group rebuilt from a table the catalog already holds is the one an earlier assembly of
+        // that table built against the same inputs, so it is taken from there. Only the groups
+        // rebuilt are remembered: the ones this keeps are the old record's, which the table need
+        // not determine. A font group not rebuilt is the old record's too, built from the font it
+        // holds.
+        let font_group = crate::css::computed_value_types::STYLE_GROUP_INDEX_FONT;
+        let assembly_inputs = match font.filter(|_| groups_to_rebuild & (1 << font_group) != 0) {
+            Some(font) => GroupAssemblyInputs::new(length, font),
+            None => GroupAssemblyInputs::new(length, &unsafe {
+                crate::css::table_group_builder::font_group_build_inputs_of(
+                    self.sets[old_record.groups].payloads()[font_group].as_ptr(),
+                )
+            }),
+        };
+        let remembers_assemblies = !self.content_identities_suspended && !replaying_style_groups();
+        let found_table = remembers_assemblies
+            .then(|| self.find_assembled_table(&table, cascade_state, old_table))
+            .flatten();
+        let assembled = found_table
+            .and_then(|table| self.table_assemblies.get(&(table, assembly_inputs)))
+            .filter(|assembled| assembled.built & groups_to_rebuild == groups_to_rebuild)
+            .map(|assembled| assembled.groups);
+
         let mut groups: SmallVec<[_; crate::css::table_group_builder::group_index::COUNT]> =
             self.group_identities(old_record.groups).collect();
         let mut canonicalized_groups = 0_u32;
+        if let Some(assembled) = assembled {
+            for (group, group_identity) in groups.iter_mut().enumerate() {
+                if groups_to_rebuild & (1 << group) == 0 {
+                    continue;
+                }
+                let identity = assembled[group];
+                if identity == *group_identity {
+                    canonicalized_groups += 1;
+                }
+                *group_identity = identity;
+            }
+        }
         for (group, group_identity) in groups.iter_mut().enumerate() {
-            if groups_to_rebuild & (1 << group) == 0 {
+            if assembled.is_some() || groups_to_rebuild & (1 << group) == 0 {
                 continue;
             }
             let old_payload = self.groups[*group_identity].payload;
-            let payload = if group == STYLE_GROUP_INDEX_FONT {
-                unsafe {
-                    crate::css::table_group_builder::rebuild_font_group_from_table(
-                        &table,
-                        font.expect("a font group rebuild carries the resolved font"),
-                        old_payload.as_ptr(),
-                    )
-                }
-            } else {
-                unsafe {
-                    crate::css::table_group_builder::rebuild_group_from_table(
-                        &table,
-                        group,
-                        old_payload.as_ptr(),
-                        current_color,
-                        used_color_scheme,
-                        Some(length),
-                    )
-                }
-            };
-            let payload = SharedPayload::new(payload?);
+            let payload = SharedPayload::new(unsafe {
+                crate::css::table_group_builder::assemble_group_from_table(
+                    &table,
+                    group,
+                    font,
+                    old_payload.as_ptr(),
+                    color_inputs,
+                    length,
+                )
+            });
             // An equal payload keeps the old identity, as a C++ build adopts its parent's and
             // predecessor's identical payloads.
             let identity = if payload == old_payload
@@ -1563,21 +1792,35 @@ impl ComputedGroupSets {
         let holds_image_values = self
             .sets
             .get_index(group_set.0 as usize)
-            .is_some_and(|set| style_group_payloads_hold_image_values(SharedPayload::as_pointer_slice(&set.payloads)));
+            .is_some_and(|set| style_group_payloads_hold_image_values(SharedPayload::as_pointer_slice(set.payloads())));
         let old_metadata = self.computed_fixed_metadata[old_record.fixed_metadata];
         let swap_eligible = table_inherited_group_swap_eligible(&table);
         let dependency_flags =
             table.publication_dependency_flags() | (u8::from(holds_image_values) * HOLDS_IMAGE_VALUES);
-        let fixed_metadata = if dependency_flags == old_metadata.dependency_flags {
+        let fixed_metadata = if dependency_flags == old_metadata.dependency_flags
+            && counter_style_environment_identity == old_metadata.counter_style_environment_identity
+        {
             old_record.fixed_metadata
         } else {
             self.intern_fixed_metadata(ComputedFixedMetadata {
                 dependency_flags,
+                counter_style_environment_identity,
                 ..old_metadata
             })
             .0
         };
-        let longhand_table = self.intern_owned_longhand_table(table, Some(old_table), None);
+        let longhand_table = match found_table {
+            Some(found) => found,
+            None => self.intern_owned_longhand_table(table, old_table, None),
+        };
+        if remembers_assemblies {
+            if let Some(cascade_state) = cascade_state {
+                self.table_candidates.insert(cascade_state, longhand_table);
+            }
+            if assembled.is_none() {
+                self.remember_assembled_groups(longhand_table, assembly_inputs, &groups, groups_to_rebuild);
+            }
+        }
         // The environment moves with the record when the node's custom declarations resolved to
         // another; a record keeps its environment otherwise.
         let custom_properties = match environment {
@@ -1596,6 +1839,19 @@ impl ComputedGroupSets {
         };
         let new_style_record = self.intern_style_record(new_record).0;
         // Descendant swaps read the node's inherited groups from their own column.
+        // A node whose animations composed a record gives that composition up here: the base this
+        // assembles is the style beneath it, and the caller has the host sample the animations
+        // again over it once the batch is applied. Until then the host's element still names the
+        // composition, so the batch keeps the slot alive - giving up the assignment is not giving
+        // up the record - and the caller drops the pin when the host acknowledges the row.
+        let pinned_composition = self.columns.animation_overlay_slot(index).and_then(|slot| {
+            let base = (*self.style_record_column.get(index)?)?;
+            let composed = self.final_style_record(base, Some(slot)).raw();
+            self.pin_style_record(composed);
+            self.release_animation_overlay_assignment(slot);
+            self.columns.set_animation_overlay_slot(index, None);
+            Some(composed)
+        });
         self.columns.publish(
             index,
             PublishedComputedInputs {
@@ -1612,11 +1868,12 @@ impl ComputedGroupSets {
             self.style_record_column.resize(index + 1, None);
         }
         self.style_record_column[index] = Some(new_style_record);
-        Some(EngineComputedAssembly {
+        EngineComputedAssembly {
             delta: (previous_style_record, self.final_base_style_record(new_style_record)),
             canonicalized_groups,
             group_set_unchanged: group_set == old_record.groups,
-        })
+            pinned_composition,
+        }
     }
 
     /// Put a node back on the record it held before an engine derivation C++ never installed,
@@ -1641,16 +1898,55 @@ impl ComputedGroupSets {
             self.remove(node);
             return;
         }
-        let Some(previous_base) = previous_style_record.base_record() else {
-            return;
+        let previous_slot = self
+            .animation_overlay_slots_by_record
+            .get(&previous_style_record)
+            .copied();
+        let (previous_base, previous_environment) = if let Some(slot) = previous_slot {
+            let Some(overlay) = self.animation_overlay_slots[slot as usize].as_ref() else {
+                return;
+            };
+            if overlay.is_assigned {
+                return;
+            }
+            (
+                overlay.base_style_record,
+                Some(overlay.effective_custom_property_environment),
+            )
+        } else {
+            // A previous record the engine reclaimed meanwhile names whatever took its index since.
+            let Some(base) = previous_style_record
+                .base_record()
+                .filter(|&base| self.style_record_generation_is_live(base, previous_style_record.base_generation()))
+            else {
+                return;
+            };
+            (base, None)
         };
         let Some(record) = self.style_records.get_index(previous_base.index()).copied() else {
             return;
         };
+        let custom_properties = previous_environment
+            .map(|environment| self.intern_custom_property_environment(environment).0)
+            .unwrap_or(record.custom_properties);
+        if let Some(slot) = previous_slot {
+            self.animation_overlay_slots[slot as usize]
+                .as_mut()
+                .expect("pinned animation overlay is live")
+                .is_assigned = true;
+            self.live_animation_overlay_assignments += 1;
+        }
         let inherited_identity = record.inherited_groups;
         self.columns.groups[index] = record.groups.0;
         self.columns.inherited_groups[index] = inherited_identity.0;
-        self.columns.custom_properties[index] = record.custom_properties.0;
+        self.columns.custom_properties[index] = custom_properties.0;
+        self.columns.fixed_metadata[index] = record.fixed_metadata.0;
+        self.columns.set_animation_overlay_slot(index, previous_slot);
+        let swap_eligible = record
+            .longhand_table
+            .and_then(|table| self.computed_longhand_tables.get_index(table.index()))
+            .is_some_and(|retained| table_inherited_group_swap_eligible(retained.table()));
+        self.columns.set_inherited_group_swap_eligible(index, swap_eligible);
         self.style_record_column[index] = Some(previous_base);
     }
 
@@ -1723,22 +2019,23 @@ impl ComputedGroupSets {
         &mut self,
         base_style_record: StyleRecordID,
         source_identity: u64,
-        animated_overlay: Box<crate::css::animated_overlay::AnimatedOverlay>,
+        animated_overlay: Arc<crate::css::animated_overlay::AnimatedOverlay>,
         payloads: &[SharedPayload],
     ) -> AnimationOverlayRecord {
         assert!(payloads.iter().all(|payload| !payload.is_null()));
-        for (index, &payload) in payloads.iter().enumerate() {
-            retain_group_payload(index, payload.as_ptr());
-        }
         AnimationOverlayRecord {
             base_style_record,
+            effective_custom_property_environment: self.custom_property_environments
+                [self.style_records[base_style_record].custom_properties],
             source_identity,
             final_style_record: self.next_animation_overlay_record(),
             animated_overlay,
             holds_image_values: style_group_payloads_hold_image_values(SharedPayload::as_pointer_slice(payloads)),
-            payloads: payloads.into(),
+            payloads: Arc::new(StyleRecordPayloads::retain(payloads, &self.payloads_home)),
+            published: OnceLock::new(),
             pin_count: 0,
             is_assigned: true,
+            is_retired: false,
         }
     }
 
@@ -1752,7 +2049,7 @@ impl ComputedGroupSets {
         let record = self.make_animation_overlay_record(
             base_style_record,
             source_identity,
-            Box::new(
+            Arc::new(
                 animated_overlay
                     .expect("animation overlay properties are missing")
                     .clone(),
@@ -1760,7 +2057,7 @@ impl ComputedGroupSets {
             payloads,
         );
         self.animation_overlay_nested_memory
-            .grow_committed(size_of_val(record.payloads.as_ref()) as u64);
+            .grow_committed(size_of_val(record.payloads.as_slice()) as u64);
         let final_style_record = record.final_style_record;
         let (slot, slot_allocated) = if let Some(slot) = self.free_animation_overlay_slots.pop() {
             self.animation_overlay_slots[slot as usize] = Some(record);
@@ -1782,7 +2079,7 @@ impl ComputedGroupSets {
             .expect("animation-overlay slot is live");
         assert!(!record.is_assigned && record.pin_count == 0);
         let final_style_record = record.final_style_record;
-        let payload_bytes = size_of_val(record.payloads.as_ref()) as u64;
+        let payload_bytes = size_of_val(record.payloads.as_slice()) as u64;
         self.animation_overlay_slots_by_record.remove(&final_style_record);
         self.animation_overlay_slots[slot as usize] = None;
         self.free_animation_overlay_slots.push(slot);
@@ -1799,8 +2096,89 @@ impl ComputedGroupSets {
         record.is_assigned = false;
         self.live_animation_overlay_assignments -= 1;
         if record.pin_count == 0 {
-            self.reclaim_animation_overlay_slot(slot);
+            self.reclaim_or_retire_animation_overlay_slot(slot);
         }
+    }
+
+    /// Reclaims a slot the engine no longer assigns or pins, unless the host pins its record, may be
+    /// pinning it beside a pass in flight, or holds it as published: then the slot is retired until
+    /// the host lets go of it.
+    fn reclaim_or_retire_animation_overlay_slot(&mut self, slot: u32) {
+        let record = self.animation_overlay_slots[slot as usize]
+            .as_mut()
+            .expect("animation-overlay slot is live");
+        // A retired slot is in `retired_animation_overlay_slots`, and only the sweep over them
+        // reclaims it.
+        if record.is_retired {
+            return;
+        }
+        if self.host_pins.may_pin(record.final_style_record.raw()) || record.is_held_as_published() {
+            record.is_retired = true;
+            self.retired_animation_overlay_slots.push(slot);
+            return;
+        }
+        self.reclaim_animation_overlay_slot(slot);
+    }
+
+    /// Reclaims the retired slots whose records the host no longer pins, once its table is lent.
+    pub(crate) fn reclaim_retired_animation_overlays(&mut self) {
+        if self.retired_animation_overlay_slots.is_empty() || self.host_pins.defers_reclamation() {
+            return;
+        }
+        for slot in std::mem::take(&mut self.retired_animation_overlay_slots) {
+            let record = self.animation_overlay_slots[slot as usize]
+                .as_mut()
+                .expect("a retired animation-overlay slot is live");
+            // An engine pin can take a retired record back into an assignment, which keeps it
+            // live; releasing that assignment decides again.
+            if record.is_assigned {
+                record.is_retired = false;
+                continue;
+            }
+            if self.host_pins.may_pin(record.final_style_record.raw()) || record.is_held_as_published() {
+                self.retired_animation_overlay_slots.push(slot);
+                continue;
+            }
+            record.is_retired = false;
+            // The engine's own last unpin decides again.
+            if record.pin_count == 0 {
+                self.reclaim_animation_overlay_slot(slot);
+            }
+        }
+    }
+
+    /// Lends the document thread's pin table to the engine, whenever the document thread waits on
+    /// it from now on.
+    pub(crate) fn lend_host_pins(&mut self, host_pins: HostPins) {
+        self.host_pins = host_pins;
+    }
+
+    /// The document thread's pin table, for its readers outside the engine to pin in.
+    pub(crate) fn host_pin_table(&self) -> Option<&super::host_pins::HostPinTable> {
+        self.host_pins.table()
+    }
+
+    /// Stops lending the host's pins while a pass runs beside the document thread.
+    pub(crate) fn begin_pass_beside_host_pins(&mut self) {
+        self.host_pins.lend_beside();
+    }
+
+    /// Lends the host's pins again once the document thread has taken the pass back, and reclaims
+    /// what the pass retired that the host does not pin.
+    pub(crate) fn finish_pass_beside_host_pins(&mut self) {
+        self.host_pins.restore(HostPinsLend::Lent);
+        self.reclaim_retired_animation_overlays();
+    }
+
+    /// Stops lending the host's pins while the engine runs beside the document thread, and returns how they were lent,
+    /// which [`Self::lend_host_pins`] lends them as again once it no longer does.
+    pub(crate) fn lend_host_pins_beside(&mut self) -> HostPinsLend {
+        self.host_pins.lend_beside()
+    }
+
+    /// Lends the host's pins as [`Self::lend_host_pins_beside`] found them.
+    pub(crate) fn restore_host_pins(&mut self, lend: HostPinsLend) {
+        self.host_pins.restore(lend);
     }
 
     fn update_animation_overlay(
@@ -1830,7 +2208,7 @@ impl ComputedGroupSets {
                 .expect("animation-overlay slot is live");
             if current.base_style_record == base_style_record
                 && current.source_identity == source_identity
-                && current.payloads.as_ref() == payloads
+                && current.payloads.as_slice() == payloads
             {
                 return AnimationOverlayPublication {
                     slot: Some(slot),
@@ -1840,20 +2218,26 @@ impl ComputedGroupSets {
                     record_updated: false,
                 };
             }
-            if current.pin_count == 0 {
+            // A retired slot an assignment took back still waits for the retired sweep, which
+            // reads the record it retired.
+            if current.pin_count == 0
+                && !current.is_retired
+                && !self.host_pins.may_pin(current.final_style_record.raw())
+                && !current.is_held_as_published()
+            {
                 let old_final_style_record = current.final_style_record;
-                let old_payload_bytes = size_of_val(current.payloads.as_ref()) as u64;
+                let old_payload_bytes = size_of_val(current.payloads.as_slice()) as u64;
                 let record = self.make_animation_overlay_record(
                     base_style_record,
                     source_identity,
-                    Box::new(
+                    Arc::new(
                         animated_overlay
                             .expect("animation overlay properties are missing")
                             .clone(),
                     ),
                     payloads,
                 );
-                let new_payload_bytes = size_of_val(record.payloads.as_ref()) as u64;
+                let new_payload_bytes = size_of_val(record.payloads.as_slice()) as u64;
                 if new_payload_bytes >= old_payload_bytes {
                     self.animation_overlay_nested_memory
                         .grow_committed(new_payload_bytes - old_payload_bytes);
@@ -1920,7 +2304,6 @@ impl ComputedGroupSets {
                 self.columns.animation_overlay_slot(index),
             )
         };
-        let previous_style_record = self.final_style_record(base_style_record, current_slot);
         let animated_overlay = unsafe { animated_overlay.as_ref() };
         let publication = self.update_animation_overlay(
             current_slot,
@@ -1938,14 +2321,14 @@ impl ComputedGroupSets {
             self.columns
                 .set_animation_overlay_slot(target.node.element_index()? as usize, publication.slot);
         }
-        Some(AnimationOverlayUpdate {
-            previous_style_record,
+        let update = AnimationOverlayUpdate {
             style_record: publication.final_style_record,
             slot_allocated: publication.slot_allocated,
             slot_released: publication.slot_released,
             record_updated: publication.record_updated,
             live_records: self.live_animation_overlay_assignments,
-        })
+        };
+        Some(update)
     }
 
     #[cfg(test)]
@@ -2090,20 +2473,7 @@ impl ComputedGroupSets {
         //     style record - on every recompute. The target's previous table is offered as a
         //     canonical candidate and reused when every slot holds an equal value, mirroring how
         //     output group payloads canonicalize against the previous group set above.
-        let previous_longhand_table = target.and_then(|target| {
-            let ComputedStyleTarget { node, pseudo_kind } = target;
-            let style_record = if target.is_pseudo() {
-                self.pseudo_row(node, pseudo_kind)
-                    .and_then(|row| row.assignment)
-                    .map(|inputs| inputs.style_record)
-            } else {
-                node.element_index()
-                    .and_then(|index| self.style_record_column.get(index as usize))
-                    .copied()
-                    .flatten()
-            }?;
-            self.style_records.get_index(style_record.index())?.longhand_table
-        });
+        let previous_longhand_table = target.and_then(|target| self.target_longhand_table(target));
         let canonical_longhand_table = self.sets[identity].canonical_longhand_table;
         let longhand_table_identity = longhand_table.map(|table| {
             let (identity, moved) =
@@ -2219,6 +2589,12 @@ impl ComputedGroupSets {
             )
         };
         let final_style_record_identity = animation_overlay_publication.final_style_record;
+        if let Some(slot) = animation_overlay_publication.slot {
+            self.animation_overlay_slots[slot as usize]
+                .as_mut()
+                .expect("published animation overlay is live")
+                .effective_custom_property_environment = custom_property_environment;
+        }
         let style_record_node_handle_changed =
             target.is_some() && previous_style_record_identity != Some(final_style_record_identity);
         ComputedGroupPublication {
@@ -2252,10 +2628,9 @@ impl ComputedGroupSets {
     ) -> Option<FinalStyleRecordID> {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         let requested_style_record_identity = final_style_record.base_record()?;
-        assert!(
+        named_record_is_live(
             self.style_record_generation_is_live(requested_style_record_identity, final_style_record.base_generation()),
-            "base style-record is not live"
-        );
+        )?;
         let previous_base_style_record_identity = if target.is_pseudo() {
             self.pseudo_row(target.node, target.pseudo_kind)
                 .and_then(|row| row.assignment)
@@ -2418,8 +2793,8 @@ impl ComputedGroupSets {
             return false;
         }
         if first.groups != second.groups {
-            let first_groups = &self.sets[first.groups].payloads;
-            let second_groups = &self.sets[second.groups].payloads;
+            let first_groups = self.sets[first.groups].payloads();
+            let second_groups = self.sets[second.groups].payloads();
             if first_groups.len() != second_groups.len()
                 || first_groups
                     .iter()
@@ -2506,8 +2881,8 @@ impl ComputedGroupSets {
         if node_set == parent_set {
             return Some(true);
         }
-        let node_groups = &self.sets[node_set].payloads;
-        let parent_groups = &self.sets[parent_set].payloads;
+        let node_groups = self.sets[node_set].payloads();
+        let parent_groups = self.sets[parent_set].payloads();
         // C++ and Rust can intern equal payloads under different group identities. Inheritance
         // follows the parent's value in that case just as it does after group reclamation.
         Some((0..ENGINE_INHERITED_GROUP_COUNT).all(|group| {
@@ -2548,8 +2923,8 @@ impl ComputedGroupSets {
         }
         // Reclamation interns an equal payload under a new identity, so the groups compare by
         // content past their identities.
-        let record_groups = &self.sets[record.groups].payloads;
-        let node_groups = &self.sets[node_set].payloads;
+        let record_groups = self.sets[record.groups].payloads();
+        let node_groups = self.sets[node_set].payloads();
         (0..ENGINE_INHERITED_GROUP_COUNT).all(|group| {
             if own_groups & (1 << group) != 0 {
                 return true;
@@ -2570,6 +2945,17 @@ impl ComputedGroupSets {
     pub fn pseudo_style_record(&self, node: StyleNodeID, pseudo_kind: u8) -> Option<FinalStyleRecordID> {
         let assignment = self.pseudo_row(node, pseudo_kind)?.assignment.as_ref()?;
         Some(self.final_style_record(assignment.style_record, assignment.animation_overlay_slot))
+    }
+
+    /// A bit per pseudo-element kind the node holds a settled record for. The tree build asks this
+    /// once per element rather than once per pseudo-element, because most elements hold none and
+    /// the answer is one lookup for all of them.
+    #[must_use]
+    pub fn published_pseudo_record_mask(&self, node: StyleNodeID) -> u32 {
+        self.pseudo_rows(node)
+            .iter()
+            .filter(|row| row.assignment.is_some())
+            .fold(0, |mask, row| mask | 1 << row.kind)
     }
 
     /// The pseudo-element kinds this node holds published computed styles for.
@@ -2672,6 +3058,7 @@ impl ComputedGroupSets {
 
     /// The longhands whose previous specified values read the effective color scheme.
     #[must_use]
+    #[cfg(any(test, feature = "style-recording"))]
     pub fn color_scheme_dependency_properties(&self, target: ComputedStyleTarget) -> Option<[u64; 6]> {
         Self::specified_value_dependency_properties(
             self.longhand_table_for_target(target)?,
@@ -2690,6 +3077,7 @@ impl ComputedGroupSets {
 
     /// The longhands whose previous specified values may read font metrics.
     #[must_use]
+    #[cfg(any(test, feature = "style-recording"))]
     pub fn font_dependency_properties(&self, target: ComputedStyleTarget) -> Option<[u64; 6]> {
         Self::specified_value_dependency_properties(
             self.longhand_table_for_target(target)?,
@@ -2703,6 +3091,25 @@ impl ComputedGroupSets {
         final_style_record
             .base_record()
             .is_some_and(|record| self.style_record_generation_is_live(record, final_style_record.base_generation()))
+    }
+
+    /// Publish the sampled custom-property environment independently of the base record.
+    /// Animation samples replace the element's environment without recomputing that record.
+    pub(crate) fn set_node_custom_property_environment(&mut self, node: StyleNodeID, environment: u64) {
+        let Some(index) = node.element_index().map(|index| index as usize) else {
+            return;
+        };
+        if self.columns.custom_properties(index).is_none() {
+            return;
+        }
+        let identity = self.intern_custom_property_environment(environment).0;
+        self.columns.custom_properties[index] = identity.0;
+        if let Some(slot) = self.columns.animation_overlay_slot(index) {
+            self.animation_overlay_slots[slot as usize]
+                .as_mut()
+                .expect("assigned animation overlay is live")
+                .effective_custom_property_environment = environment;
+        }
     }
 
     /// The raw custom-property environment identity behind a node's record.
@@ -2776,11 +3183,88 @@ impl ComputedGroupSets {
         ))
     }
 
+    /// Retain a warm composition while an engine candidate moves only its base environment.
+    /// The host resamples that composition over the candidate before acknowledging the row.
+    pub(super) fn republish_animated_base_with_environment(
+        &mut self,
+        node: StyleNodeID,
+        environment: u64,
+    ) -> Option<EngineComputedAssembly> {
+        let index = node.element_index()? as usize;
+        let slot = self.columns.animation_overlay_slot(index)?;
+        let old_base = *self.style_record_column.get(index)?.as_ref()?;
+        let old_record = *self.style_records.get_index(old_base.index())?;
+        let old_composition = self.final_style_record(old_base, Some(slot));
+        let custom_properties = self.intern_custom_property_environment(environment).0;
+        let new_base = self
+            .intern_style_record(StyleRecord {
+                custom_properties,
+                ..old_record
+            })
+            .0;
+        self.pin_style_record(old_composition.raw());
+        self.release_animation_overlay_assignment(slot);
+        self.columns.set_animation_overlay_slot(index, None);
+        self.columns.custom_properties[index] = custom_properties.0;
+        self.style_record_column[index] = Some(new_base);
+        Some(EngineComputedAssembly {
+            delta: (old_composition, self.final_base_style_record(new_base)),
+            pinned_composition: Some(old_composition.raw()),
+            canonicalized_groups: 0,
+            group_set_unchanged: true,
+        })
+    }
+
     /// Every raw custom-property environment identity a live record was published with.
     pub fn live_custom_property_environments(&self) -> impl Iterator<Item = u64> + '_ {
         self.custom_property_environments
             .live_identities()
             .map(|identity| *self.custom_property_environments.get(identity))
+            .chain(
+                self.animation_overlay_slots
+                    .iter()
+                    .flatten()
+                    .map(|record| record.effective_custom_property_environment),
+            )
+    }
+
+    /// The base record behind a final record: itself, or the record an overlay was composed over.
+    #[must_use]
+    pub(crate) fn base_style_record_of(&self, raw_style_record: u64) -> u64 {
+        if raw_style_record & FinalStyleRecordID::ANIMATION_OVERLAY_TAG == 0 {
+            return raw_style_record;
+        }
+        self.animation_overlay_slots_by_record
+            .get(&FinalStyleRecordID(raw_style_record))
+            .and_then(|slot| self.animation_overlay_slots.get(*slot as usize)?.as_ref())
+            .map_or(raw_style_record, |record| {
+                self.final_base_style_record(record.base_style_record).raw()
+            })
+    }
+
+    /// Whether a record is an animation overlay's rather than a style's own. Such a record lives in
+    /// a slot the next sampling of that animation releases.
+    #[must_use]
+    pub(crate) fn record_is_animation_overlay(raw_style_record: u64) -> bool {
+        raw_style_record & FinalStyleRecordID::ANIMATION_OVERLAY_TAG != 0
+    }
+
+    /// The custom-property environment the style beneath an animation overlay was published with.
+    /// An overlay record carries none of its own: it is the composition, and what the element's own
+    /// declarations resolved to is on the record it was composed over.
+    pub(crate) fn animation_overlay_base_custom_property_environment(&self, raw_style_record: u64) -> Option<u64> {
+        let final_style_record = FinalStyleRecordID(raw_style_record);
+        if raw_style_record & FinalStyleRecordID::ANIMATION_OVERLAY_TAG == 0 {
+            return None;
+        }
+        let slot = *self.animation_overlay_slots_by_record.get(&final_style_record)?;
+        let base = self
+            .animation_overlay_slots
+            .get(slot as usize)?
+            .as_ref()?
+            .base_style_record;
+        let record = self.style_records.get_index(base.index())?;
+        Some(self.custom_property_environments[record.custom_properties])
     }
 
     /// The raw custom-property environment identity a record was published with.
@@ -2797,6 +3281,30 @@ impl ComputedGroupSets {
         };
         self.columns.ensure(index);
         self.columns.adjustment_facts[index] = facts;
+    }
+
+    pub fn set_associated_pseudo_kind(&mut self, node: StyleNodeID, pseudo_kind_plus_one: u8) {
+        let Some(index) = node.element_index().map(|index| index as usize) else {
+            return;
+        };
+        self.columns.ensure(index);
+        self.columns.associated_pseudo_kinds[index] = pseudo_kind_plus_one;
+    }
+
+    pub fn associated_pseudo_kind(&self, node: StyleNodeID) -> Option<u8> {
+        node.element_index()
+            .and_then(|index| self.columns.associated_pseudo_kinds.get(index as usize))
+            .copied()
+            .and_then(|kind| kind.checked_sub(1))
+    }
+
+    pub fn set_construction_facts(&mut self, node: StyleNodeID, facts: u32, box_kind: u8) {
+        let Some(index) = node.element_index().map(|index| index as usize) else {
+            return;
+        };
+        self.columns.ensure(index);
+        self.columns.construction_facts[index] = facts;
+        self.columns.box_kinds[index] = box_kind;
     }
 
     /// The identity of the inherited groups a node's published style carries.
@@ -2819,6 +3327,22 @@ impl ComputedGroupSets {
         }
     }
 
+    /// The synthetic pseudo-elements the node's last published match answer has rules for.
+    pub(super) fn node_pseudo_style_mask(&self, node: StyleNodeID) -> Option<u64> {
+        let index = node.element_index()? as usize;
+        let flags = *self.columns.flags.get(index)?;
+        (flags & PublishedComputedColumns::HAS_PSEUDO_STYLE_MASK != 0).then(|| self.columns.pseudo_style_masks[index])
+    }
+
+    pub(super) fn set_node_pseudo_style_mask(&mut self, node: StyleNodeID, mask: u64) {
+        let Some(index) = node.element_index().map(|index| index as usize) else {
+            return;
+        };
+        self.columns.ensure(index);
+        self.columns.pseudo_style_masks[index] = mask;
+        self.columns.flags[index] |= PublishedComputedColumns::HAS_PSEUDO_STYLE_MASK;
+    }
+
     pub(super) fn node_has_animation_overlay(&self, node: StyleNodeID) -> bool {
         let Some(index) = node.element_index().map(|index| index as usize) else {
             return false;
@@ -2830,6 +3354,34 @@ impl ComputedGroupSets {
                 .is_some_and(|view| !view.animated_overlay.is_null())
     }
 
+    pub(super) fn set_sampled_composition_identity(&mut self, node: StyleNodeID, record: u64) {
+        let Some(index) = node.element_index().map(|index| index as usize) else {
+            return;
+        };
+        self.columns.ensure(index);
+        self.columns.sampled_composition_identities[index] = record;
+    }
+
+    pub(super) fn sampled_composition_identity(&self, node: StyleNodeID) -> Option<u64> {
+        let index = node.element_index()? as usize;
+        let identity = *self.columns.sampled_composition_identities.get(index)?;
+        (identity != 0
+            && self
+                .assigned_style_record(node)
+                .is_some_and(|record| record.raw() == identity))
+        .then_some(identity)
+    }
+
+    pub(super) fn sampled_composition_identity_for_pseudo(&self, node: StyleNodeID) -> Option<u64> {
+        let index = node.element_index()? as usize;
+        let identity = *self.columns.sampled_composition_identities.get(index)?;
+        (identity != 0
+            && self
+                .assigned_style_record(node)
+                .is_some_and(|record| self.base_style_record_of(record.raw()) == self.base_style_record_of(identity)))
+        .then_some(identity)
+    }
+
     pub(super) fn node_inherited_group_swap_eligible(&self, node: StyleNodeID) -> bool {
         node.element_index()
             .is_some_and(|index| self.columns.inherited_group_swap_eligible(index as usize))
@@ -2838,6 +3390,20 @@ impl ComputedGroupSets {
     pub fn adjustment_facts(&self, node: StyleNodeID) -> u32 {
         node.element_index()
             .and_then(|index| self.columns.adjustment_facts.get(index as usize))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub fn construction_facts(&self, node: StyleNodeID) -> u32 {
+        node.element_index()
+            .and_then(|index| self.columns.construction_facts.get(index as usize))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub fn box_kind(&self, node: StyleNodeID) -> u8 {
+        node.element_index()
+            .and_then(|index| self.columns.box_kinds.get(index as usize))
             .copied()
             .unwrap_or(0)
     }
@@ -2881,7 +3447,6 @@ impl ComputedGroupSets {
     }
 
     pub fn remove(&mut self, node: StyleNodeID) {
-        self.take_shared_computation_context(node);
         let Some(index) = node.element_index().map(|index| index as usize) else {
             return;
         };
@@ -2953,7 +3518,12 @@ impl ComputedGroupSets {
     #[must_use]
     pub fn custom_property_environment_capacity_bytes(&self) -> u64 {
         capacity_bytes! {
-            shallow [self.custom_property_environments, self.columns.custom_properties, self.columns.adjustment_facts];
+            shallow [
+                self.custom_property_environments,
+                self.columns.custom_properties,
+                self.columns.adjustment_facts,
+                self.columns.associated_pseudo_kinds,
+            ];
             cached [];
             nested [];
             skip [];
@@ -2996,7 +3566,6 @@ impl ComputedGroupSets {
                 self.columns.cascade_states,
                 self.columns.flags,
                 self.pending_cascade_states,
-                self.shared_computation_contexts,
             ];
             cached [];
             nested [];
@@ -3061,6 +3630,27 @@ impl ComputedGroupSets {
             for &identity in self.base_style_record_pins.keys() {
                 mark_style_record(identity);
             }
+            // Whoever holds a record as the engine published it (a layout row, a publication of the rows, a
+            // change on its way to the owner, the host) may name it to the engine again, so it holds the
+            // record live. Only the engine hands the value out, so a count of one cannot grow meanwhile.
+            for identity in self.style_records.live_identities() {
+                if self.published_style_records[identity.index()]
+                    .get()
+                    .is_some_and(|record| Arc::strong_count(record) > 1)
+                {
+                    mark_style_record(identity);
+                }
+            }
+            if let Some(host_pins) = self.host_pins.lent_table() {
+                host_pins.for_each_pinned(|raw| {
+                    let record = FinalStyleRecordID(raw);
+                    if let Some(identity) = record.base_record()
+                        && self.style_record_generation_is_live(identity, record.base_generation())
+                    {
+                        mark_style_record(identity);
+                    }
+                });
+            }
         }
 
         for index in 0..self.columns.flags.len() {
@@ -3120,6 +3710,15 @@ impl ComputedGroupSets {
         if replaying_style_groups() {
             return retention;
         }
+        self.table_candidates.clear();
+        self.table_assemblies.retain(|(table, _), assembled| {
+            assembled.built = (0..assembled.groups.len())
+                .filter(|&group| {
+                    assembled.built & (1 << group) != 0 && reachable.groups[assembled.groups[group].index()]
+                })
+                .fold(0, |built, group| built | (1 << group));
+            reachable.longhand_tables[table.index()] && assembled.built != 0
+        });
 
         let mut unreachable_style_records = self
             .style_records
@@ -3136,6 +3735,8 @@ impl ComputedGroupSets {
             }
             let (changed, _) = self.style_record_liveness.set(identity.index(), false);
             assert!(changed, "retired base style-record identity must be live");
+            // What the host still holds of the record it holds by its own references.
+            self.published_style_records[identity.index()] = OnceLock::new();
         }
         for identity in self.sets.live_identities().collect::<Vec<_>>() {
             if reachable.sets[identity.index()] {
@@ -3150,13 +3751,13 @@ impl ComputedGroupSets {
                 self.sets.get_mut(identity),
                 ComputedGroupSet {
                     identity_hash: 0,
-                    payloads: Box::default(),
+                    payloads: None,
                     groups: Box::default(),
                     canonical_longhand_table: None,
                 },
             );
             self.group_set_nested_memory
-                .shrink_committed((size_of_val(set.payloads.as_ref()) + size_of_val(set.groups.as_ref())) as u64);
+                .shrink_committed((size_of_val(set.payloads()) + size_of_val(set.groups.as_ref())) as u64);
             self.sets.retire_identity(set.identity_hash, identity);
         }
         for identity in self
@@ -3238,9 +3839,13 @@ impl ComputedGroupSets {
     }
 
     pub(super) fn reclaim_unreachable_if_needed(&mut self) -> Option<ComputedGroupRetention> {
-        if self.style_record_view_epoch_depth != 0 {
+        // Beside a pass in flight the host may pin any record it holds, and a pin it promised may
+        // wait for the frame in flight; the sweep waits for the document thread to take the pass
+        // back, and for the pin to land.
+        if self.style_record_view_epoch_depth != 0 || self.host_pins.defers_reclamation() {
             return None;
         }
+        self.payloads_home.release_returned();
         if self.style_records_interned_since_reclamation < self.next_reclamation_after {
             return None;
         }
@@ -3250,41 +3855,79 @@ impl ComputedGroupSets {
         Some(retention)
     }
 
+    /// Assert that a record the host reads was published: a base record whose longhand table is
+    /// frozen, or an animation overlay whose slot is held. Only such a record is
+    /// immutable, which is what lets the host read one anywhere, outside the drain as well as in it.
+    pub(crate) fn debug_assert_style_record_is_published(&self, raw_style_record: u64) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let style_record = FinalStyleRecordID(raw_style_record);
+        let base_style_record = if let Some(identity) = style_record.base_record() {
+            // NB: A read of a retired generation is refused, in release builds too, by the read.
+            if !self.style_record_generation_is_live(identity, style_record.base_generation()) {
+                return;
+            }
+            identity
+        } else {
+            let overlay = self
+                .animation_overlay_slots_by_record
+                .get(&style_record)
+                .and_then(|slot| self.animation_overlay_slots.get(*slot as usize)?.as_ref());
+            debug_assert!(overlay.is_some(), "a record read is of an overlay that is not held");
+            let Some(overlay) = overlay else {
+                return;
+            };
+            overlay.base_style_record
+        };
+        let table = self
+            .style_records
+            .get_index(base_style_record.index())
+            .and_then(|record| record.longhand_table)
+            .and_then(|identity| self.computed_longhand_tables.get_index(identity.0 as usize));
+        debug_assert!(
+            table.is_none_or(|table| table.table().is_frozen()),
+            "a record read is of a record whose longhand table is not frozen"
+        );
+    }
+
     pub fn style_record_payloads(&self, raw_style_record: u64) -> Option<&[SharedPayload]> {
+        self.style_record_payload_owner(raw_style_record)
+            .map(|payloads| payloads.as_slice())
+    }
+
+    /// The record's payloads as the value that owns them, which a reader clones to keep every group
+    /// it names alive for as long as it reads them, whatever the engine reclaims meanwhile.
+    pub(crate) fn style_record_payload_owner(&self, raw_style_record: u64) -> Option<&Arc<StyleRecordPayloads>> {
         let final_style_record = FinalStyleRecordID(raw_style_record);
+        self.debug_assert_style_record_is_published(raw_style_record);
         if raw_style_record & FinalStyleRecordID::ANIMATION_OVERLAY_TAG != 0 {
             let style_record = final_style_record;
             let slot = *self.animation_overlay_slots_by_record.get(&style_record)?;
             let record = self.animation_overlay_slots[slot as usize].as_ref()?;
-            return (!record.payloads.is_empty()).then_some(record.payloads.as_ref());
+            return (!record.payloads.is_empty()).then_some(&record.payloads);
         }
         let style_record = final_style_record.base_record()?;
-        assert!(
-            self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-            "base style-record is not live"
-        );
+        named_record_is_live(self.style_record_generation_is_live(style_record, final_style_record.base_generation()))?;
         let record = self.style_records.get_index(style_record.index())?;
-        Some(&self.sets[record.groups].payloads)
+        self.sets[record.groups].payloads.as_ref()
     }
 
     pub fn style_record_dependency_flags(&self, raw_style_record: u64) -> Option<u8> {
         let final_style_record = FinalStyleRecordID(raw_style_record);
+        self.debug_assert_style_record_is_published(raw_style_record);
         let (base_style_record, overlay_holds_image_values) =
             if let Some(style_record) = final_style_record.base_record() {
-                assert!(
+                named_record_is_live(
                     self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-                    "base style-record is not live"
-                );
+                )?;
                 (style_record, false)
             } else {
                 let slot = *self.animation_overlay_slots_by_record.get(&final_style_record)?;
                 let overlay = self.animation_overlay_slots[slot as usize].as_ref()?;
                 (overlay.base_style_record, overlay.holds_image_values)
             };
-        assert!(
-            self.style_record_is_live(base_style_record),
-            "base style-record is not live"
-        );
+        named_record_is_live(self.style_record_is_live(base_style_record))?;
         let record = self.style_records.get_index(base_style_record.index())?;
         Some(
             self.computed_fixed_metadata.get(record.fixed_metadata).dependency_flags
@@ -3297,10 +3940,9 @@ impl ComputedGroupSets {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         let base_style_record = match final_style_record.base_record() {
             Some(style_record) => {
-                assert!(
+                named_record_is_live(
                     self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-                    "base style-record is not live"
-                );
+                )?;
                 style_record
             }
             None => {
@@ -3308,10 +3950,7 @@ impl ComputedGroupSets {
                 self.animation_overlay_slots[slot as usize].as_ref()?.base_style_record
             }
         };
-        assert!(
-            self.style_record_is_live(base_style_record),
-            "base style-record is not live"
-        );
+        named_record_is_live(self.style_record_is_live(base_style_record))?;
         let record = self.style_records.get_index(base_style_record.index())?;
         Some(
             self.group_identities(record.groups)
@@ -3339,10 +3978,9 @@ impl ComputedGroupSets {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         let base_style_record = match final_style_record.base_record() {
             Some(style_record) => {
-                assert!(
+                named_record_is_live(
                     self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-                    "base style-record is not live"
-                );
+                )?;
                 style_record
             }
             None => {
@@ -3350,10 +3988,7 @@ impl ComputedGroupSets {
                 self.animation_overlay_slots[slot as usize].as_ref()?.base_style_record
             }
         };
-        assert!(
-            self.style_record_is_live(base_style_record),
-            "base style-record is not live"
-        );
+        named_record_is_live(self.style_record_is_live(base_style_record))?;
         let identity = self
             .style_records
             .get_index(base_style_record.index())?
@@ -3368,16 +4003,16 @@ impl ComputedGroupSets {
 
     pub(crate) fn style_record_view(&self, raw_style_record: u64) -> Option<StyleRecordView<'_>> {
         let final_style_record = FinalStyleRecordID(raw_style_record);
+        self.debug_assert_style_record_is_published(raw_style_record);
         let (base_style_record, payloads, animation_overlay_identity, animated_overlay) =
             if let Some(style_record) = final_style_record.base_record() {
-                assert!(
+                named_record_is_live(
                     self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-                    "base style-record is not live"
-                );
+                )?;
                 let record = self.style_records.get_index(style_record.index())?;
                 (
                     style_record,
-                    self.sets[record.groups].payloads.as_ref(),
+                    self.sets[record.groups].payloads(),
                     0_u64,
                     HostShared::null(),
                 )
@@ -3386,17 +4021,14 @@ impl ComputedGroupSets {
                 let overlay = self.animation_overlay_slots[slot as usize].as_ref()?;
                 (
                     overlay.base_style_record,
-                    overlay.payloads.as_ref(),
+                    overlay.payloads.as_slice(),
                     overlay.source_identity,
                     HostShared::new(std::ptr::from_ref(overlay.animated_overlay.as_ref())),
                 )
             };
-        assert!(
-            self.style_record_is_live(base_style_record),
-            "base style-record is not live"
-        );
+        named_record_is_live(self.style_record_is_live(base_style_record))?;
         let record = self.style_records.get_index(base_style_record.index())?;
-        let base_payloads = self.sets[record.groups].payloads.as_ref();
+        let base_payloads = self.sets[record.groups].payloads();
         let fixed_metadata = self
             .computed_fixed_metadata
             .get_index(record.fixed_metadata.0 as usize)?;
@@ -3418,179 +4050,124 @@ impl ComputedGroupSets {
         })
     }
 
-    pub(crate) fn style_records_match_for_verification(
-        &self,
-        target: ComputedStyleTarget,
-        first: u64,
-        second: u64,
-    ) -> bool {
-        let Some(first) = self.style_record_view(first) else {
-            return false;
-        };
-        let Some(second) = self.style_record_view(second) else {
-            return false;
-        };
-        let svg_reset = 1 << crate::css::computed_value_types::STYLE_GROUP_INDEX_SVG_RESET;
-        let svg_reset_reads_current_color = self
-            .current_color_dependency_mask(target)
-            .filter(|dependencies| dependencies & svg_reset != 0)
-            .is_some();
-        fn repeatable_list_values_equal(
-            first: &crate::css::computed_value_types::ComputedStyleValueHandle,
-            second: &crate::css::computed_value_types::ComputedStyleValueHandle,
-        ) -> bool {
-            fn list(
-                value: &crate::css::computed_value_types::ComputedStyleValueHandle,
-            ) -> Option<&[crate::css::style_value::RetainedStyleValueData]> {
-                match value.data()? {
-                    crate::css::style_value::StyleValueData::ValueList {
-                        values, separator: 1, ..
-                    } => Some(values.as_slice()),
-                    _ => None,
+    /// The record as a value that owns everything a read of it reads, one for each record; see
+    /// [`super::published_record`].
+    pub(crate) fn publish_style_record(&self, raw_style_record: u64) -> Option<Arc<PublishedStyleRecord>> {
+        let final_style_record = FinalStyleRecordID(raw_style_record);
+        let published = match final_style_record.base_record() {
+            Some(style_record) => {
+                if !self.style_record_generation_is_live(style_record, final_style_record.base_generation()) {
+                    return None;
                 }
+                self.published_style_records.get(style_record.index())?
             }
-            let first_list = list(first);
-            let second_list = list(second);
-            let first_length = first_list.map_or(1, <[_]>::len);
-            let second_length = second_list.map_or(1, <[_]>::len);
-            let length = first_length.max(second_length);
-            (0..length).all(|index| {
-                let first = first_list.map_or_else(|| first.data(), |values| Some(values[index % first_length].data()));
-                let second =
-                    second_list.map_or_else(|| second.data(), |values| Some(values[index % second_length].data()));
-                first == second
-            })
+            None => {
+                let slot = *self.animation_overlay_slots_by_record.get(&final_style_record)?;
+                &self.animation_overlay_slots[slot as usize].as_ref()?.published
+            }
+        };
+        if let Some(record) = published.get() {
+            return Some(record.clone());
         }
-        let Some(first_table) = (unsafe { first.longhand_table.as_ref() }) else {
-            return false;
-        };
-        let Some(second_table) = (unsafe { second.longhand_table.as_ref() }) else {
-            return false;
-        };
-        // Equal resolved groups do not imply equal inheritance sources. In particular, a child
-        // resolves inherited currentcolor against its own color rather than the parent's.
-        let inheritance_sources_equal = first_table.retained_inheritance_dependent_values().count()
-            == second_table.retained_inheritance_dependent_values().count()
-            && first_table
-                .retained_inheritance_dependent_values()
-                .all(|(property, value)| {
-                    second_table
-                        .retained_inheritance_dependent_values()
-                        .find(|(candidate, _)| *candidate == property)
-                        .is_some_and(|(_, other)| value.data() == other.data())
-                });
-        inheritance_sources_equal
-            && first.payloads.len() == second.payloads.len()
-            && first
-                .payloads
-                .iter()
-                .zip(second.payloads)
-                .enumerate()
-                .all(|(index, (&first, &second))| {
-                    if first == second || style_group_payloads_equal(index, first.as_ptr(), second.as_ptr()) {
-                        return true;
-                    }
-                    if index == crate::css::computed_value_types::STYLE_GROUP_INDEX_BACKGROUND {
-                        let first_background = unsafe {
-                            first
-                                .cast::<crate::css::computed_value_types::BackgroundValues>()
-                                .deref()
-                        };
-                        let second_background = unsafe {
-                            second
-                                .cast::<crate::css::computed_value_types::BackgroundValues>()
-                                .deref()
-                        };
-                        // Engine records retain the canonical background longhands. Legacy records
-                        // expand their repeatable lists to the background-image layer count while
-                        // building the payload, so compare those lists modulo repetition and the
-                        // scalar fields directly.
-                        if first_background.background_color == second_background.background_color
-                            && first_background.background_color_style_value
-                                == second_background.background_color_style_value
-                            && first_background.background_color_clip == second_background.background_color_clip
-                            && repeatable_list_values_equal(
-                                &first_background.background_image,
-                                &second_background.background_image,
-                            )
-                            && repeatable_list_values_equal(
-                                &first_background.background_attachment,
-                                &second_background.background_attachment,
-                            )
-                            && repeatable_list_values_equal(
-                                &first_background.background_blend_mode,
-                                &second_background.background_blend_mode,
-                            )
-                            && repeatable_list_values_equal(
-                                &first_background.background_clip,
-                                &second_background.background_clip,
-                            )
-                            && repeatable_list_values_equal(
-                                &first_background.background_origin,
-                                &second_background.background_origin,
-                            )
-                            && repeatable_list_values_equal(
-                                &first_background.background_position_x,
-                                &second_background.background_position_x,
-                            )
-                            && repeatable_list_values_equal(
-                                &first_background.background_position_y,
-                                &second_background.background_position_y,
-                            )
-                            && repeatable_list_values_equal(
-                                &first_background.background_repeat,
-                                &second_background.background_repeat,
-                            )
-                            && repeatable_list_values_equal(
-                                &first_background.background_size,
-                                &second_background.background_size,
-                            )
-                        {
-                            return true;
-                        }
-                    }
-                    if index != crate::css::computed_value_types::STYLE_GROUP_INDEX_SVG_RESET
-                        || !svg_reset_reads_current_color
-                    {
-                        return false;
-                    }
-                    // The engine and legacy builders may encode currentcolor differently in the
-                    // two color fields. Every other field in the group must still agree.
-                    let first = unsafe { first.cast::<crate::css::computed_value_types::SVGResetValues>().deref() };
-                    let second = unsafe {
-                        second
-                            .cast::<crate::css::computed_value_types::SVGResetValues>()
-                            .deref()
-                    };
-                    first.cx == second.cx
-                        && first.cy == second.cy
-                        && first.d == second.d
-                        && first.r == second.r
-                        && first.rx == second.rx
-                        && first.ry == second.ry
-                        && first.x == second.x
-                        && first.y == second.y
-                        && first.stop_opacity == second.stop_opacity
-                        && first.flood_opacity == second.flood_opacity
-                        && first.vector_effect == second.vector_effect
-                })
+        let record = self.make_published_style_record(final_style_record)?;
+        Some(published.get_or_init(|| record).clone())
+    }
+
+    fn make_published_style_record(&self, final_style_record: FinalStyleRecordID) -> Option<Arc<PublishedStyleRecord>> {
+        let (base_style_record, payloads, animation_overlay_identity, animated_overlay, overlay_holds_image_values) =
+            match final_style_record.base_record() {
+                Some(style_record) => {
+                    let record = self.style_records.get_index(style_record.index())?;
+                    (style_record, self.sets[record.groups].payloads.clone()?, 0, None, false)
+                }
+                None => {
+                    let slot = *self.animation_overlay_slots_by_record.get(&final_style_record)?;
+                    let overlay = self.animation_overlay_slots[slot as usize].as_ref()?;
+                    (
+                        overlay.base_style_record,
+                        overlay.payloads.clone(),
+                        overlay.source_identity,
+                        Some(overlay.animated_overlay.clone()),
+                        overlay.holds_image_values,
+                    )
+                }
+            };
+        if !self.style_record_is_live(base_style_record) {
+            return None;
+        }
+        let record = self.style_records.get_index(base_style_record.index())?;
+        let base_payloads = self.sets[record.groups].payloads.clone()?;
+        let fixed_metadata = self
+            .computed_fixed_metadata
+            .get_index(record.fixed_metadata.0 as usize)?;
+        let longhand_table = record
+            .longhand_table
+            .and_then(|identity| self.computed_longhand_tables.get_index(identity.0 as usize))
+            .and_then(|table| std::ptr::NonNull::new(table.table.as_ptr().cast_mut()))
+            // SAFETY: The catalog holds a reference to the frozen table for as long as it keeps it.
+            .map(|table| unsafe { super::published_record::SharedLonghandTable::retain(table) });
+        Some(Arc::new(PublishedStyleRecord {
+            style_record: final_style_record.raw(),
+            payloads,
+            base_payloads,
+            longhand_table,
+            animated_overlay,
+            pseudo_element_styles: fixed_metadata.pseudo_element_styles,
+            counter_style_environment_identity: fixed_metadata.counter_style_environment_identity,
+            animation_overlay_identity,
+            custom_property_environment: self.custom_property_environments[record.custom_properties],
+            dependency_flags: fixed_metadata.dependency_flags
+                | (u8::from(overlay_holds_image_values) * HOLDS_IMAGE_VALUES),
+        }))
+    }
+
+    /// Read the underlying style of a final record, including a retained old composition.
+    pub(crate) fn base_style_record_view(&self, record: FinalStyleRecordID) -> Option<StyleRecordView<'_>> {
+        let base = FinalStyleRecordID(self.base_style_record_of(record.raw()));
+        let identity = base.base_record()?;
+        if !self.style_record_generation_is_live(identity, base.base_generation()) {
+            return None;
+        }
+        self.style_record_view(base.raw())
+    }
+
+    /// Whether `raw_style_record` still names a record: a base record of a live generation, or an
+    /// animation overlay whose slot has not been reclaimed.
+    pub(crate) fn style_record_is_held(&self, raw_style_record: u64) -> bool {
+        let final_style_record = FinalStyleRecordID(raw_style_record);
+        match final_style_record.base_record() {
+            Some(style_record) => {
+                self.style_record_generation_is_live(style_record, final_style_record.base_generation())
+            }
+            None => self.animation_overlay_slots_by_record.contains_key(&final_style_record),
+        }
+    }
+
+    /// The slot of an animation-overlay record someone named, which holds it for as long as anyone holds the record
+    /// as published or pinned; a debug assertion otherwise, and no slot.
+    fn named_animation_overlay_slot(&self, style_record: FinalStyleRecordID) -> Option<u32> {
+        let slot = self.animation_overlay_slots_by_record.get(&style_record).copied();
+        debug_assert!(slot.is_some(), "animation-overlay record is live");
+        slot
     }
 
     pub fn pin_style_record(&mut self, raw_style_record: u64) {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         if let Some(style_record) = final_style_record.base_record() {
-            assert!(
+            if named_record_is_live(
                 self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-                "base style-record is not live"
-            );
+            )
+            .is_none()
+            {
+                return;
+            }
             let pin_count = self.base_style_record_pins.entry(style_record).or_default();
             *pin_count = pin_count.checked_add(1).expect("base style-record pin count overflow");
             return;
         }
-        let slot = *self
-            .animation_overlay_slots_by_record
-            .get(&final_style_record)
-            .expect("animation-overlay record is live");
+        let Some(slot) = self.named_animation_overlay_slot(final_style_record) else {
+            return;
+        };
         let record = self.animation_overlay_slots[slot as usize]
             .as_mut()
             .expect("animation-overlay slot is live");
@@ -3600,13 +4177,29 @@ impl ComputedGroupSets {
             .expect("animation-overlay pin count overflow");
     }
 
+    /// Whether `raw_style_record` is an animation-overlay record the engine no longer assigns: it
+    /// lives by its pins alone.
+    #[must_use]
+    pub fn style_record_is_unassigned_animation_overlay(&self, raw_style_record: u64) -> bool {
+        if raw_style_record & FinalStyleRecordID::ANIMATION_OVERLAY_TAG == 0 {
+            return false;
+        }
+        self.animation_overlay_slots_by_record
+            .get(&FinalStyleRecordID(raw_style_record))
+            .and_then(|slot| self.animation_overlay_slots[*slot as usize].as_ref())
+            .is_some_and(|record| !record.is_assigned)
+    }
+
     pub fn unpin_style_record(&mut self, raw_style_record: u64) {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         if let Some(style_record) = final_style_record.base_record() {
-            assert!(
+            if named_record_is_live(
                 self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-                "base style-record is not live"
-            );
+            )
+            .is_none()
+            {
+                return;
+            }
             let std::collections::hash_map::Entry::Occupied(mut entry) =
                 self.base_style_record_pins.entry(style_record)
             else {
@@ -3619,10 +4212,9 @@ impl ComputedGroupSets {
             }
             return;
         }
-        let slot = *self
-            .animation_overlay_slots_by_record
-            .get(&final_style_record)
-            .expect("animation-overlay record is live");
+        let Some(slot) = self.named_animation_overlay_slot(final_style_record) else {
+            return;
+        };
         let record = self.animation_overlay_slots[slot as usize]
             .as_mut()
             .expect("animation-overlay slot is live");
@@ -3631,7 +4223,7 @@ impl ComputedGroupSets {
             .checked_sub(1)
             .expect("animation-overlay record is pinned");
         if !record.is_assigned && record.pin_count == 0 {
-            self.reclaim_animation_overlay_slot(slot);
+            self.reclaim_or_retire_animation_overlay_slot(slot);
         }
     }
 
@@ -3646,8 +4238,6 @@ impl ComputedGroupSets {
     }
 
     pub fn settle_nested_memory(&mut self, memory: &mut MemoryController) {
-        self.shared_style_record_memory
-            .resize_required_to(memory, self.shared_style_records.shallow_capacity_bytes());
         let group_set = self.group_set_nested_memory.bytes();
         self.group_set_nested_memory.reconcile_committed(memory, group_set);
         let longhand_tables = self.longhand_table_nested_memory.bytes();
@@ -3706,6 +4296,7 @@ impl ComputedGroupSets {
 
 impl Drop for ComputedGroupSets {
     fn drop(&mut self) {
+        self.payloads_home.release_returned();
         for identity in self.groups.live_identities() {
             let group = self.groups.get(identity);
             release_group_payload(group.index, group.payload.as_ptr());
@@ -3828,11 +4419,12 @@ mod tests {
         assert_eq!(view.payloads, payloads.as_slice());
         assert_eq!(view.longhand_table, table);
         // Interning took the caller's reference instead of retaining a second one, so each
-        // component still has exactly one owner: the catalog.
+        // component is owned by the catalog alone: its group, and the payloads its group set holds
+        // for readers.
         for (index, &payload) in payloads.iter().enumerate() {
             assert_eq!(
                 crate::css::computed_values::group_payload_refcount(index, payload.as_ptr()),
-                1
+                2
             );
         }
         assert_eq!(longhand_table_owners(table.as_ptr()), 1);
@@ -3863,12 +4455,12 @@ mod tests {
         for (index, &payload) in payloads.iter().enumerate() {
             assert_eq!(
                 crate::css::computed_values::group_payload_refcount(index, payload.as_ptr()),
-                2
+                3
             );
             release_group_payload(index, payload.as_ptr());
             assert_eq!(
                 crate::css::computed_values::group_payload_refcount(index, payload.as_ptr()),
-                1
+                2
             );
         }
         assert_eq!(longhand_table_owners(table.as_ptr()), 2);
@@ -4155,6 +4747,259 @@ mod tests {
         assert_eq!(sets.live_animation_overlay_records(), 0);
     }
 
+    fn host_pins_lent_to(sets: &mut ComputedGroupSets) -> super::super::host_pins::HostPinTable {
+        let pins = super::super::host_pins::HostPinTable::default();
+        sets.lend_host_pins(HostPins::new(pins.clone()));
+        pins
+    }
+
+    #[test]
+    fn a_host_pinned_animation_overlay_is_retired_until_the_host_lets_go() {
+        let mut sets = ComputedGroupSets::default();
+        let pins = host_pins_lent_to(&mut sets);
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut first_metadata = metadata(0, 0, 0);
+        first_metadata.animation_overlay_identity = 1;
+        first_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let first = sets.publish_unowned(Some(target), &[], 0, 0, first_metadata);
+
+        // The host's pin keeps the record from being rewritten in place.
+        pins.host().pin(first.style_record_identity.raw());
+        let mut second_metadata = metadata(0, 0, 0);
+        second_metadata.animation_overlay_identity = 2;
+        second_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let second = sets.publish_unowned(Some(target), &[], 0, 0, second_metadata);
+        assert_ne!(first.style_record_identity, second.style_record_identity);
+        assert!(sets.style_record_is_held(first.style_record_identity.raw()));
+
+        // Releasing the pin changes nothing in the engine until it reads the table again.
+        pins.host().unpin(first.style_record_identity.raw());
+        assert!(sets.style_record_is_held(first.style_record_identity.raw()));
+        sets.reclaim_retired_animation_overlays();
+        assert!(!sets.style_record_is_held(first.style_record_identity.raw()));
+        assert!(sets.style_record_is_held(second.style_record_identity.raw()));
+        sets.remove(node);
+        assert_eq!(sets.live_animation_overlay_records(), 0);
+    }
+
+    /// A layout row holds the animation overlay it was given as the engine published it until the change that moves
+    /// the row on reaches the owner: the node moving off the overlay leaves the slot to the retired sweep, and the
+    /// row's box can still pin the record by its identity as it leaves the document.
+    #[test]
+    fn an_animation_overlay_held_as_published_outlives_its_node_moving_on() {
+        let mut sets = ComputedGroupSets::default();
+        let _pins = host_pins_lent_to(&mut sets);
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut first_metadata = metadata(0, 0, 0);
+        first_metadata.animation_overlay_identity = 1;
+        first_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let first = sets
+            .publish_unowned(Some(target), &[], 0, 0, first_metadata)
+            .style_record_identity
+            .raw();
+        let row = sets.publish_style_record(first).expect("the overlay is live");
+
+        let mut second_metadata = metadata(0, 0, 0);
+        second_metadata.animation_overlay_identity = 2;
+        second_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let second = sets.publish_unowned(Some(target), &[], 0, 0, second_metadata);
+        assert_ne!(first, second.style_record_identity.raw());
+        sets.reclaim_retired_animation_overlays();
+        assert!(sets.style_record_is_held(first));
+        sets.pin_style_record(first);
+        sets.unpin_style_record(first);
+
+        // The row moves on too: nothing holds the old overlay now.
+        drop(row);
+        sets.reclaim_retired_animation_overlays();
+        assert!(!sets.style_record_is_held(first));
+        assert!(sets.style_record_is_held(second.style_record_identity.raw()));
+        sets.remove(node);
+        assert_eq!(sets.live_animation_overlay_records(), 0);
+    }
+
+    /// The layout snapshot names the style a container's box was committed with, which the element may have moved on
+    /// from many times over before the next layout: the snapshot holds the record live, so a container query can
+    /// still read it.
+    #[test]
+    fn a_record_a_layout_snapshot_holds_outlives_its_node_moving_on() {
+        use crate::layout::style_snapshot::{LayoutStyleSnapshotCommit, LayoutStyleSnapshotStore};
+        let mut sets = ComputedGroupSets::default();
+        let node = StyleNodeID::element(1);
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let committed = publish_owned(&mut sets, target, &owned_payloads(2), owned_longhand_table())
+            .style_record_identity
+            .raw();
+        let snapshots = LayoutStyleSnapshotStore::default();
+        let mut commit = LayoutStyleSnapshotCommit::default();
+        snapshots.begin_layout_commit(&mut commit, 1);
+        commit.push(
+            node,
+            crate::layout::used_values::FfiCssPixelSize::default(),
+            true,
+            crate::css::css_enums::writing_mode::HORIZONTAL_TB,
+            &crate::layout::tree_shape::StyleCell::holding(sets.publish_style_record(committed)),
+        );
+        snapshots.finish_layout_commit(&mut commit);
+        let current = publish_owned(&mut sets, target, &owned_payloads(3), owned_longhand_table())
+            .style_record_identity
+            .raw();
+        assert_ne!(committed, current);
+
+        sets.reclaim_unreachable();
+        let committed_style = snapshots.committed_box_style(node).expect("the box was committed");
+        assert_eq!(committed_style.style_record, committed);
+        assert!(sets.style_record_view(committed).is_some());
+        drop(committed_style);
+
+        // The element leaves: nothing holds the committed record now.
+        snapshots.retire(&[node]);
+        sets.reclaim_unreachable();
+        assert!(!sets.style_record_is_held(committed));
+        assert!(sets.style_record_view(current).is_some());
+    }
+
+    #[test]
+    fn a_retired_animation_overlay_the_engine_pins_waits_for_the_retired_sweep() {
+        let mut sets = ComputedGroupSets::default();
+        let pins = host_pins_lent_to(&mut sets);
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut first_metadata = metadata(0, 0, 0);
+        first_metadata.animation_overlay_identity = 1;
+        first_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let first = sets.publish_unowned(Some(target), &[], 0, 0, first_metadata);
+        let first_record = first.style_record_identity.raw();
+
+        // The host pins the overlay, the node moves off it, and the engine pins the retired slot.
+        pins.host().pin(first_record);
+        let second = sets.publish_unowned(Some(target), &[], 0, 0, metadata(0, 0, 0));
+        sets.pin_style_record(first_record);
+        pins.host().unpin(first_record);
+        // The engine's last unpin leaves the retired slot to the sweep over retired slots.
+        sets.unpin_style_record(first_record);
+        assert!(sets.style_record_is_held(first_record));
+        sets.reclaim_retired_animation_overlays();
+        assert!(!sets.style_record_is_held(first_record));
+        assert!(sets.style_record_is_held(second.style_record_identity.raw()));
+        assert_eq!(sets.live_animation_overlay_records(), 0);
+    }
+
+    #[test]
+    fn a_pass_beside_the_host_retires_what_it_would_reclaim() {
+        let mut sets = ComputedGroupSets::default();
+        let pins = host_pins_lent_to(&mut sets);
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut first_metadata = metadata(0, 0, 0);
+        first_metadata.animation_overlay_identity = 1;
+        first_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let first = sets.publish_unowned(Some(target), &[], 0, 0, first_metadata);
+        let unowned = sets.publish_unowned(None, &[], 0, 1, metadata(0, 0, 0));
+
+        sets.begin_pass_beside_host_pins();
+        // The pass moves the node off the overlay; the host pins it beside the pass, unseen.
+        let second = sets.publish_unowned(Some(target), &[], 0, 0, metadata(0, 0, 0));
+        pins.host().pin(first.style_record_identity.raw());
+        // Nor does the pass sweep a base record the host may have pinned.
+        assert!(sets.reclaim_unreachable_if_needed().is_none());
+        sets.finish_pass_beside_host_pins();
+        assert!(sets.style_record_is_held(first.style_record_identity.raw()));
+        assert!(sets.style_record_is_held(unowned.style_record_identity.raw()));
+
+        pins.host().unpin(first.style_record_identity.raw());
+        sets.reclaim_retired_animation_overlays();
+        assert!(!sets.style_record_is_held(first.style_record_identity.raw()));
+        assert!(sets.style_record_is_held(second.style_record_identity.raw()));
+    }
+
+    #[test]
+    fn a_pin_waiting_for_the_frame_defers_what_the_engine_would_reclaim() {
+        let mut sets = ComputedGroupSets::default();
+        let pins = host_pins_lent_to(&mut sets);
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut overlay_metadata = metadata(0, 0, 0);
+        overlay_metadata.animation_overlay_identity = 1;
+        overlay_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let overlay = sets
+            .publish_unowned(Some(target), &[], 0, 0, overlay_metadata)
+            .style_record_identity
+            .raw();
+        let unowned = sets
+            .publish_unowned(None, &[], 0, 1, metadata(0, 0, 0))
+            .style_record_identity
+            .raw();
+        sets.next_reclamation_after = 0;
+
+        // The node leaves the tree while the pin its box takes waits for the frame in flight.
+        pins.host().begin_pin_waiting_for_frame();
+        sets.remove(node);
+        assert!(sets.reclaim_unreachable_if_needed().is_none());
+        sets.reclaim_retired_animation_overlays();
+        assert!(sets.style_record_is_held(overlay));
+        assert!(sets.style_record_is_held(unowned));
+
+        // The pin lands, and holds the overlay once the engine reads the table again.
+        pins.host().pin(overlay);
+        pins.host().end_pin_waiting_for_frame();
+        sets.reclaim_retired_animation_overlays();
+        assert!(sets.reclaim_unreachable_if_needed().is_some());
+        assert!(sets.style_record_is_held(overlay));
+        assert!(!sets.style_record_is_held(unowned));
+
+        pins.host().unpin(overlay);
+        sets.reclaim_retired_animation_overlays();
+        assert!(!sets.style_record_is_held(overlay));
+        assert_eq!(sets.live_animation_overlay_records(), 0);
+    }
+
+    #[test]
+    fn a_host_pinned_base_record_survives_the_sweep() {
+        let mut sets = ComputedGroupSets::default();
+        let pins = host_pins_lent_to(&mut sets);
+        let pinned = sets.publish_unowned(None, &[], 0, 1, metadata(0, 0, 0));
+        let unpinned = sets.publish_unowned(None, &[], 0, 2, metadata(0, 0, 0));
+        pins.host().pin(pinned.style_record_identity.raw());
+        sets.reclaim_unreachable();
+        assert!(sets.style_record_is_held(pinned.style_record_identity.raw()));
+        assert!(!sets.style_record_is_held(unpinned.style_record_identity.raw()));
+        pins.host().unpin(pinned.style_record_identity.raw());
+        sets.reclaim_unreachable();
+        assert!(!sets.style_record_is_held(pinned.style_record_identity.raw()));
+    }
+
+    #[test]
+    fn a_replaced_or_retired_record_is_no_longer_held() {
+        let mut sets = ComputedGroupSets::default();
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut first_metadata = metadata(0, 0, 0);
+        first_metadata.animation_overlay_identity = 1;
+        first_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let first = sets.publish_unowned(Some(target), &[], 0, 0, first_metadata);
+        assert!(sets.style_record_is_held(first.style_record_identity.raw()));
+
+        // Nothing pins the overlay the node's assignment moves off, so its slot goes with it.
+        let second = sets.publish_unowned(Some(target), &[], 0, 0, metadata(0, 0, 0));
+        assert!(!sets.style_record_is_held(first.style_record_identity.raw()));
+        assert!(sets.style_record_is_held(second.style_record_identity.raw()));
+
+        let unowned = sets.publish_unowned(None, &[], 0, 1, metadata(0, 0, 0));
+        assert!(sets.style_record_is_held(unowned.style_record_identity.raw()));
+        sets.reclaim_unreachable();
+        assert!(!sets.style_record_is_held(unowned.style_record_identity.raw()));
+        assert!(sets.style_record_is_held(second.style_record_identity.raw()));
+    }
+
     #[test]
     fn base_style_record_pins_are_counted_until_the_last_view_releases() {
         let mut sets = ComputedGroupSets::default();
@@ -4171,44 +5016,6 @@ mod tests {
         assert_eq!(sets.base_style_record_pins[&base_style_record], 1);
         sets.unpin_style_record(style_record.raw());
         assert!(sets.base_style_record_pins.is_empty());
-    }
-
-    #[test]
-    fn shared_style_records_expire_before_their_view_epoch_can_reclaim_identities() {
-        let mut sets = ComputedGroupSets::default();
-        let node = StyleNodeID::element(1);
-        let target = ComputedStyleTarget::new(node, u8::MAX);
-        let donor = sets.publish_unowned(Some(target), &[], 0, 0, metadata(0, 0, 0));
-        let record = donor.style_record_identity.raw();
-        assert!(sets.inherited_groups_for_shared_style(record).is_none());
-
-        sets.begin_style_record_view_epoch();
-        let key = SharedStyleRecordKey {
-            cascade_input: 1,
-            tree_scope: 0,
-            inherited_groups: sets.inherited_groups_for_shared_style(record).unwrap(),
-            environment: 1,
-            font_environment_generation: 1,
-            root_font_inputs: super::super::publication::RootFontInputs::from_document(&Default::default()),
-            shape: [0; 4],
-        };
-        sets.remember_shared_style_record(node, key, record);
-        assert_eq!(sets.shared_style_record(key).unwrap().record, record);
-        sets.begin_style_record_view_epoch();
-        sets.end_style_record_view_epoch();
-        assert!(sets.shared_style_record(key).is_some());
-        sets.remove(node);
-        assert!(sets.reclaim_unreachable_if_needed().is_none());
-        assert_eq!(sets.shared_style_record(key).unwrap().record, record);
-        sets.end_style_record_view_epoch();
-        assert!(sets.shared_style_record(key).is_none());
-        assert_eq!(sets.shared_style_records.capacity(), 0);
-        sets.reclaim_unreachable();
-        sets.begin_style_record_view_epoch();
-        assert!(sets.inherited_groups_for_shared_style(record).is_none());
-        sets.remember_shared_style_record(node, key, record);
-        assert!(sets.shared_style_record(key).is_none());
-        sets.end_style_record_view_epoch();
     }
 
     #[test]
@@ -4375,5 +5182,155 @@ mod tests {
             + size_of_val(sets.pseudo_rows_by_node[&StyleNodeID::element(1)].as_ref());
 
         assert_eq!(accounted, expected as u64);
+    }
+
+    /// A published frame reads every row's style through payloads it owns, so the frame stays
+    /// readable after the rows, the arena and the engine's catalog that published it are gone.
+    #[test]
+    fn a_published_frame_reads_its_styles_after_the_document_side_is_gone() {
+        use crate::css::computed_values::{InheritedTableValues, group_payload_refcount};
+        use crate::painting::published_frame::{PaintRead, PaintSource};
+
+        let mut sets = ComputedGroupSets::default();
+        let target = ComputedStyleTarget::new(StyleNodeID::from_raw(1).unwrap(), u8::MAX);
+        let payloads = owned_payloads(2);
+        let table_group = crate::css::computed_value_types::STYLE_GROUP_INDEX_INHERITED_TABLE;
+        // SAFETY: The test holds the only reference to the fresh payload, which nothing reads yet.
+        unsafe { (*payloads[table_group].cast_mut().cast::<InheritedTableValues>()).empty_cells = 7 };
+        let record = publish_owned(&mut sets, target, &payloads, owned_longhand_table())
+            .style_record_identity
+            .raw();
+        // A reference of the test's own, to watch the others come and go.
+        retain_group_payload(table_group, payloads[table_group].as_ptr());
+
+        let mut arena = crate::layout::LayoutNodeArena::new();
+        let slot = arena.allocate_unbound();
+        arena.stamp_anonymous_box(
+            slot,
+            crate::layout::node_data::NodeKind::InlineNode,
+            super::super::layout_style::DerivedStyleRecord {
+                record,
+                published: sets.publish_style_record(record),
+            },
+        );
+        let frame = arena.freeze_paint_frame();
+
+        arena.free_subtree(slot).invoke_callbacks();
+        drop(arena);
+        drop(sets);
+        // The catalog's own reference is gone with it; the frame's is left.
+        assert_eq!(group_payload_refcount(table_group, payloads[table_group].as_ptr()), 2);
+
+        let absolute_rects = std::cell::RefCell::default();
+        let source = PaintSource::new(&frame, &absolute_rects);
+        let style = source
+            .node_style_if_live(slot)
+            .expect("the frame holds the row's style");
+        assert_eq!(style.empty_cells(), 7);
+
+        drop(frame);
+        assert_eq!(group_payload_refcount(table_group, payloads[table_group].as_ptr()), 1);
+        release_group_payload(table_group, payloads[table_group].as_ptr());
+    }
+
+    /// A layout row holds the record its node moved on from until the change that moves the row
+    /// reaches the owner: a sweep meanwhile leaves the record live, so the row's move can still read
+    /// it by its identity.
+    #[test]
+    fn a_record_held_as_published_outlives_its_node_moving_on() {
+        let mut sets = ComputedGroupSets::default();
+        let target = ComputedStyleTarget::new(StyleNodeID::from_raw(1).unwrap(), u8::MAX);
+        let old = publish_owned(&mut sets, target, &owned_payloads(2), owned_longhand_table())
+            .style_record_identity
+            .raw();
+        let row = sets.publish_style_record(old).expect("the record is live");
+        let new = publish_owned(&mut sets, target, &owned_payloads(3), owned_longhand_table())
+            .style_record_identity
+            .raw();
+        assert_ne!(old, new);
+
+        sets.reclaim_unreachable();
+        assert!(sets.style_record_view(old).is_some());
+
+        // The row moves on too: nothing holds the old record now.
+        drop(row);
+        sets.reclaim_unreachable();
+        assert!(!sets.style_record_is_held(old));
+        assert!(sets.style_record_view(new).is_some());
+    }
+
+    /// A record the host holds as the engine published it is read through what the value owns: the
+    /// engine hands out one value per record, and it stays readable after the catalog is gone.
+    #[test]
+    fn a_published_record_reads_its_style_after_the_catalog_is_gone() {
+        use crate::css::computed_values::{InheritedTableValues, group_payload_refcount};
+        use crate::css::style::published_record::{
+            into_handle, published_style_record_read, published_style_record_release,
+        };
+
+        let mut sets = ComputedGroupSets::default();
+        let target = ComputedStyleTarget::new(StyleNodeID::from_raw(1).unwrap(), u8::MAX);
+        let payloads = owned_payloads(2);
+        let table_group = crate::css::computed_value_types::STYLE_GROUP_INDEX_INHERITED_TABLE;
+        // SAFETY: The test holds the only reference to the fresh payload, which nothing reads yet.
+        unsafe { (*payloads[table_group].cast_mut().cast::<InheritedTableValues>()).empty_cells = 7 };
+        let record = publish_owned(&mut sets, target, &payloads, owned_longhand_table())
+            .style_record_identity
+            .raw();
+        // A reference of the test's own, to watch the others come and go.
+        retain_group_payload(table_group, payloads[table_group].as_ptr());
+
+        let published = sets.publish_style_record(record).expect("the record is live");
+        let again = sets.publish_style_record(record).expect("the record is live");
+        assert!(
+            Arc::ptr_eq(&published, &again),
+            "the engine hands out one value per record"
+        );
+        drop(again);
+        let handle = into_handle(published);
+
+        drop(sets);
+        // The catalog's own reference is gone with it; the published record's is left.
+        assert_eq!(group_payload_refcount(table_group, payloads[table_group].as_ptr()), 2);
+
+        // SAFETY: The handle is live until it is released below, and so is what the read points at.
+        let read = unsafe { published_style_record_read(handle) };
+        assert_eq!(read.style_record, record);
+        assert!(read.view.present);
+        assert!(
+            !read.view.longhand_table.is_null(),
+            "the record keeps its longhand table"
+        );
+        let table_values = unsafe { &*(*read.view.payloads.add(table_group)).cast::<InheritedTableValues>() };
+        assert_eq!(table_values.empty_cells, 7);
+
+        unsafe { published_style_record_release(handle) };
+        assert_eq!(group_payload_refcount(table_group, payloads[table_group].as_ptr()), 1);
+        release_group_payload(table_group, payloads[table_group].as_ptr());
+    }
+
+    /// Payloads whose last clone is dropped on another thread than their engine's come back to the
+    /// engine, which releases them where it may reclaim records.
+    #[test]
+    fn payloads_dropped_on_another_thread_are_released_by_their_engine() {
+        use crate::css::computed_values::group_payload_refcount;
+
+        let sets = ComputedGroupSets::default();
+        let payloads = owned_payloads(2);
+        let payloads_arc = Arc::new(StyleRecordPayloads::retain(&payloads, &sets.payloads_home));
+        for (index, &payload) in payloads.iter().enumerate() {
+            assert_eq!(group_payload_refcount(index, payload.as_ptr()), 2);
+        }
+
+        std::thread::spawn(move || drop(payloads_arc)).join().unwrap();
+        for (index, &payload) in payloads.iter().enumerate() {
+            assert_eq!(group_payload_refcount(index, payload.as_ptr()), 2);
+        }
+
+        sets.payloads_home.release_returned();
+        for (index, &payload) in payloads.iter().enumerate() {
+            assert_eq!(group_payload_refcount(index, payload.as_ptr()), 1);
+            release_group_payload(index, payload.as_ptr());
+        }
     }
 }

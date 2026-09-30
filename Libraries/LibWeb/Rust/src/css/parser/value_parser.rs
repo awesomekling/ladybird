@@ -1052,6 +1052,7 @@ pub(crate) fn parse_syntax_numeric_value(
     let value_type = match syntax_type {
         SyntaxType::Angle => VALUE_TYPE_ANGLE,
         SyntaxType::Integer => VALUE_TYPE_INTEGER,
+        SyntaxType::Frequency => VALUE_TYPE_FREQUENCY,
         SyntaxType::Length | SyntaxType::LengthPercentage => VALUE_TYPE_LENGTH,
         SyntaxType::Number => VALUE_TYPE_NUMBER,
         SyntaxType::Percentage => VALUE_TYPE_PERCENTAGE,
@@ -1080,6 +1081,7 @@ pub(crate) fn parse_syntax_numeric_value(
     match syntax_type {
         SyntaxType::Angle => parse_angle_value(context, value, NumericRange::INFINITE),
         SyntaxType::Integer => parse_integer_value(value, NumericRange::INFINITE),
+        SyntaxType::Frequency => parse_frequency_value(value, NumericRange::INFINITE),
         SyntaxType::Length => parse_length_value(context, property_id::CUSTOM, value, NumericRange::INFINITE),
         SyntaxType::LengthPercentage => parse_length_percentage_value(
             context,
@@ -3365,7 +3367,7 @@ fn parse_long_tail_property(context: &ParseContext, property: u16, values: &[Com
     }
 }
 
-fn contains_tree_counting_function(values: &[ComponentValue]) -> bool {
+pub(crate) fn contains_tree_counting_function(values: &[ComponentValue]) -> bool {
     values.iter().any(|value| match &value.kind {
         ComponentKind::Function { name, values } => {
             equals_ascii_case_insensitive(name, b"sibling-count")
@@ -5330,8 +5332,12 @@ pub(crate) fn unresolved_value(
     } else {
         comparison_source
     };
+    let components = crate::css::style_value::RetainedComponentValueList::from_source(component_source);
+    if presence.attr {
+        crate::css::parser::arbitrary_substitution::note_attr_names_read_by(components.as_slice());
+    }
     StyleValueData::Unresolved {
-        components: crate::css::style_value::RetainedComponentValueList::from_source(component_source),
+        components,
         source_text: CssString::from_utf16(source_text),
         value_comparison_text: CssString::from_utf16(comparison_source),
         presence_attr: presence.attr,

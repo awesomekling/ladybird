@@ -39,7 +39,6 @@ use super::column::Column;
 use super::fast_hash::FastMap as HashMap;
 use super::fast_hash::FastSet as HashSet;
 use super::index::StyleAtomID;
-use super::memory::DeviceClass;
 use super::memory::MemoryCategory;
 use super::memory::MemoryController;
 use super::memory::MemoryLease;
@@ -47,12 +46,11 @@ use super::order::OrderMaintenance;
 use super::order::OrderToken;
 use super::transaction::ProgramVersion;
 use super::tree::TreeScopeID;
+use super::weak_pool::WeakPool;
 use crate::css::style_value::RetainedStyleValueData;
-use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroU32;
-use std::sync::Arc;
-use std::sync::Weak;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 define_id! {
     /// Identity of a CSSOM `CSSStyleSheet` wrapper object. Assigned by C++, which owns the wrapper.
@@ -233,7 +231,6 @@ struct Rule {
     live: bool,
     gated_by_container_query: bool,
     declarations: Arc<SharedRuleDeclarations>,
-    declarations_are_complete: bool,
     semantic_declaration: SemanticDeclarationID,
 }
 
@@ -250,7 +247,6 @@ impl Rule {
             live,
             gated_by_container_query,
             declarations,
-            declarations_are_complete,
             semantic_declaration,
         } = self;
         (
@@ -264,7 +260,6 @@ impl Rule {
             live,
             gated_by_container_query,
             Arc::as_ptr(declarations),
-            declarations_are_complete,
             semantic_declaration,
         )
     }
@@ -292,7 +287,14 @@ struct RuleDeclarationData {
     /// canonical identity may have rewritten. Empty when the rule arrived without them.
     written_values: Vec<RetainedStyleValueData>,
     written_value_checks: Vec<super::publication::WrittenValueChecks>,
-    /// Whether a declared property may move layout geometry, including custom properties.
+    /// Whether no written value adds to what a cascade state's written facts answer, which lets
+    /// the facts skip finding each winner's declaration in this rule.
+    written_values_add_no_state_facts: bool,
+    /// Whether a declaration of a non-inherited property is written `inherit`, or was written with
+    /// a value the rule arrived without: only such a rule can make a winner state inherit one.
+    may_inherit_a_non_inherited_property: bool,
+    /// Whether the rule declares a property that may move layout geometry, or a custom property, whose uses are not
+    /// known until it resolves.
     may_affect_layout_geometry: bool,
     /// The custom properties the rule declares, in declaration order, and the values they were
     /// written with, parallel to them: a custom property resolves from its written spelling.
@@ -312,7 +314,6 @@ impl RuleDeclarationData {
 
 struct SharedRuleDeclarations {
     data: RuleDeclarationData,
-    hash: u64,
     _memory: MemoryLease,
 }
 
@@ -324,33 +325,10 @@ impl std::ops::Deref for Rule {
     }
 }
 
-struct SharedRuleDeclarationTable {
-    by_hash: HashMap<u64, Vec<Weak<SharedRuleDeclarations>>>,
-    memory: MemoryController,
-}
-
-thread_local! {
-    static SHARED_RULE_DECLARATIONS: RefCell<SharedRuleDeclarationTable> = RefCell::new(SharedRuleDeclarationTable {
-        by_hash: HashMap::default(),
-        memory: MemoryController::new(DeviceClass::ForegroundDesktop),
-    });
-}
-
-impl Drop for SharedRuleDeclarations {
-    fn drop(&mut self) {
-        let _ = SHARED_RULE_DECLARATIONS.try_with(|table| {
-            let Ok(mut table) = table.try_borrow_mut() else { return };
-            if let std::collections::hash_map::Entry::Occupied(mut entry) = table.by_hash.entry(self.hash) {
-                entry.get_mut().retain(|candidate| candidate.strong_count() != 0);
-                if entry.get().is_empty() {
-                    entry.remove();
-                }
-            }
-        });
-    }
-}
-
-fn share_rule_declarations(data: RuleDeclarationData) -> Arc<SharedRuleDeclarations> {
+fn share_rule_declarations(
+    data: RuleDeclarationData,
+    pool: &mut WeakPool<SharedRuleDeclarations>,
+) -> Arc<SharedRuleDeclarations> {
     // Canonical IDs are document-local, so equal numeric declarations alone are insufficient:
     // compare the authored values as well before sharing their immutable storage.
     let mut hasher = super::fast_hash::fast_hasher();
@@ -365,33 +343,25 @@ fn share_rule_declarations(data: RuleDeclarationData) -> Arc<SharedRuleDeclarati
         }
     }
     let hash = hasher.finish();
-    SHARED_RULE_DECLARATIONS.with_borrow_mut(|table| {
-        let bucket = table.by_hash.entry(hash).or_default();
-        bucket.retain(|candidate| candidate.strong_count() != 0);
-        if let Some(found) = bucket
-            .iter()
-            .filter_map(Weak::upgrade)
-            .find(|candidate| candidate.data == data)
-        {
-            return found;
-        }
-        let mut memory = MemoryLease::new(MemoryCategory::RuleProgram);
-        memory.resize_required_to(
-            &mut table.memory,
-            size_of::<SharedRuleDeclarations>() as u64 + data.capacity_bytes(),
-        );
-        let declarations = Arc::new(SharedRuleDeclarations {
-            data,
-            hash,
-            _memory: memory,
-        });
-        table
-            .by_hash
-            .get_mut(&hash)
-            .unwrap()
-            .push(Arc::downgrade(&declarations));
-        declarations
-    })
+    if let Some(found) = pool.find(hash, |candidate| candidate.data == data) {
+        return found;
+    }
+    let mut memory = MemoryLease::new(MemoryCategory::RuleProgram);
+    memory.resize_required_to(
+        &mut pool.memory,
+        size_of::<SharedRuleDeclarations>() as u64 + data.capacity_bytes(),
+    );
+    let declarations = Arc::new(SharedRuleDeclarations { data, _memory: memory });
+    pool.insert(hash, &declarations);
+    declarations
+}
+
+fn rule_declaration_pool() -> MutexGuard<'static, WeakPool<SharedRuleDeclarations>> {
+    // Every engine interns through the same pool, from whichever thread runs it. Declarations
+    // never reach back into the pool when they are dropped, so the lock is only held while
+    // interning.
+    static RULE_DECLARATIONS: OnceLock<Mutex<WeakPool<SharedRuleDeclarations>>> = OnceLock::new();
+    RULE_DECLARATIONS.get_or_init(Mutex::default).lock().unwrap()
 }
 
 struct SemanticDeclarationEntry {
@@ -469,7 +439,7 @@ impl StyleSheetProgram {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            empty_declarations: share_rule_declarations(RuleDeclarationData::default()),
+            empty_declarations: share_rule_declarations(RuleDeclarationData::default(), &mut rule_declaration_pool()),
             sheets: Vec::new(),
             rules: RuleRecordTable::default(),
             rule_children: Vec::new(),
@@ -901,7 +871,6 @@ impl StyleSheetProgram {
             live,
             gated_by_container_query: false,
             declarations: Arc::clone(&self.empty_declarations),
-            declarations_are_complete: false,
             semantic_declaration: SemanticDeclarationID::default(),
         });
         self.record_capacity_change(previous_rule_capacity, self.rules.shallow_capacity_bytes());
@@ -1323,7 +1292,6 @@ impl StyleSheetProgram {
         written_values: Vec<RetainedStyleValueData>,
         custom_declarations: Vec<CustomDeclaration>,
         custom_written_values: Vec<RetainedStyleValueData>,
-        declarations_are_complete: bool,
     ) {
         debug_assert!(written_values.is_empty() || written_values.len() == declared.len());
         debug_assert!(custom_written_values.is_empty() || custom_written_values.len() == custom_declarations.len());
@@ -1332,25 +1300,39 @@ impl StyleSheetProgram {
         }
         let entry = &mut self.rules[rule.0 as usize];
         let declared_custom_properties_before = entry.live && !entry.custom_declarations.is_empty();
-        let written_value_checks = declared
+        let written_value_checks: Vec<_> = declared
             .iter()
             .zip(&written_values)
             .map(|(declared, value)| super::publication::WrittenValueChecks::prepare(declared.property, value))
             .collect();
+        let written_values_add_no_state_facts = written_value_checks
+            .iter()
+            .all(super::publication::WrittenValueChecks::adds_no_state_facts);
+        let may_inherit_a_non_inherited_property = declared.iter().enumerate().any(|(index, declared)| {
+            !crate::css::property_metadata::property_is_inherited(declared.property)
+                && written_values.get(index).is_none_or(|value| {
+                    matches!(value.data(), crate::css::style_value::StyleValueData::Keyword { keyword }
+                        if *keyword == crate::css::style_compute::keyword::INHERIT)
+                })
+        });
         let may_affect_layout_geometry = !custom_declarations.is_empty()
             || declared
                 .iter()
                 .any(|declared| crate::css::property_metadata::property_may_affect_layout_geometry(declared.property));
-        let moves_layout_geometry = entry.declarations.data.may_affect_layout_geometry != may_affect_layout_geometry
-            || entry.declarations_are_complete != declarations_are_complete;
-        entry.declarations = share_rule_declarations(RuleDeclarationData {
-            declared_properties: declared,
-            written_values,
-            written_value_checks,
-            may_affect_layout_geometry,
-            custom_declarations,
-            custom_written_values,
-        });
+        let moves_layout_geometry = entry.declarations.data.may_affect_layout_geometry != may_affect_layout_geometry;
+        entry.declarations = share_rule_declarations(
+            RuleDeclarationData {
+                declared_properties: declared,
+                written_values,
+                written_value_checks,
+                written_values_add_no_state_facts,
+                may_inherit_a_non_inherited_property,
+                may_affect_layout_geometry,
+                custom_declarations,
+                custom_written_values,
+            },
+            &mut rule_declaration_pool(),
+        );
         match (
             declared_custom_properties_before,
             entry.live && !entry.custom_declarations.is_empty(),
@@ -1359,7 +1341,6 @@ impl StyleSheetProgram {
             (true, false) => self.rules_declaring_custom_properties -= 1,
             _ => {}
         }
-        entry.declarations_are_complete = declarations_are_complete;
         // The routing liveness view carries which live routes' rules may move layout geometry. A rule that cannot
         // decide has no live routes, and moves the routing liveness when it comes to.
         if moves_layout_geometry && self.rule_can_decide(rule) {
@@ -1391,9 +1372,6 @@ impl StyleSheetProgram {
     /// style-sharing optimization. IDs are never reused, so invalidation cannot alias a cached ID.
     pub(super) fn ensure_semantic_declaration(&mut self, rule: RuleID) -> SemanticDeclarationID {
         let rule_index = rule.0 as usize;
-        if !self.rules[rule_index].declarations_are_complete {
-            return SemanticDeclarationID::default();
-        }
         if self.rules[rule_index].semantic_declaration != SemanticDeclarationID::default() {
             return self.rules[rule_index].semantic_declaration;
         }
@@ -1485,10 +1463,27 @@ impl StyleSheetProgram {
             .map(|(_, value)| value)
     }
 
-    /// Whether a match of this rule may move geometry. Incomplete declarations cannot prove independence.
+    /// Whether none of the rule's written values adds to a cascade state's written facts. A rule
+    /// that arrived without its written values adds none either: no winner finds its value.
+    pub(super) fn written_values_add_no_state_facts(&self, rule: RuleID) -> bool {
+        self.rules[rule.0 as usize]
+            .declarations
+            .data
+            .written_values_add_no_state_facts
+    }
+
+    /// Whether a winner of the rule can inherit a non-inherited property: one of its declarations
+    /// is written `inherit`, or its written values are unknown.
+    pub(super) fn may_inherit_a_non_inherited_property(&self, rule: RuleID) -> bool {
+        self.rules[rule.0 as usize]
+            .declarations
+            .data
+            .may_inherit_a_non_inherited_property
+    }
+
+    /// Whether a match of the rule may move layout geometry: it declares a property that may, or a custom property.
     pub(super) fn rule_may_affect_layout_geometry(&self, rule: RuleID) -> bool {
-        let rule = &self.rules[rule.0 as usize];
-        !rule.declarations_are_complete || rule.may_affect_layout_geometry
+        self.rules[rule.0 as usize].declarations.data.may_affect_layout_geometry
     }
 
     pub(super) fn written_value_checks(&self, rule: RuleID, index: usize) -> super::publication::WrittenValueChecks {
@@ -1519,14 +1514,7 @@ impl StyleSheetProgram {
     /// Whether the rule's declarations are all in the winner columns. A rule declaring custom
     /// properties is not: they never reach the columns.
     pub fn declarations_are_complete_for(&self, rule: RuleID) -> bool {
-        let rule = &self.rules[rule.0 as usize];
-        rule.declarations_are_complete && rule.custom_declarations.is_empty()
-    }
-
-    /// Whether the rule's longhand declarations are all in the winner columns, whatever custom
-    /// properties it declares beside them.
-    pub fn declarations_are_complete_but_for_custom_properties(&self, rule: RuleID) -> bool {
-        self.rules[rule.0 as usize].declarations_are_complete
+        self.rules[rule.0 as usize].custom_declarations.is_empty()
     }
 
     /// Record that a tree scope's rules include the document's author sheets as well as its own,
@@ -1714,7 +1702,6 @@ mod tests {
                 )],
                 Vec::new(),
                 Vec::new(),
-                true,
             );
         };
         set(&mut first, first_rule, 1);
@@ -1759,19 +1746,19 @@ mod tests {
                 value: SpecifiedValueID(1),
             }]
         };
-        program.set_rule_declared_properties(rule, vec![], vec![], declarations(), vec![], true);
+        program.set_rule_declared_properties(rule, vec![], vec![], declarations(), vec![]);
         assert!(program.any_rule_declares_custom_properties());
         program.remove_rule(group);
         assert!(!program.any_rule_declares_custom_properties());
 
         let reserved = program.reserve_rule(sheet, None, RuleKind::Style);
-        program.set_rule_declared_properties(reserved, vec![], vec![], declarations(), vec![], true);
+        program.set_rule_declared_properties(reserved, vec![], vec![], declarations(), vec![]);
         assert!(!program.any_rule_declares_custom_properties());
         program.set_rule_liveness(&[(reserved, true), (reserved, true)]);
         assert!(program.any_rule_declares_custom_properties());
         program.set_rule_liveness(&[(reserved, false)]);
         assert!(!program.any_rule_declares_custom_properties());
-        program.set_rule_declared_properties(reserved, vec![], vec![], vec![], vec![], true);
+        program.set_rule_declared_properties(reserved, vec![], vec![], vec![], vec![]);
         assert!(!program.any_rule_declares_custom_properties());
     }
 
@@ -1840,7 +1827,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_equal_declarations_share_a_collision_checked_identity() {
+    fn equal_declarations_share_a_collision_checked_identity() {
         let (mut program, sheet) = program_with_sheet();
         let first = program.append_rule(sheet, None, RuleKind::Style);
         let second = program.append_rule(sheet, None, RuleKind::Style);
@@ -1853,9 +1840,9 @@ mod tests {
             value: SpecifiedValueID(value),
         };
 
-        program.set_rule_declared_properties(first, vec![declared(10)], Vec::new(), Vec::new(), Vec::new(), true);
-        program.set_rule_declared_properties(second, vec![declared(10)], Vec::new(), Vec::new(), Vec::new(), true);
-        program.set_rule_declared_properties(third, vec![declared(20)], Vec::new(), Vec::new(), Vec::new(), true);
+        program.set_rule_declared_properties(first, vec![declared(10)], Vec::new(), Vec::new(), Vec::new());
+        program.set_rule_declared_properties(second, vec![declared(10)], Vec::new(), Vec::new(), Vec::new());
+        program.set_rule_declared_properties(third, vec![declared(20)], Vec::new(), Vec::new(), Vec::new());
 
         let first_identity = program.ensure_semantic_declaration(first);
         let second_identity = program.ensure_semantic_declaration(second);
@@ -1864,22 +1851,14 @@ mod tests {
         assert_eq!(first_identity, second_identity);
         assert_ne!(first_identity, third_identity);
 
-        program.set_rule_declared_properties(
-            never_interned,
-            vec![declared(30)],
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            true,
-        );
+        program.set_rule_declared_properties(never_interned, vec![declared(30)], Vec::new(), Vec::new(), Vec::new());
         assert_eq!(program.ensure_semantic_declaration(first), first_identity);
 
-        program.set_rule_declared_properties(second, vec![declared(10)], Vec::new(), Vec::new(), Vec::new(), false);
-        assert_eq!(
-            program.ensure_semantic_declaration(second),
-            SemanticDeclarationID::default()
-        );
-        assert_ne!(program.ensure_semantic_declaration(first), first_identity);
+        // Republishing declarations retires every identity; equal declarations share a fresh one.
+        program.set_rule_declared_properties(second, vec![declared(10)], Vec::new(), Vec::new(), Vec::new());
+        let republished_identity = program.ensure_semantic_declaration(second);
+        assert_ne!(republished_identity, first_identity);
+        assert_eq!(program.ensure_semantic_declaration(first), republished_identity);
         assert_eq!(program.capacity_bytes(), program.recompute_capacity_bytes());
     }
 

@@ -143,7 +143,7 @@ pub(crate) struct OwnedToken {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum TokenizerInput<'a> {
+pub enum TokenizerInput<'a> {
     Ascii(&'a [u8]),
     Utf16(&'a [u16]),
 }

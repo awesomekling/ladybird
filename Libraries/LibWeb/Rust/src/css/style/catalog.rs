@@ -15,76 +15,10 @@ use super::shared_vector::{SharedVector, SharedVectorPool};
 use super::*;
 
 define_id! { default pub(super) struct MatchAnswerID(pub(super)); }
-define_id! { default pub(super) struct SelectorTruthSetID(pub(super)); }
 
 impl super::intern_table::InternIdentity for MatchAnswerID {
     fn index(self) -> usize {
         self.0 as usize - 1
-    }
-}
-
-impl super::intern_table::InternIdentity for SelectorTruthSetID {
-    fn index(self) -> usize {
-        self.0 as usize - 1
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) struct SelectorTruth {
-    pub(super) entry: EntryID,
-    pub(super) tree_scope: TreeScopeID,
-    pub(super) scope_proximity: u32,
-}
-
-#[derive(Default)]
-pub(super) struct SelectorTruthSetCatalog {
-    sets: super::intern_table::InternTable<SelectorTruthSetID, Arc<[SelectorTruth]>>,
-    verified_derived_answers: HashMap<(SelectorTruthSetID, TreeScopeID, u64), Arc<[RetainedRuleMatch]>>,
-}
-
-impl SelectorTruthSetCatalog {
-    pub(super) fn intern_prepared(&mut self, truth: Vec<SelectorTruth>) -> (SelectorTruthSetID, bool) {
-        let hash = content_hash(&truth);
-        if let Some(identity) = self
-            .sets
-            .find(hash, |_identity, candidate| candidate.as_ref() == truth.as_slice())
-        {
-            return (identity, true);
-        }
-        let identity = SelectorTruthSetID(
-            u32::try_from(self.sets.len())
-                .ok()
-                .and_then(|length| length.checked_add(1))
-                .expect("selector truth-set identity space exhausted"),
-        );
-        self.sets.insert(hash, identity, truth.into());
-        (identity, false)
-    }
-
-    pub(super) fn get(&self, identity: SelectorTruthSetID) -> &Arc<[SelectorTruth]> {
-        &self.sets[identity]
-    }
-
-    pub(super) fn verify_derived_answer(
-        &mut self,
-        truth: SelectorTruthSetID,
-        tree_scope: TreeScopeID,
-        program_version: ProgramVersion,
-        answer: &[RetainedRuleMatch],
-    ) -> bool {
-        match self
-            .verified_derived_answers
-            .entry((truth, tree_scope, program_version.0))
-        {
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(answer.into());
-                false
-            }
-            std::collections::hash_map::Entry::Occupied(entry) => {
-                assert_eq!(entry.get().as_ref(), answer, "selector truth derived two rule answers");
-                true
-            }
-        }
     }
 }
 
@@ -554,6 +488,34 @@ pub(super) struct PrefixCaches {
     pub(super) answers: PrefixAnswerCache,
 }
 
+/// The prefix caches the engine shares with the matching traversals and patches that borrow them.
+/// The borrows nest, so each is checked when it is taken, as a `RefCell`'s is: a conflicting borrow
+/// panics rather than waits. The check is atomic, so the engine can move to the thread its stages
+/// run on.
+#[derive(Default)]
+pub(super) struct SharedPrefixCaches(std::sync::RwLock<PrefixCaches>);
+
+impl SharedPrefixCaches {
+    #[track_caller]
+    pub(super) fn borrow(&self) -> std::sync::RwLockReadGuard<'_, PrefixCaches> {
+        match self.0.try_read() {
+            Ok(caches) => caches,
+            // A panic while the caches were borrowed leaves them as a `RefCell` would.
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => panic!("the prefix caches are already mutably borrowed"),
+        }
+    }
+
+    #[track_caller]
+    pub(super) fn borrow_mut(&self) -> std::sync::RwLockWriteGuard<'_, PrefixCaches> {
+        match self.0.try_write() {
+            Ok(caches) => caches,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => panic!("the prefix caches are already borrowed"),
+        }
+    }
+}
+
 impl Default for PrefixAnswerCache {
     fn default() -> Self {
         Self {
@@ -947,23 +909,6 @@ pub(super) fn prepare_retained_match_answer(matches: impl Iterator<Item = RuleMa
     let mut answer: Vec<_> = matches.map(RetainedRuleMatch::from_rule_match).collect();
     answer.sort_unstable();
     answer
-}
-
-pub(super) fn prepare_selector_truth_set(
-    matches: &[RetainedRuleMatch],
-    programs: &SelectorPrograms,
-) -> Vec<SelectorTruth> {
-    let mut truth = matches
-        .iter()
-        .map(|matched| SelectorTruth {
-            entry: programs.entry_id(matched.program, matched.entry),
-            tree_scope: matched.tree_scope,
-            scope_proximity: matched.scope_proximity,
-        })
-        .collect::<Vec<_>>();
-    truth.sort_unstable();
-    truth.dedup();
-    truth
 }
 
 pub(super) fn merge_retained_match_answers(answer: &mut Vec<RetainedRuleMatch>, suffix: &[RetainedRuleMatch]) {
@@ -1385,7 +1330,7 @@ pub(super) struct RetainedAnswerPatch {
     /// One shared match workspace for every node this patch visits, carrying the relation and
     /// sibling-prefix caches across them exactly as a matching traversal does.
     pub(super) match_workspace: MatchScratch,
-    pub(super) prefix_caches: Rc<RefCell<PrefixCaches>>,
+    pub(super) prefix_caches: std::sync::Arc<SharedPrefixCaches>,
     pub(super) dispatch_workspace: DispatchCandidateWorkspace,
     pub(super) always_emit: bool,
     pub(super) has_non_selector_inputs: bool,
@@ -1440,6 +1385,9 @@ pub(super) struct RetainedAnswerDeltaTransition {
     /// The pseudo-element winner states the first member settled beside its winner state, of
     /// the same program version.
     pub(super) pseudo_winner_states: Box<[(super::tree::PseudoElementTarget, CascadeStateID)]>,
+    /// The pseudo-element kinds the deltas' rules target: a replaying member's rows for those
+    /// kinds that `pseudo_winner_states` does not carry predate the transition.
+    pub(super) flipped_pseudo_kinds: u64,
     /// Whether the first member's winner application reported an update, which decides whether
     /// replays hand the traversal an incremental cascade answer.
     pub(super) winners_updated: bool,
@@ -1703,7 +1651,7 @@ pub(super) struct BatchMatchingTraversal {
     pub(super) reuse_retained_match_answers: bool,
     pub(super) retained_answer_dispatch: Option<Arc<RuleDispatch>>,
     pub(super) ancestor_requirements: AncestorRequirementsCache,
-    pub(super) prefix_caches: Rc<RefCell<PrefixCaches>>,
+    pub(super) prefix_caches: std::sync::Arc<SharedPrefixCaches>,
     pub(super) match_workspace: MatchScratch,
     pub(super) match_workspace_bytes: u64,
     pub(super) dispatch_workspace: DispatchCandidateWorkspace,
@@ -1765,7 +1713,6 @@ pub(super) struct PublishedMatchAnswers {
     pub(super) entries: Vec<PublishedMatchAnswer>,
     pub(super) shared_payloads: HashMap<MatchAnswerID, Box<[RuleMatch]>>,
     pub(super) memory: MemoryLease,
-    pub(super) match_element_calls_at_publication: u64,
     pub(super) discard_unobserved_retained_answers: bool,
 }
 
@@ -1776,7 +1723,6 @@ impl Default for PublishedMatchAnswers {
             entries: Vec::new(),
             shared_payloads: HashMap::default(),
             memory: MemoryLease::new(MemoryCategory::BatchScratch),
-            match_element_calls_at_publication: 0,
             discard_unobserved_retained_answers: false,
         }
     }
@@ -1806,7 +1752,6 @@ impl PublishedMatchAnswers {
             ];
             skip [
                 self.memory,
-                self.match_element_calls_at_publication,
                 self.discard_unobserved_retained_answers,
             ];
         }
@@ -1931,16 +1876,24 @@ pub(super) struct ScopeDispatchKey {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct ScopeDispatchShape(pub(super) SharedVector<(SelectorProgramID, bool)>);
 
-thread_local! {
-    static SHARED_SCOPE_DISPATCH_SHAPES: RefCell<SharedVectorPool<(SelectorProgramID, bool)>> =
-        RefCell::new(SharedVectorPool::new(MemoryCategory::RuleProgram));
-    static SHARED_SCOPE_CASCADE_ORIGINS: RefCell<SharedVectorPool<(u8, CascadeLayerID)>> =
-        RefCell::new(SharedVectorPool::new(MemoryCategory::RuleProgram));
+/// The pools for the shapes scope dispatches are keyed by.
+pub(super) struct ScopeShapePools {
+    dispatch_shapes: SharedVectorPool<(SelectorProgramID, bool)>,
+    cascade_origins: SharedVectorPool<(u8, CascadeLayerID)>,
+}
+
+impl Default for ScopeShapePools {
+    fn default() -> Self {
+        Self {
+            dispatch_shapes: SharedVectorPool::new(MemoryCategory::RuleProgram),
+            cascade_origins: SharedVectorPool::new(MemoryCategory::RuleProgram),
+        }
+    }
 }
 
 impl ScopeDispatchShape {
-    pub(super) fn share(&mut self) {
-        self.0.share(&SHARED_SCOPE_DISPATCH_SHAPES);
+    pub(super) fn share(&mut self, pools: &mut ScopeShapePools) {
+        self.0.share(&mut pools.dispatch_shapes);
     }
 }
 
@@ -1955,11 +1908,11 @@ pub(super) struct ScopeCascadeShape {
 }
 
 impl ScopeCascadeShape {
-    pub(super) fn share(&mut self) {
-        // Cache keys contain immutable numeric identities. Equal scopes and documents can
-        // share these arrays without retaining a document or any mutable cascade result.
-        self.dispatch.share();
-        self.rule_origins_and_layers.share(&SHARED_SCOPE_CASCADE_ORIGINS);
+    pub(super) fn share(&mut self, pools: &mut ScopeShapePools) {
+        // Cache keys contain immutable numeric identities. Equal scopes can share these arrays
+        // without retaining any mutable cascade result.
+        self.dispatch.share(pools);
+        self.rule_origins_and_layers.share(&mut pools.cascade_origins);
     }
 }
 
@@ -2007,7 +1960,6 @@ pub(super) struct PendingRuleDeclarations {
     pub(super) written_values: Vec<crate::css::style_value::RetainedStyleValueData>,
     pub(super) custom_declarations: Vec<super::program::CustomDeclaration>,
     pub(super) custom_written_values: Vec<crate::css::style_value::RetainedStyleValueData>,
-    pub(super) complete: bool,
 }
 
 pub(super) struct SheetRuleReplacement {

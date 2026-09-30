@@ -3175,6 +3175,9 @@ unsafe fn build_font_group(
         // SAFETY: The non-null check above and the caller's guarantee make the
         // list live for the call; the handle keeps it live afterwards.
         font_cascade_list: unsafe { libgfx_rust::font::FontCascadeListHandle::retain(inputs.font_cascade_list) },
+        // SAFETY: As above. A cascade the font computer published carries a frozen snapshot; one
+        // built for something else (canvas, a unit test) does not, and never reaches a stage.
+        frozen_font_list: unsafe { libgfx_rust::font::frozen_font_list_of(inputs.font_cascade_list) },
         font_weight: inputs.font_weight,
         font_width: inputs.font_width,
         math_shift: inputs.math_shift,
@@ -3285,6 +3288,30 @@ pub(crate) unsafe fn rebuild_font_group_from_table(
     (!payload.is_null()).then_some(payload)
 }
 
+/// The resolved font a font group payload was built from.
+///
+/// # Safety
+/// `payload` must be a valid font group payload.
+pub(crate) unsafe fn font_group_build_inputs_of(payload: *const c_void) -> FfiFontGroupBuildInputs {
+    let font = unsafe { &*payload.cast::<crate::css::computed_value_types::FontValues>() };
+    FfiFontGroupBuildInputs {
+        font_size_raw: font.font_size.raw_value(),
+        line_height_used_raw: font.line_height_used.raw_value(),
+        font_variant_emoji: font.font_variant_emoji,
+        font_ascent: font.font_ascent,
+        font_descent: font.font_descent,
+        font_x_height: font.font_x_height,
+        font_zero_advance: font.font_zero_advance,
+        first_available_font: font.first_available_font,
+        font_cascade_list: font.font_cascade_list.as_raw(),
+        font_weight: font.font_weight,
+        font_width: font.font_width,
+        math_shift: font.math_shift,
+        math_style: font.math_style,
+        math_depth: font.math_depth,
+    }
+}
+
 /// The element's own resolved color as the group builders consume it: the table's computed
 /// `color`, resolved against the initial color the way the C++ build seeds its context.
 pub(crate) fn own_color_from_table(
@@ -3309,6 +3336,65 @@ pub(crate) fn own_color_from_table(
         channels: None,
     };
     to_color(values.value(property_id::COLOR)?, &input).map(packed_color)
+}
+
+/// The used color scheme and the element's own resolved `color` a record assembled from a
+/// driven table builds its groups with. A drive always computes both; a table that somehow holds
+/// neither assembles against the browser's default light scheme and opaque black rather than
+/// publishing no record.
+pub(crate) fn assembly_color_inputs(
+    table: &ComputedLonghandTable,
+    length: &crate::css::style_compute::FfiLengthResolutionContext,
+) -> (u8, u32) {
+    const LIGHT: u8 = 2;
+    let used_color_scheme = u8::try_from(table.effective_color_scheme()).unwrap_or_else(|_| {
+        debug_assert!(false, "a driven table without a used color scheme");
+        LIGHT
+    });
+    let current_color = own_color_from_table(table, used_color_scheme, Some(length)).unwrap_or_else(|| {
+        debug_assert!(false, "a driven table whose color does not resolve");
+        0xff00_0000
+    });
+    (used_color_scheme, current_color)
+}
+
+/// One group's payload for a record assembled from a driven table: the font group from the
+/// resolved font, which only a font group assembly needs, every other group from the table, the element's own color and its used color
+/// scheme. A driven table holds a value every builder encodes; a group whose builder declines one
+/// anyway publishes the group's defaults rather than no record.
+///
+/// # Safety
+/// `table` must be a valid frozen table and `parent_payload` a valid payload of the group or null.
+pub(crate) unsafe fn assemble_group_from_table(
+    table: &ComputedLonghandTable,
+    group: usize,
+    font: Option<&FfiFontGroupBuildInputs>,
+    parent_payload: *const c_void,
+    (used_color_scheme, current_color): (u8, u32),
+    length: &crate::css::style_compute::FfiLengthResolutionContext,
+) -> *const c_void {
+    let payload = unsafe {
+        if group == group_index::FONT {
+            rebuild_font_group_from_table(
+                table,
+                font.expect("a font group assembly carries the resolved font"),
+                parent_payload,
+            )
+        } else {
+            rebuild_group_from_table(
+                table,
+                group,
+                parent_payload,
+                current_color,
+                used_color_scheme,
+                Some(length),
+            )
+        }
+    };
+    payload.unwrap_or_else(|| {
+        debug_assert!(false, "style group {group} declined a driven table");
+        crate::css::computed_values::default_group_payload(group)
+    })
 }
 
 /// Rebuilds one non-inherited group whose specified values read the newly

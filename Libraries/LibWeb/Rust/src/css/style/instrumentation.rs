@@ -24,7 +24,7 @@ macro_rules! define_counters {
 
         pub const COUNTER_COUNT: usize = 0 $(+ { let _ = Counter::$variant; 1 })+;
 
-        static COUNTER_NAMES: [&str; COUNTER_COUNT] = [$($name,)+];
+        pub static COUNTER_NAMES: [&str; COUNTER_COUNT] = [$($name,)+];
 
         impl Counter {
             #[must_use]
@@ -61,10 +61,10 @@ define_counters! {
     AtomSweeps => "atomSweeps",
     AtomSweepsDeferredForActiveTraversal => "atomSweepsDeferredForActiveTraversal",
     AtomSweepRootSlotsVisited => "atomSweepRootSlotsVisited",
-    AtomSweepPinReleasesSkipped => "atomSweepPinReleasesSkipped",
     StyleAtomsReclaimed => "styleAtomsReclaimed",
     LanguageTextsPublished => "languageTextsPublished",
     CustomPropertyNamesPublished => "customPropertyNamesPublished",
+    CustomPropertyNameSetsLookedUp => "customPropertyNameSetsLookedUp",
 
     // Exclusive transaction intervals. Fused stages retain one name until execution splits.
     TransactionMicroseconds => "transactionMicroseconds",
@@ -75,21 +75,6 @@ define_counters! {
     ComputationPublicationMicroseconds => "computationPublicationMicroseconds",
     EmitMicroseconds => "emitMicroseconds",
     TransactionRemainderMicroseconds => "transactionRemainderMicroseconds",
-    // The passes inside those phases, clocked only when `LIBWEB_STYLE_PASS_CLOCKS` is set. The
-    // phase clocks say which quarter of the transaction a millisecond is in; these say which
-    // pass, which is what decides whether a pass is per-node work or bookkeeping around it.
-    RoutingSetupMicroseconds => "routingSetupMicroseconds",
-    RoutingInputsMicroseconds => "routingInputsMicroseconds",
-    SequenceRoutingMicroseconds => "sequenceRoutingMicroseconds",
-    PendingRouteFlushMicroseconds => "pendingRouteFlushMicroseconds",
-    BatchCompilationMicroseconds => "batchCompilationMicroseconds",
-    WinnerVersionAdvanceMicroseconds => "winnerVersionAdvanceMicroseconds",
-    RetainedAnswerPatchLoopMicroseconds => "retainedAnswerPatchLoopMicroseconds",
-    CompletionBatchBeginMicroseconds => "completionBatchBeginMicroseconds",
-    CompletionBatchMaterializeMicroseconds => "completionBatchMaterializeMicroseconds",
-    CompletionBatchRelationMicroseconds => "completionBatchRelationMicroseconds",
-    CompletionPassMicroseconds => "completionPassMicroseconds",
-    ComputationLoopMicroseconds => "computationLoopMicroseconds",
     // Physical work, including drives whose output is later abandoned.
     RootFontInputsPrepared => "rootFontInputsPrepared",
     RootFontInputsUnprovenFallbacks => "rootFontInputsUnprovenFallbacks",
@@ -122,13 +107,6 @@ define_counters! {
     StructuralTests => "structuralTests",
     RelationalTests => "relationalTests",
 
-    // DOM selector queries. Candidate rows are the elements admitted by the query plan, while
-    // evaluations are the rows that reached the exact matcher after selector-list deduplication.
-    SelectorQueryCandidateRows => "selectorQueryCandidateRows",
-    SelectorQueryEvaluations => "selectorQueryEvaluations",
-    SelectorQueryAttributeValuePlanHits => "selectorQueryAttributeValuePlanHits",
-    SelectorQueryAttributeValueCatalogScans => "selectorQueryAttributeValueCatalogScans",
-
     // Candidate enumeration and cold evaluation.
     ColdMatchingBatchMissingRows => "coldMatchingBatchMissingRows",
     ColdMatchingBatchRows => "coldMatchingBatchRows",
@@ -152,52 +130,31 @@ define_counters! {
     EngineComputedRecordCohortHits => "engineComputedRecordCohortHits",
     EngineComputedRecordSharedHits => "engineComputedRecordSharedHits",
     EngineComputedRecordGateReaction => "engineComputedRecordGateReaction",
-    EngineComputedRecordGateDeclarations => "engineComputedRecordGateDeclarations",
-    EngineComputedRecordGateIncompleteAnswer => "engineComputedRecordGateIncompleteAnswer",
     EngineComputedPseudoRecords => "engineComputedPseudoRecords",
     EngineComputedRecordUnchangedWinners => "engineComputedRecordUnchangedWinners",
-    EngineComputedRecordsAbandoned => "engineComputedRecordsAbandoned",
     RetryAfterAncestorCalls => "retryAfterAncestorCalls",
     RetryAfterAncestorSettled => "retryAfterAncestorSettled",
-    RetryAfterAncestorPseudoAbandons => "retryAfterAncestorPseudoAbandons",
     RetryAfterAncestorColdHits => "retryAfterAncestorColdHits",
     RetryAfterAncestorMicroseconds => "retryAfterAncestorMicroseconds",
-    EngineComputedRecordBailPseudoStale => "engineComputedRecordBailPseudoStale",
+    EngineComputedRecordHostPseudoSettles => "engineComputedRecordHostPseudoSettles",
+    EngineComputedRecordHostPseudoDeclines => "engineComputedRecordHostPseudoDeclines",
+    EngineComputedRecordHostPseudoBackings => "engineComputedRecordHostPseudoBackings",
+    BatchBackingPseudoMatchHosts => "batchBackingPseudoMatchHosts",
+    CascadePseudoWinnerRows => "cascadePseudoWinnerRows",
+    StyleReactionRankSlotWrites => "styleReactionRankSlotWrites",
     EngineComputedRecordBailPseudoBackdrop => "engineComputedRecordBailPseudoBackdrop",
-    EngineComputedRecordBailPseudoMask => "engineComputedRecordBailPseudoMask",
-    EngineComputedRecordBailPseudoRow => "engineComputedRecordBailPseudoRow",
-    EngineComputedRecordBailPseudoFlip => "engineComputedRecordBailPseudoFlip",
     EngineComputedRecordGateAncestors => "engineComputedRecordGateAncestors",
     EngineComputedLonghandEvaluations => "engineComputedLonghandEvaluations",
-    EngineComputedRecordBailNoCascadeState => "engineComputedRecordBailNoCascadeState",
     EngineComputedRecordBailStaleCascadeState => "engineComputedRecordBailStaleCascadeState",
-    EngineComputedRecordBailWinnerMissingNode => "engineComputedRecordBailWinnerMissingNode",
-    EngineComputedRecordBailWinnerStaleProgram => "engineComputedRecordBailWinnerStaleProgram",
-    EngineComputedRecordBailWinnerStalePriority => "engineComputedRecordBailWinnerStalePriority",
     EngineComputedRecordBailUnchangedWinners => "engineComputedRecordBailUnchangedWinners",
-    EngineComputedRecordBailIncompleteWinners => "engineComputedRecordBailIncompleteWinners",
-    EngineComputedRecordBailRecord => "engineComputedRecordBailRecord",
-    EngineComputedRecordBailProperty => "engineComputedRecordBailProperty",
-    EngineComputedRecordBailWinner => "engineComputedRecordBailWinner",
-    EngineComputedRecordBailWinnerOperator => "engineComputedRecordBailWinnerOperator",
-    EngineComputedRecordBailWinnerSpelling => "engineComputedRecordBailWinnerSpelling",
-    EngineComputedRecordBailWinnerElement => "engineComputedRecordBailWinnerElement",
-    EngineComputedRecordBailWinnerAnimated => "engineComputedRecordBailWinnerAnimated",
-    EngineComputedRecordBailNoEnvironment => "engineComputedRecordBailNoEnvironment",
-    EngineComputedRecordBailCustomProperties => "engineComputedRecordBailCustomProperties",
-    EngineComputedRecordBailSubstitution => "engineComputedRecordBailSubstitution",
+    EngineComputedRecordBailCustomPropertyCssWide => "engineComputedRecordBailCustomPropertyCssWide",
     EngineComputedRecordSubstitutions => "engineComputedRecordSubstitutions",
     EngineComputedRecordSubstitutionMemoHits => "engineComputedRecordSubstitutionMemoHits",
     EngineCustomPropertyEnvironmentsResolved => "engineCustomPropertyEnvironmentsResolved",
     EngineCustomPropertyEnvironmentMemoHits => "engineCustomPropertyEnvironmentMemoHits",
     EngineCustomPropertyEnvironmentBails => "engineCustomPropertyEnvironmentBails",
-    EngineComputedRecordBailFontPhase => "engineComputedRecordBailFontPhase",
-    EngineComputedRecordBailRecordParent => "engineComputedRecordBailRecordParent",
-    EngineComputedRecordBailDrive => "engineComputedRecordBailDrive",
-    EngineComputedRecordBailValue => "engineComputedRecordBailValue",
-    EngineComputedRecordBailAssemble => "engineComputedRecordBailAssemble",
-    EngineComputedRecordBailRecordOverlay => "engineComputedRecordBailRecordOverlay",
-    EngineComputedRecordBailRecordTable => "engineComputedRecordBailRecordTable",
+    EngineComputedRecordBailRootFontInputs => "engineComputedRecordBailRootFontInputs",
+    EngineComputedRecordBailDriveTreeCounting => "engineComputedRecordBailDriveTreeCounting",
     PrefixDeadDeltaBailMatched => "prefixDeadDeltaBailMatched",
     PrefixDeadDeltaBailOwnAdditions => "prefixDeadDeltaBailOwnAdditions",
     PrefixDeadDeltaBailEndpoints => "prefixDeadDeltaBailEndpoints",
@@ -219,11 +176,6 @@ define_counters! {
     Tier3RefusalRetainedMatchAnswerBytes => "tier3RefusalRetainedMatchAnswerBytes",
     MatchAnswerSignatures => "matchAnswerSignatures",
     MatchAnswerSignatureReuses => "matchAnswerSignatureReuses",
-    SelectorTruthSetMisses => "selectorTruthSetMisses",
-    SelectorTruthSetHits => "selectorTruthSetHits",
-    SelectorTruthSetRows => "selectorTruthSetRows",
-    SelectorTruthDerivedAnswerMisses => "selectorTruthDerivedAnswerMisses",
-    SelectorTruthDerivedAnswerHits => "selectorTruthDerivedAnswerHits",
     RetainedMatchAnswerReuses => "retainedMatchAnswerReuses",
     RetainedSelectorIncidenceBatchPrograms => "retainedSelectorIncidenceBatchPrograms",
     RetainedSelectorIncidenceBatchRows => "retainedSelectorIncidenceBatchRows",
@@ -347,6 +299,9 @@ define_counters! {
     TransitionProofWinnerGap => "transitionProofWinnerGap",
     TransitionProofPriorityWin => "transitionProofPriorityWin",
     SharedStyleRecordHits => "sharedStyleRecordHits",
+
+    // How many style scopes hold a published `@keyframes` row now.
+    AnimationKeyframeScopes => "animationKeyframeScopes",
 }
 
 /// The counter set for one document.

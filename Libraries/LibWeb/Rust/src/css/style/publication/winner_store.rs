@@ -20,7 +20,12 @@ pub(super) enum WinnerValue {
         source: WinnerSource,
         index: usize,
     },
-    Substituted(RetainedStyleValueData),
+    /// A value substituted from what `source` declared, which keeps the sheet a `url()` in it
+    /// resolves against.
+    Substituted {
+        value: RetainedStyleValueData,
+        source: WinnerSource,
+    },
 }
 
 pub(super) struct WinnerDeclaration {
@@ -109,6 +114,20 @@ impl WinnerStore {
             + self.by_property.capacity() * size_of::<u16>()) as u64
     }
 
+    pub(super) fn container_relative_length_unit_mask(&self, engine: &RetainedState) -> u8 {
+        let view = self.view(engine);
+        self.declarations.iter().fold(0, |mask, declaration| {
+            mask | view.dependencies(declaration).container_relative_length_unit_mask
+        })
+    }
+
+    pub(super) fn uses_tree_counting_function(&self, engine: &RetainedState) -> bool {
+        let view = self.view(engine);
+        self.declarations
+            .iter()
+            .any(|declaration| view.dependencies(declaration).uses_tree_counting_function)
+    }
+
     pub(super) fn view<'a>(&'a self, engine: &'a RetainedState) -> WinnerView<'a> {
         WinnerView { store: self, engine }
     }
@@ -149,7 +168,7 @@ pub(super) fn shorthand_longhand_data(property: u16, data: &StyleValueData) -> O
 impl WinnerView<'_> {
     fn value<'a>(&'a self, declaration: &'a WinnerDeclaration) -> &'a StyleValueData {
         let written = match &declaration.value {
-            WinnerValue::Substituted(value) => return value.data(),
+            WinnerValue::Substituted { value, .. } => return value.data(),
             WinnerValue::Written { node, source, index } => match source {
                 WinnerSource::Rule(rule) => &self.engine.program.written_values_of(*rule)[*index],
                 WinnerSource::Element(kind) => &self.engine.facts.element_written_declared_values(*node, *kind)[*index],
@@ -165,25 +184,80 @@ impl WinnerView<'_> {
     }
 }
 
+impl WinnerStore {
+    /// The resource context of each declaration, in cascade order, as the drive reads a winner's
+    /// source slot.
+    pub(super) fn drive_resource_contexts(
+        &self,
+        engine: &RetainedState,
+    ) -> Vec<crate::css::style_compute::FfiStyleSheetResourceContext> {
+        let view = self.view(engine);
+        if !self
+            .declarations
+            .iter()
+            .any(|declaration| view.dependencies(declaration).may_need_style_sheet_resource_context)
+        {
+            return Vec::new();
+        }
+        self.declarations
+            .iter()
+            .map(|declaration| {
+                view.resource_context(declaration).map_or(
+                    crate::css::style_compute::FfiStyleSheetResourceContext::empty(),
+                    |context| context.as_drive_context(),
+                )
+            })
+            .collect()
+    }
+}
+
+impl<'a> WinnerView<'a> {
+    fn dependencies(&self, declaration: &WinnerDeclaration) -> ExternalValueDependencies {
+        let memoized = declaration.dependencies.load(Ordering::Relaxed);
+        if memoized & DEPENDENCIES_COMPUTED != 0 {
+            return unpack_dependencies(memoized);
+        }
+        let dependencies = external_value_dependencies(self.value(declaration));
+        declaration
+            .dependencies
+            .store(pack_dependencies(dependencies), Ordering::Relaxed);
+        dependencies
+    }
+
+    /// The resource context of the sheet a rule declaration came from, written or substituted. An element's own
+    /// declarations resolve against the document's base URL, as they do in the host's cascade.
+    fn resource_context(
+        &self,
+        declaration: &WinnerDeclaration,
+    ) -> Option<&'a super::resource_contexts::StyleSheetResourceContext> {
+        let (WinnerValue::Written {
+            source: WinnerSource::Rule(rule),
+            ..
+        }
+        | WinnerValue::Substituted {
+            source: WinnerSource::Rule(rule),
+            ..
+        }) = declaration.value
+        else {
+            return None;
+        };
+        let engine: &'a RetainedState = self.engine;
+        engine
+            .document_resource_contexts
+            .for_source(engine.rule_source_identity(rule)?)
+    }
+}
+
 impl CascadedValues for WinnerView<'_> {
     fn winning_declaration(&self, property: u16) -> Option<WinningDeclaration> {
         let (index, declaration) = self.store.declaration(property)?;
         let value = self.value(declaration);
-        let memoized = declaration.dependencies.load(Ordering::Relaxed);
-        let dependencies = if memoized & DEPENDENCIES_COMPUTED == 0 {
-            let dependencies = external_value_dependencies(value);
-            declaration
-                .dependencies
-                .store(pack_dependencies(dependencies), Ordering::Relaxed);
-            dependencies
-        } else {
-            unpack_dependencies(memoized)
-        };
+        let dependencies = self.dependencies(declaration);
         Some((
             std::ptr::from_ref(value).cast(),
             declaration.important,
             u32::try_from(index).unwrap(),
-            false,
+            self.resource_context(declaration).is_some(),
             dependencies,
         ))
     }
@@ -233,7 +307,6 @@ mod tests {
                 })
                 .collect(),
             written.into(),
-            true,
         );
         let owners = Arc::strong_count(&observer);
         let store = WinnerStore::new(
@@ -275,5 +348,65 @@ mod tests {
         assert_eq!(Arc::strong_count(&observer), owners);
         drop(store);
         assert_eq!(Arc::strong_count(&observer), owners);
+    }
+}
+
+impl WinnerStore {
+    pub(super) fn drive_random_base_values(
+        &self,
+        engine: &mut RetainedState,
+        node: StyleNodeID,
+    ) -> Drive<Vec<crate::css::style_compute::FfiRandomBaseValue>> {
+        let view = self.view(engine);
+        let mut sharings = Vec::new();
+        for declaration in &self.declarations {
+            if view.dependencies(declaration).has_unfixed_random_sharing {
+                crate::css::style_compute::collect_unfixed_random_sharings_in_value(
+                    view.value(declaration),
+                    &mut sharings,
+                );
+            }
+        }
+        engine.random_base_values_for_sources(node, &sharings)
+    }
+}
+
+impl RetainedState {
+    pub(in crate::css::style) fn random_base_values_for_sources(
+        &mut self,
+        node: StyleNodeID,
+        sharings: &[*const StyleValueData],
+    ) -> Drive<Vec<crate::css::style_compute::FfiRandomBaseValue>> {
+        let mut bases = Vec::with_capacity(sharings.len());
+        let mut missing = false;
+        for &source in sharings {
+            // The winner recipe retains every source until this drive has finished.
+            let StyleValueData::RandomValueSharing {
+                has_name,
+                name,
+                is_auto,
+                element_shared,
+                ..
+            } = (unsafe { &*source })
+            else {
+                unreachable!()
+            };
+            let name = if *has_name { name.units() } else { &[] };
+            let shared = *element_shared || !*is_auto;
+            let key = (name.to_vec(), (!shared).then_some(node));
+            if let Some(&value) = self.random_base_values.get(&key) {
+                bases.push(crate::css::style_compute::FfiRandomBaseValue {
+                    source: source.cast(),
+                    value,
+                });
+            } else {
+                self.random_base_requests.push((node, key.0, shared));
+                missing = true;
+            }
+        }
+        if missing {
+            return Err(Unanswered::Suspended(Suspension::RandomBases));
+        }
+        Ok(bases)
     }
 }

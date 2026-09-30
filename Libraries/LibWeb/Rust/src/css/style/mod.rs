@@ -50,6 +50,8 @@ macro_rules! define_id {
     };
 }
 
+mod anchor_names;
+pub(crate) mod animations;
 mod atoms;
 pub mod batch_matcher;
 pub mod bridge;
@@ -60,16 +62,25 @@ mod child_reactions;
 mod column;
 pub mod compiler;
 mod computed;
+mod container_queries;
 mod counter_context;
-mod custom_property_cascade;
+pub(crate) mod custom_property_cascade;
 mod custom_property_environments;
+mod deferred_pseudo;
 #[cfg(test)]
 mod differential_tests;
+pub(crate) mod drain_table;
+pub(crate) mod engine_home;
+pub(crate) mod engine_sample;
+mod environment_move;
 pub mod exact_matcher;
 pub use crate::fast_hash;
+pub(crate) mod flight_style_rows;
 mod flush;
 mod fnv;
+mod font_faces;
 mod font_resolution;
+pub(crate) mod host_pins;
 pub mod impact;
 pub mod index;
 mod input_routing;
@@ -82,17 +93,25 @@ pub mod memory;
 mod native_rules;
 pub mod order;
 mod ordering;
+pub(crate) mod owner_calls;
 mod partial_view;
 mod planning;
 mod prefix;
 pub mod program;
 mod program_updates;
 mod publication;
+pub(crate) mod published_record;
+pub(crate) mod record_payloads;
 #[cfg(feature = "style-recording")]
 pub mod record_replay;
+mod resource_contexts;
 mod routing;
 mod sorted_merge;
-mod style_invalidation;
+pub(crate) mod style_invalidation;
+mod transition_baselines;
+pub(crate) mod transition_step;
+mod weak_pool;
+pub(crate) use transition_baselines::InheritedAnimatedValue;
 #[cfg(not(feature = "style-recording"))]
 pub mod record_replay {
     include!(concat!(env!("OUT_DIR"), "/style_engine_event_kind_stub_generated.rs"));
@@ -144,16 +163,17 @@ pub mod record_replay {
 }
 pub mod relative_selector;
 pub mod selector;
+pub mod selector_evaluation;
 mod shareable;
 mod shared_vector;
 mod sheet_occurrences;
+mod size_container_invalidation;
 mod specified_value;
 pub mod transaction;
 mod transaction_view;
 pub mod tree;
 
 use atoms::DocumentAtoms;
-use atoms::PinnedAtoms;
 use atoms::ReclaimedStyleAtom;
 use catalog::*;
 use column::BitColumn;
@@ -162,17 +182,13 @@ use fast_hash::FastMap as HashMap;
 use fast_hash::FastSet as HashSet;
 use planning::*;
 use smallvec::SmallVec;
-use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use crate::css::cascaded_properties::CascadeOrigin;
 use crate::css::cascaded_properties::CascadedPropertyStore;
-use crate::css::cascaded_properties::FfiCascadeBlock;
-use crate::css::cascaded_properties::FfiSourceSlotAssignment;
 use crate::css::computed_values::computed_group_dependency_mask;
 use crate::css::computed_values::computed_group_output_mask;
 use crate::css::host_shared::{HostShared, SharedPayload};
@@ -188,7 +204,11 @@ use instrumentation::Counters;
 use exact_matcher::ExactMatchContext;
 use exact_matcher::ExactMatcher;
 
+pub use computed::HOLDS_IMAGE_VALUES;
 pub use counter_context::StyleEngine;
+pub(crate) use engine_home::PendingFacts;
+pub use engine_home::{OwnedStyleEngine, StyleEngineHandle, StyleEngineInputHandle};
+pub use inputs::{PublishedBoxFacts, PublishedTextSource, TextStyleParentFacts};
 
 use batch_matcher::AncestorRequirements;
 use batch_matcher::AncestorRequirementsCache;
@@ -265,7 +285,6 @@ use program::RuleID;
 use program::RuleKind;
 use program::RuleVersion;
 use program::SelectorProgramID;
-use program::SemanticDeclarationID;
 use program::SheetID;
 use program::StyleSheetObjectID;
 use program::StyleSheetProgram;
@@ -343,163 +362,6 @@ const RETAINED_WITNESS_SIBLING_STEPS: usize = 64;
 /// How much of a sibling sequence the first fact batch asks for. A scan that stops early wastes at
 /// most this many rows, which is cheaper than the restart a smaller window would cost.
 const INITIAL_SIBLING_FACT_WINDOW: usize = 8;
-
-mod verification {
-    use super::Counters;
-    use super::MatchAnswerID;
-    use super::RetainedState;
-    use super::RuleMatch;
-    use super::StyleNodeID;
-    #[cfg(test)]
-    use std::cell::Cell;
-    use std::sync::OnceLock;
-
-    static STYLE_ANSWER_PATCH: OnceLock<bool> = OnceLock::new();
-    static SELECTOR_TRUTH_DERIVATION: OnceLock<bool> = OnceLock::new();
-    static CASCADE_WINNERS: OnceLock<bool> = OnceLock::new();
-    static STYLE_PLAN_PROVENANCE: OnceLock<bool> = OnceLock::new();
-    static PUBLISHED_STYLE_TRANSACTION: OnceLock<bool> = OnceLock::new();
-    static PREFIX_RELATION: OnceLock<bool> = OnceLock::new();
-
-    #[cfg(test)]
-    thread_local! {
-        static SELECTOR_TRUTH_DERIVATION_OVERRIDE: Cell<bool> = const { Cell::new(false) };
-    }
-
-    fn enabled(gate: &OnceLock<bool>, variable: &str) -> bool {
-        *gate.get_or_init(|| std::env::var_os(variable).is_some())
-    }
-
-    pub(super) struct StyleAnswerVerifier<'a> {
-        engine: &'a mut RetainedState,
-        counters: &'a mut Counters,
-    }
-
-    impl StyleAnswerVerifier<'_> {
-        pub(super) fn verify_match_answer(&mut self, answer: &[RuleMatch], node: StyleNodeID, description: &str) {
-            let cold = self
-                .engine
-                .exact_match_answer_for_verification(node, self.counters)
-                .expect("cold matching must answer wherever a retained answer did");
-            assert_eq!(answer, cold, "{description} differs from cold matching for {node:?}");
-        }
-
-        pub(super) fn verify_cascade_answer(&mut self, answer: &[RuleMatch], node: StyleNodeID, description: &str) {
-            let (cold, _) = self
-                .engine
-                .exact_cascade_answer_for_verification(node, self.counters)
-                .expect("cold matching must answer wherever a retained answer did");
-            assert_eq!(answer, cold, "{description} differs from cold matching for {node:?}");
-        }
-
-        pub(super) fn verify_retained_cascade_input(
-            &mut self,
-            effects: &super::AnswerEffects,
-            node: StyleNodeID,
-            cascade_input: MatchAnswerID,
-        ) {
-            self.engine
-                .verify_retained_cascade_input(effects, node, cascade_input, self.counters);
-        }
-    }
-
-    /// Re-derive every patched or reused retained answer cold and compare it. The callback receives
-    /// only the verifier capability, so it cannot publish through or otherwise mutate the engine.
-    pub(super) fn style_answer_patch(
-        engine: &mut RetainedState,
-        counters: &mut Counters,
-        check: impl FnOnce(&mut StyleAnswerVerifier<'_>),
-    ) {
-        if enabled(&STYLE_ANSWER_PATCH, "LIBWEB_VERIFY_STYLE_ANSWER_PATCH") {
-            check(&mut StyleAnswerVerifier { engine, counters });
-        }
-    }
-
-    pub(super) fn selector_truth_derivation_is_enabled() -> bool {
-        #[cfg(test)]
-        if SELECTOR_TRUTH_DERIVATION_OVERRIDE.get() {
-            return true;
-        }
-        *SELECTOR_TRUTH_DERIVATION.get_or_init(|| {
-            std::env::var_os("LIBWEB_VERIFY_STYLE_ANSWER_PATCH").is_some()
-                || std::env::var_os("LIBWEB_VERIFY_SELECTOR_TRUTH_DERIVATION").is_some()
-        })
-    }
-
-    #[cfg(test)]
-    pub(super) fn with_selector_truth_derivation_enabled<T>(run: impl FnOnce() -> T) -> T {
-        struct RestoreOverride<'a> {
-            value: &'a Cell<bool>,
-            previous: bool,
-        }
-
-        impl Drop for RestoreOverride<'_> {
-            fn drop(&mut self) {
-                self.value.set(self.previous);
-            }
-        }
-
-        SELECTOR_TRUTH_DERIVATION_OVERRIDE.with(|value| {
-            let restore = RestoreOverride {
-                previous: value.replace(true),
-                value,
-            };
-            let result = run();
-            drop(restore);
-            result
-        })
-    }
-
-    /// Compare complete retained cascade winners with the legacy cascade output.
-    pub(super) fn cascade_winners(engine: &RetainedState, check: impl FnOnce(&RetainedState)) {
-        if enabled(&CASCADE_WINNERS, "LIBWEB_VERIFY_CASCADE_WINNERS") {
-            check(engine);
-        }
-    }
-
-    /// Require every scoped style transaction output to name semantic provenance.
-    pub(super) fn style_plan_provenance(engine: &RetainedState, check: impl FnOnce(&RetainedState)) {
-        if enabled(&STYLE_PLAN_PROVENANCE, "LIBWEB_VERIFY_STYLE_PLAN_PROVENANCE") {
-            check(engine);
-        }
-    }
-
-    /// Require a published style transaction to complete without another selector query.
-    pub(super) fn published_style_transaction(engine: &RetainedState, check: impl FnOnce(&RetainedState)) {
-        if enabled(
-            &PUBLISHED_STYLE_TRANSACTION,
-            "LIBWEB_VERIFY_PUBLISHED_STYLE_TRANSACTION",
-        ) {
-            check(engine);
-        }
-    }
-
-    pub(super) fn prefix_relation_is_enabled() -> bool {
-        enabled(&PREFIX_RELATION, "LIBWEB_VERIFY_PREFIX_RELATION")
-    }
-
-    pub(super) fn gate_bits() -> u8 {
-        u8::from(enabled(&STYLE_ANSWER_PATCH, "LIBWEB_VERIFY_STYLE_ANSWER_PATCH"))
-            | (u8::from(enabled(&CASCADE_WINNERS, "LIBWEB_VERIFY_CASCADE_WINNERS")) << 1)
-            | (u8::from(enabled(&STYLE_PLAN_PROVENANCE, "LIBWEB_VERIFY_STYLE_PLAN_PROVENANCE")) << 2)
-            | (u8::from(enabled(
-                &PUBLISHED_STYLE_TRANSACTION,
-                "LIBWEB_VERIFY_PUBLISHED_STYLE_TRANSACTION",
-            )) << 3)
-            | (u8::from(selector_truth_derivation_is_enabled()) << 4)
-            | (u8::from(prefix_relation_is_enabled()) << 5)
-    }
-}
-
-use verification::{
-    cascade_winners as verify_cascade_winners, published_style_transaction as verify_published_style_transaction,
-    selector_truth_derivation_is_enabled as verify_selector_truth_derivation_is_enabled,
-    style_answer_patch as verify_style_answer_patch, style_plan_provenance as verify_style_plan_provenance,
-};
-
-fn verification_gate_bits() -> u8 {
-    verification::gate_bits()
-}
 
 fn exact_tree_routing_is_selective(changed_nodes: usize, document_nodes: usize) -> bool {
     changed_nodes <= SMALL_CANDIDATE_SOURCE
@@ -773,11 +635,14 @@ impl ProgramStaging {
     }
 }
 
-/// One document's style engine.
-struct QuerySortedCandidatesStamp {
-    generation: u64,
-    root: StyleNodeID,
-    keys: Vec<DispatchKey>,
+/// One match of an answer a transaction publishes, as the custom-property cascade reads it.
+#[derive(Clone, Copy)]
+pub(super) struct BatchCustomPropertyMatch {
+    rule: RuleID,
+    tree_scope: TreeScopeID,
+    specificity: Specificity,
+    scope_proximity: u32,
+    pseudo: Option<u16>,
 }
 
 /// Long-lived engine state: the document, its program, derived results and cross-flush
@@ -791,9 +656,28 @@ pub struct RetainedState {
     /// points are `refresh_admission_facts`'s callers.
     admission: AdmissionFacts,
     deferred_pseudo_element: Option<tree::PseudoElementKind>,
+    /// The pseudo kind whose derived reactions remain dormant outside the current observability
+    /// interval, independently of whether its publication is globally deferred right now.
+    latent_deferred_pseudo_element: Option<tree::PseudoElementKind>,
+    deferred_pseudo_element_observable_nodes: Vec<StyleNodeID>,
     tree: StyleNodeTree,
     program: StyleSheetProgram,
     native_rules: native_rules::NativeRuleRegistry,
+    /// What the container conditions of the rows the engine answered left for the host to record,
+    /// per element, taken when the host installs the element's record.
+    container_effects_for_host: drain_table::DrainTable<StyleNodeID, container_queries::ContainerVerdict>,
+    /// Each node's gated rules and whether their conditions held when its winners were published:
+    /// the winners hold a gated rule's declarations exactly where it did.
+    published_container_verdicts: HashMap<StyleNodeID, Vec<(RuleID, bool, bool)>>,
+    /// Nodes whose winners were published while an ancestor's answer was moving in the same
+    /// transaction, so their gated rules' conditions could not be decided when they were.
+    container_gates_unheld: HashSet<StyleNodeID>,
+    container_input_nodes: HashSet<StyleNodeID>,
+    /// What the host learned about size container queries, which finds the elements a size
+    /// query container's new box moves.
+    size_container_queries: size_container_invalidation::SizeContainerQueryFacts,
+    /// The anchor names the installed records of elements register in their tree scopes.
+    anchor_names: anchor_names::AnchorNameRegistry,
     declaration_block_version: u32,
     /// Whether the last transaction taken planned nothing but derived child reactions.
     last_transaction_only_derived_child_reactions: bool,
@@ -805,39 +689,70 @@ pub struct RetainedState {
     /// points for rules that can no longer decide.
     routing_needs_detachment_sweep: bool,
     match_workspace: MatchScratch,
-    /// Sibling positions and relation answers shared by the candidates of one DOM selector query.
-    /// A query can't mutate the tree it walks — so this is reset per-query, rather than per-candidate.
-    query_match_workspace: MatchScratch,
-    /// Advanced when a selector query settles over a changed document — so a run of queries over
-    /// an unchanged one shares a single workspace. A query that never asks a positional question
-    /// pays a comparison, rather than a workspace rebuild.
-    selector_query_generation: u64,
-    /// The transaction version the last selector query settled at; the change detector for the
-    /// generation above.
-    query_settled_transaction_version: StyleTransactionVersion,
-    /// Tree-ordered candidates of the last posting-driven selector query. querySelector in a loop
-    /// typically asks with the same subject keys every time — so collect-and-sort pays once per
-    /// document change, rather than once per query.
-    query_sorted_candidates: Vec<StyleNodeID>,
-    /// What `query_sorted_candidates` was computed from. Same stamp, same list.
-    query_sorted_candidates_stamp: Option<QuerySortedCandidatesStamp>,
-    /// node -> preorder rank under the stamped root; how candidates get their tree order without a
-    /// walk per query.
-    query_preorder_ranks: HashMap<StyleNodeID, u32>,
-    query_preorder_ranks_stamp: Option<(u64, StyleNodeID)>,
-    /// Which query `query_match_workspace` holds answers for.
-    query_workspace_generation: u64,
     /// Scratch for the fact rows one exact candidate evaluation covers, reused across candidates.
     exact_covered_scratch: Vec<StyleNodeID>,
     cascade_compaction_scratch: ordering::CascadeCompactionWorkspace,
     cascade_compaction_scratch_memory: MemoryLease,
+    /// The document's top layer, in the order its members were added. The membership bit each
+    /// element carries says whether a member is rendered; the order is the order their boxes are
+    /// built in, and belongs to the document rather than to any one element.
+    top_layer_elements: Vec<StyleNodeID>,
     /// Monotonic identity assigned to each non-empty normalized style transaction.
     next_style_transaction_version: StyleTransactionVersion,
-    /// Latest document-wide scalar computation facts, copied at the transaction boundary.
-    document_style_computation_inputs: Option<bridge::FfiDocumentStyleComputationInputs>,
+    /// Latest document-wide scalar computation facts, copied at the transaction boundary. The host
+    /// publishes them with every transaction, before it asks for any row.
+    document_style_computation_inputs: bridge::FfiDocumentStyleComputationInputs,
+    document_media_snapshot: custom_property_cascade::DocumentMediaSnapshot,
+    document_function_snapshot: custom_property_cascade::DocumentFunctionSnapshot,
+    /// The viewport the last flush drove records against. A record that reads the viewport cannot
+    /// stand when it moved, and the viewport is a published input: comparing it here is what tells
+    /// the engine so, without the host naming every reader.
+    driven_viewport: (f64, f64),
+    /// The base URLs a `url()` resolves against, copied at the transaction boundary with the inputs.
+    document_resource_contexts: resource_contexts::DocumentResourceContexts,
+    /// Immutable registry generation used by custom-property style queries during a transaction.
+    custom_property_registry: std::sync::Arc<crate::css::custom_properties::CustomPropertyRegistry>,
+    /// The custom-property environment each element holds, kept so a row that inherits custom
+    /// properties is not the reason a walk to the element it inherits from happens. This is the only
+    /// copy: the host reads an element's environment from here. An element holding none has no
+    /// entry, which most elements are.
+    element_custom_property_data: drain_table::FollowedTable<StyleNodeID, inputs::HeldCustomPropertyEnvironment>,
+    /// The custom-property environment each of an element's synthetic pseudo-elements holds, by the
+    /// pseudo-element's kind. The host reads it from here; a missing entry is one holding none.
+    pseudo_element_custom_property_data:
+        drain_table::FollowedTable<(StyleNodeID, u8), inputs::HeldCustomPropertyEnvironment>,
+    /// The environment each element's animations sampled custom properties into, over the one its
+    /// own declarations resolve to. Its own values substitute under it.
+    sampled_custom_property_environments: HashMap<StyleNodeID, u64>,
+    /// The same for the synthetic pseudo-elements whose animations the engine sampled.
+    sampled_pseudo_element_custom_property_environments: HashMap<(StyleNodeID, u8), u64>,
+    /// The elements whose style reads what a moved custom-property environment can change other
+    /// than through `var()`: an `if()` or `inherit()` condition, a custom function, or a style
+    /// container query. The host notes each once; a node keeps it until it is retired.
+    environment_move_recompute_nodes: HashSet<StyleNodeID>,
     /// Every font resolution this document has been given. An evaluation step reads it; only a
-    /// host round between passes adds to it.
+    /// round between passes adds to it.
     font_resolution: Option<font_resolution::FontResolutionCache>,
+    /// The document's `@font-face` table at the generation this update is computing for. Held for
+    /// the whole update so that resolving a font needs nothing the document owns.
+    font_face_snapshot: Option<std::sync::Arc<font_faces::FontFaceSnapshot>>,
+    /// The resolver's memo of answers it has already given, shared with the host so that the
+    /// document can read back the cascades a change to the table makes stale.
+    font_cascade_memo: Option<font_faces::RetainedFontCascadeMemo>,
+    /// The last request computed for the document element, retained so the next update can
+    /// publish its answer before evaluation begins.
+    root_font_request: Option<font_resolution::FontRequest>,
+    /// `font-family: monospace`, the family the monospace font-size recascade resolves an
+    /// ancestor's font-relative lengths against.
+    monospace_font_family: RetainedStyleValueData,
+    /// Random bases are filled between record passes and read by the value drive.
+    random_base_values: HashMap<(Vec<u16>, Option<StyleNodeID>), f64>,
+    random_base_requests: Vec<(StyleNodeID, Vec<u16>, bool)>,
+    /// The most recently committed layout outputs. Layout publishes a complete immutable
+    /// generation; evaluation only reads it.
+    layout_style_snapshots: std::sync::Arc<crate::layout::style_snapshot::LayoutStyleSnapshotStore>,
+    /// Container selection facts copied from each element's last published computed record.
+    container_query_inputs: tree::ContainerQueryInputColumns,
     layer_topology_version: u64,
     sheet_order_version: u64,
 
@@ -855,20 +770,104 @@ pub struct RetainedState {
     /// The nodes whose engine-computed record substituted a custom property into a winner: what
     /// C++ notes as reading custom properties when it installs the record.
     nodes_with_substituted_records: HashSet<StyleNodeID>,
+    /// Nodes whose retained winner drive resolved a sibling-counting value, including one
+    /// produced by custom-property substitution.
+    nodes_with_tree_counting_records: HashSet<StyleNodeID>,
+    /// The nodes whose engine-computed record moved the longhands that declare the element's CSS
+    /// transitions, and whether the registration is the whole of the debt. It is an effect of the
+    /// row rather than a part of the record: the host drains it after the batch, in the order it
+    /// applied the rows. `true` means a delta that moved nothing but those longhands, so no value
+    /// a transition runs on moved and only the registration is owed; `false` means the row also
+    /// moved values the step has to compare, so the host runs the whole step against the record
+    /// the row moved away from.
+    nodes_owing_a_transition_registration: HashMap<StyleNodeID, bool>,
+    /// The nodes whose engine-computed record read a non-inherited property straight from the
+    /// parent, through an explicit `inherit`, and the style groups it read. C++ marks the parent
+    /// with that union so a later change to those groups reaches this element again. It is an
+    /// effect of the row rather than a part of the record: the host drains it after the batch.
+    nodes_owing_explicit_inheritance: HashMap<StyleNodeID, u32>,
+    /// The nodes whose children, as the host marks them, explicitly inherit a non-inherited
+    /// property: a change to the node's non-inherited groups reaches them.
+    children_explicitly_inherit_marks: HashSet<StyleNodeID>,
+    /// What the engine settled for each row of the batch the host is applying, by node, from which
+    /// the engine derives what the row's application derives for the children.
+    engine_row_child_facts: HashMap<StyleNodeID, child_reactions::EngineRowChildFacts>,
+    /// The compositions this batch derived beneath and keeps alive: the host's element still names
+    /// one until the row that replaced it is applied, so the pin is dropped at acknowledgement.
+    batch_pinned_compositions: Vec<(StyleNodeID, u64)>,
+    /// The nodes whose record the engine derived beneath a composition their animations made: the
+    /// host samples those animations again over the new record once the batch is applied.
+    nodes_owing_an_animation_sample: HashSet<StyleNodeID>,
+    /// The elements whose synthetic pseudo-elements the next pass settles over the composition
+    /// the host installed for them: the pass that settled the element left them to it, as the
+    /// element's composition was still to come.
+    pseudo_settles_owed: std::collections::BTreeMap<StyleNodeID, publication::OwedPseudoSettle>,
+    /// The rows whose animations the pass sampled itself, with what it published for them: the
+    /// host installs the composition rather than sampling again, and applies what it left.
+    rows_sampled_in_pass: drain_table::DrainTable<StyleNodeID, engine_sample::SettledRowPublication>,
+    /// The synthetic pseudo-elements whose animations the engine sampled as it settled them over
+    /// their element's composition, with what it published for them: the host installs the
+    /// composition rather than sampling again.
+    pseudo_elements_sampled_in_pass: HashMap<(StyleNodeID, u8), engine_sample::SettledRowPublication>,
+    /// The custom-property environments the engine named for synthetic pseudo-elements as it
+    /// settled their records, which each takes once the host installs its record; `None` for one
+    /// holding none.
+    pseudo_element_environments_named_in_settle:
+        drain_table::FollowedTable<(StyleNodeID, u8), engine_sample::NamedPseudoElementEnvironment>,
+    /// The identity the next overlay the engine composes itself is published under, which the
+    /// high bit keeps apart from the host's.
+    next_engine_animation_overlay_identity: u64,
+    /// https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
+    /// Per transition target, the before-change style its transitions are decided against for the
+    /// rest of the style stabilization epoch, pinned until the epoch commits.
+    transition_baselines: HashMap<(StyleNodeID, u8), u64>,
+    /// The transitions each element holds, which a row's transition step decides over.
+    element_transitions: transition_step::ElementTransitions,
+    /// The transition steps the pass decided, which the host applies where it installs the rows.
+    transition_steps_decided_in_pass: drain_table::DrainTable<StyleNodeID, transition_step::SharedTransitionStep>,
+    /// The transition steps the engine decided for the pseudo-elements it settled, which the host
+    /// applies where it installs their records.
+    pseudo_element_transition_steps_decided_in_pass:
+        drain_table::DrainTable<(StyleNodeID, u8), transition_step::SharedTransitionStep>,
+    /// What each tree scope's registered counter styles are, as one identity per scope. A record
+    /// whose `content` or `list-style-type` names an overridable counter style is only the answer
+    /// while the registry it named is the one in place, so the record carries the identity and a
+    /// later edit to `@counter-style` moves it.
+    counter_style_environment_identities: HashMap<tree::TreeScopeID, u64>,
+    /// The nodes whose engine-computed record moved the longhands that declare the element's CSS
+    /// animations, and the plan each one leaves for the host. Like the transition debt it is an
+    /// effect of the row rather than a part of the record: the host drains it after the batch, in
+    /// the order it applied the rows.
+    nodes_owing_animation_definitions: drain_table::FollowedTable<(StyleNodeID, u8), animations::SettledAnimationPlan>,
+    /// The names of the CSS animations the host holds for each element, which the animation stage
+    /// matches its newly computed definitions against.
+    css_defined_animations: animations::CssDefinedAnimations,
+    /// The timing of every animation the host holds a keyframe effect for, per element and
+    /// pseudo-element, which the animation stage decides relevance from.
+    animation_timing_rows: animations::AnimationTimingRows,
+    /// The effects the host holds for each element and pseudo-element, in composite order, described
+    /// well enough for the animation stage to build its own batch.
+    animation_effect_descriptions: animations::AnimationEffectDescriptions,
+    /// The current time each of the document's animation timelines was sampled at when the style
+    /// update began.
+    animation_timeline_samples: animations::AnimationTimelineSamples,
+    /// The font metrics a `rem` resolves against, as the host last left them.
+    root_element_font_metrics: animations::RootElementFontMetrics,
+    /// The `@keyframes` each of the document's style scopes defines, as the host's rule caches
+    /// resolved them when the style update began.
+    animation_keyframes: animations::AnimationKeyframes,
     /// Whether the registrations used by this transaction differ from the preceding one. A
-    /// previously substituted record must then be recomputed by C++, which implements registered
-    /// custom properties, even when its cascade winners did not move.
+    /// previously substituted record must then be driven again even when its cascade winners
+    /// did not move.
     custom_property_registrations_changed: bool,
-    /// Pending selections for elements, and separately for the few pseudo-elements that hold one.
-    /// Both are keyed by the element so that retiring it releases every selection by key.
-    pending_element_style_computation_selections: HashMap<StyleNodeID, StyleComputationSelection>,
-    pending_pseudo_style_computation_selections: HashMap<StyleNodeID, Vec<(u8, StyleComputationSelection)>>,
     /// Records the engine derived for published reactions that C++ has not installed yet. Their
     /// columns already moved so descendants in the same flush build on them; the cascade state
     /// and answer consumption follow C++'s acknowledgement, and a discarded transaction reverts
     /// the columns of the ones it never installed. Group records by node so acknowledging or
     /// abandoning one element visits only its own record and pseudo-elements.
     engine_computed_records_pending: HashMap<StyleNodeID, SmallVec<[publication::PendingEngineComputedRecord; 1]>>,
+    /// Pseudo records produced by synchronous demands, held until a batch settles the node.
+    demand_pseudo_records: HashMap<(StyleNodeID, u8), computed::FinalStyleRecordID>,
     /// First records derived earlier, by what they were derived from, for later elements alike.
     /// Pseudo-element records the engine derived, by what they were derived from, for elements
     /// alike in that to share.
@@ -877,12 +876,23 @@ pub struct RetainedState {
     /// Nodes whose style input the C++ computation has to settle: C++ recorded one, or their
     /// parent's display moved, which their box-type transformation reads.
     style_input_nodes_for_cpp: HashSet<StyleNodeID>,
+    tree_counting_input_nodes: HashSet<StyleNodeID>,
     /// Elements whose parent's display moved under their record this transaction: their
     /// box-type transformation reads it, so their record is driven again in full.
     parent_inputs_moved_nodes: HashSet<StyleNodeID>,
     engine_pseudo_record_cache: HashMap<publication::PseudoCohortKey, computed::FinalStyleRecordID>,
+    /// Whether the answer the current transaction publishes for each node has winners complete
+    /// but for custom properties, read for the record loop: the answers are installed after it.
+    batch_answers_complete_but_for_custom_properties: HashMap<StyleNodeID, bool>,
+    /// Beside them, the matches in each answer that declare custom properties, read the same way:
+    /// what the node's custom-property cascade runs over while its answer is not installed.
+    batch_custom_property_matches: HashMap<StyleNodeID, Vec<BatchCustomPropertyMatch>>,
+    /// Beside them, each published host's matches for the element-backed pseudo-elements, which
+    /// the elements backing them cascade from while the host's answer is not installed.
+    batch_backing_pseudo_matches: HashMap<StyleNodeID, Vec<RuleMatch>>,
     engine_cold_record_cache: HashMap<publication::ColdRecordKey, publication::ColdRecord>,
     engine_cold_record_donors: HashMap<publication::ColdRecordDonorKey, Vec<publication::ColdRecordDonor>>,
+    engine_warm_record_cohorts: HashMap<publication::RecordCohortKey, publication::RecordCohortValue>,
     computed_group_set_memory: MemoryLease,
     custom_property_environment_memory: MemoryLease,
     computed_fixed_metadata_memory: MemoryLease,
@@ -898,7 +908,6 @@ pub struct RetainedState {
     /// exists inside one answers the pages that need it least. An id is never reused for a
     /// different answer, so a consumer holding one across a flush is never told the wrong thing.
     match_answers: MatchAnswerCatalog,
-    selector_truth_sets: SelectorTruthSetCatalog,
     retained_match_answers: RetainedMatchAnswers,
     retained_selector_incidences: RetainedSelectorIncidences,
     /// Whether the current transaction changes activation without changing selector inputs.
@@ -922,7 +931,7 @@ pub struct RetainedState {
     /// Prefix transitions and their canonical answers have one document-lifetime owner. Matching
     /// traversals and answer patches borrow it synchronously and change its cache-owned lifecycle
     /// between scratch and retained residency without moving the payload.
-    prefix_caches: Rc<RefCell<PrefixCaches>>,
+    prefix_caches: std::sync::Arc<SharedPrefixCaches>,
     /// Test-only: force the bounded completion window regardless of headroom.
     #[cfg(test)]
     force_bounded_prefix_completion: bool,
@@ -935,8 +944,6 @@ pub struct RetainedState {
     transaction_fact_view: Option<TransactionFactView>,
     facts: ElementFactStore,
     programs: SelectorPrograms,
-    attribute_value_text_names: HashSet<StyleAtomID>,
-    attribute_value_text_requirements_version: u64,
     selector_programs_need_sweep: bool,
     routing: Arc<RoutingRegistry>,
     /// Exact selector changes and refresh requests emitted by the current transaction.
@@ -997,15 +1004,22 @@ pub struct RetainedState {
 /// Host-facing engine state: C++ ownership, journal intake and the record/replay adapters.
 /// Never reachable from an evaluation step.
 pub struct HostState {
-    /// The host's synchronous font resolver. A step that misses the cache returns `NeedsInput`;
-    /// the round outside the step calls this and the node is retried.
+    /// The style pass the host is installing wave by wave, between two of its waves.
+    pub(super) suspended_style_pass: Option<Box<flush::StylePass>>,
+    /// The cold matching batch of the style update the host is installing, once one of its
+    /// transactions published rows: whether it holds a traversal the update ends.
+    pub(super) update_cold_matching_batch: Option<bool>,
+    /// The font resolver the host installed. A step that misses the cache returns `NeedsInput`;
+    /// the round outside the step resolves from the published table and the node is retried.
+    /// This is not a host service: it reads no document, and carries no context that could.
     font_resolver: Option<font_resolution::FontResolverHost>,
+    /// Random bases allocated while freezing style inputs. Named sharing scopes are document-wide;
+    /// `auto` scopes include the element. This is host preparation state, not part of a sealed step.
+    random_state: std::collections::hash_map::RandomState,
+    random_serial: u64,
     /// The capture-local document identity, absent when record-replay is disabled.
     #[cfg(feature = "style-recording")]
     recording_id: Option<u64>,
-    /// The instrumentation state to restore after C++ materializes a record for verification.
-    computed_record_verification_counters: Option<Box<Counters>>,
-    computed_record_verification_pins: Vec<u64>,
     journal: NormalizationJournal,
     /// Local selector facts through the latest geometry read which reused committed layout. A
     /// normal style observation merges this into `journal`; a newly introduced transition can
@@ -1014,13 +1028,24 @@ pub struct HostState {
     flushing_deferred_geometry_journal: bool,
     /// Exact element reactions retained across rootless flushes until a style root can consume them.
     deferred_element_style_inputs: Vec<NormalizedInput>,
+    /// Whether the deferred element style inputs moved other than as the host's copy of them in the engine's home
+    /// follows by itself, which a new copy then follows.
+    deferred_element_style_inputs_moved: bool,
+    /// Pseudo-only reactions held until their otherwise deferred pseudo becomes observable on the
+    /// node. Unlike rootless inputs, these do not keep the document's style update unsettled.
+    latent_deferred_pseudo_element_style_inputs: Vec<NormalizedInput>,
     /// Whether the deferred element style inputs are owed to the next transaction, as opposed to
     /// held back by a flush without a document root.
     deferred_element_style_inputs_are_pending: bool,
+    /// The reactions C++ applied since the last transaction, which it derives the children's from.
+    applied_style_reactions: Vec<child_reactions::AppliedStyleReaction>,
     /// The nodes whose deferred element style input C++ recorded and the engine did not also
     /// derive as a child reaction: what makes the next transaction a new pass of a style change
     /// rather than one more generation of the last one.
     externally_recorded_style_input_nodes: HashSet<StyleNodeID>,
+    /// The record each element holds in the host, keyed by the elements that hold one. The host
+    /// reports every record it installs or clears.
+    held_style_records: HashMap<StyleNodeID, u64>,
     deferred_element_style_input_memory: MemoryLease,
     /// Whether any tree input batch has crossed into the engine. A first batch consisting entirely
     /// of unique arrivals can install its final relation rows as one bulk load.
@@ -1041,18 +1066,48 @@ pub struct HostState {
     /// Borrowed FFI result storage for the most recently published style transaction.
     ffi_style_transaction_output: bridge::FfiStyleTransactionOutput,
     ffi_style_transaction_output_memory: MemoryLease,
+    /// The root and output of a style pass the main thread submitted, which the pass leaves here
+    /// for the main thread to take once it has taken the frame back.
+    submitted_style_pass_output: Option<(StyleNodeID, Box<bridge::FfiStyleTransactionOutput>)>,
     /// Borrowed FFI result storage for the most recent style-node query.
     ffi_style_node_query: Vec<u32>,
     ffi_style_node_query_memory: MemoryLease,
-    /// Borrowed FFI result storage for retained cascade source-slot assignments.
-    ffi_retained_cascade_assignments: Vec<FfiSourceSlotAssignment>,
-    ffi_retained_cascade_assignments_memory: MemoryLease,
     /// Identities released at transaction settlement. The FFI keeps this batch borrowed until C++
     /// has removed its matching fly-string references and atom-keyed memo entries.
     reclaimed_style_atoms: Vec<ReclaimedStyleAtom>,
+    /// The records the answer of the last style transaction names, published for the host's drain of it, which the
+    /// engine's home takes over as whoever reached the engine for the transaction is done with it.
+    pub(super) records_for_drain: Option<Vec<(u64, std::sync::Arc<published_record::PublishedStyleRecord>)>>,
+    /// The records the owner named the host otherwise since whoever reached the engine last was done with it: the
+    /// samples and read demands it answered, which the engine's home takes over with the news.
+    pub(super) records_named: Vec<(u64, std::sync::Arc<published_record::PublishedStyleRecord>)>,
+    /// The compositions the engine published as elements' records since whoever reached it last was done with it, in
+    /// order, which the engine's home takes over with the news.
+    pub(super) compositions_published: Vec<(StyleNodeID, u64)>,
+    /// The rules the main thread compiled that the engine published since whoever reached it last was done with it,
+    /// which go back with the news for the main thread to free.
+    #[expect(clippy::vec_box, reason = "the rules go back boxed as they came")]
+    pub(super) published_rules: Vec<Box<crate::css::rule::compilation::CompiledRules>>,
+    /// What the owner decided of each pseudo-element row it answered last, with the record the row moved to, which the
+    /// engine's home takes over for the host's drain: whether the counter styles the row's generated content names
+    /// differ from the ones its box was built with, as a `CONTENT_COUNTER_STYLES_*` answer.
+    pub(super) content_counter_style_verdicts: drain_table::HandedTable<(StyleNodeID, u8), (u64, u8)>,
+    /// The custom-property environments of elements a transaction retired. Their reference counts
+    /// belong to the host and are not atomic, and a transaction may run on the stage thread, so
+    /// the transaction leaves them here and the bridge releases them on the document thread.
+    retired_custom_property_data: Vec<inputs::RetainedCustomPropertyData>,
+    /// The environment moves a style pass made as it settled a row whose custom-property environment
+    /// moved, by the element each moves, until the host acknowledges the element's republished
+    /// record in its drain and the element takes the moved environment.
+    environment_moves_in_flight: HashMap<StyleNodeID, environment_move::EnvironmentMoveInFlight>,
     /// Whether transaction settlement performed an atom sweep, including a sweep that reclaimed
     /// no identities. Recording consumes this alongside the release batch.
     style_atoms_swept: bool,
+    /// While a submitted style pass runs, the host may name an atom beside it that the engine no
+    /// longer holds, so the pass leaves its sweep to the host's finish of it.
+    atom_sweep_waits_for_host: bool,
+    /// Whether the submitted pass would have swept.
+    atom_sweep_skipped_by_submitted_pass: bool,
     /// Replay reconstructs semantic engine state but not transient C++ query handles. The recorded
     /// release batch supplies their lifetime boundary while still requiring every released atom to
     /// be reclaimable from replay's complete semantic root set.
@@ -1077,12 +1132,6 @@ impl std::ops::DerefMut for StyleEngineState {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.retained
     }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct StyleComputationSelection {
-    pub computed_property_words: [u64; crate::css::property_metadata::LONGHAND_WORD_COUNT],
-    pub computed_property_closure_is_exact: bool,
 }
 
 #[cfg(test)]

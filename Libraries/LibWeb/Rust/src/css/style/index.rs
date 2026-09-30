@@ -32,9 +32,10 @@ use super::column::RemovablePagedColumnPage;
 use super::column::advance_epoch;
 use super::fast_hash::FastMap as HashMap;
 use super::fast_hash::FastSet as HashSet;
+use super::instrumentation::Counter;
+use super::instrumentation::Counters;
 use super::shared_vector::{SharedVector, SharedVectorPool};
 use crate::css::style_value::RetainedStyleValueData;
-use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -52,9 +53,6 @@ use super::program::DeclaredProperty;
 use super::program::EntryID;
 use super::program::RuleID;
 use super::program::SelectorProgramID;
-use super::selector::AttributeCase;
-use super::selector::AttributeOperator;
-use super::selector::AttributeTest;
 use super::sorted_merge::SortedMergeEntry;
 use super::sorted_merge::merge_sorted_by;
 use super::transaction::ElementDeclarationKind;
@@ -74,55 +72,6 @@ impl StyleAtomID {
     #[must_use]
     pub fn is_none(self) -> bool {
         self == Self::NONE
-    }
-}
-
-fn attribute_value_equals(value: &[u16], literal: &[u16], insensitive: bool) -> bool {
-    if !insensitive {
-        return value == literal;
-    }
-    value.len() == literal.len()
-        && value.iter().zip(literal).all(|(&left, &right)| {
-            left == right
-                || match (u8::try_from(left), u8::try_from(right)) {
-                    (Ok(left), Ok(right)) => left.eq_ignore_ascii_case(&right),
-                    _ => false,
-                }
-        })
-}
-
-fn attribute_value_starts_with(value: &[u16], literal: &[u16], insensitive: bool) -> bool {
-    value.len() >= literal.len() && attribute_value_equals(&value[..literal.len()], literal, insensitive)
-}
-
-fn attribute_value_may_match(value: &[u16], literal: &[u16], operator: AttributeOperator, insensitive: bool) -> bool {
-    match operator {
-        AttributeOperator::Presence => true,
-        AttributeOperator::Exact => attribute_value_equals(value, literal, insensitive),
-        AttributeOperator::Includes => {
-            !literal.is_empty()
-                && value
-                    .split(|unit| matches!(unit, 0x20 | 0x09 | 0x0A | 0x0C | 0x0D))
-                    .any(|token| attribute_value_equals(token, literal, insensitive))
-        }
-        AttributeOperator::DashMatch => {
-            attribute_value_equals(value, literal, insensitive)
-                || (value.len() > literal.len()
-                    && value[literal.len()] == u16::from(b'-')
-                    && attribute_value_starts_with(value, literal, insensitive))
-        }
-        AttributeOperator::Prefix => !literal.is_empty() && attribute_value_starts_with(value, literal, insensitive),
-        AttributeOperator::Suffix => {
-            !literal.is_empty()
-                && value.len() >= literal.len()
-                && attribute_value_equals(&value[value.len() - literal.len()..], literal, insensitive)
-        }
-        AttributeOperator::Substring => {
-            !literal.is_empty()
-                && value.len() >= literal.len()
-                && (0..=value.len() - literal.len())
-                    .any(|start| attribute_value_equals(&value[start..start + literal.len()], literal, insensitive))
-        }
     }
 }
 
@@ -354,10 +303,6 @@ impl<T: Clone + Default> PagedOwnedColumn<T> {
         self.values.iter_mut()
     }
 
-    fn indexed_iter(&self) -> impl Iterator<Item = (usize, &T)> {
-        self.indices.iter().copied().zip(self.values.iter())
-    }
-
     fn indexed_iter_mut(&mut self) -> impl Iterator<Item = (usize, &mut T)> {
         self.indices.iter().copied().zip(self.values.iter_mut())
     }
@@ -372,7 +317,11 @@ impl<T: Clone + Default> ShallowCapacityBytes for PagedOwnedColumn<T> {
 #[derive(Clone, Default)]
 struct AttributeCatalogs {
     name_forms: PagedCopyColumn<AttributeNameForms>,
+    name_texts: PagedOwnedColumn<Option<Box<[u16]>>>,
+    names_without_namespace: PagedCopyColumn<bool>,
     value_texts: PagedOwnedColumn<Option<Box<[u16]>>>,
+    /// Whether a name a selector reads has needed the value text, which moved the catalog version.
+    value_texts_read_by_selectors: PagedCopyColumn<bool>,
     language_texts: PagedOwnedColumn<Option<Box<[u16]>>>,
 }
 
@@ -2479,17 +2428,27 @@ impl Default for RuleDispatchTopology {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct AncestorDispatchTopologyID(usize);
 
-thread_local! {
-    static SHARED_CASCADE_RULE_PAGES: RefCell<SharedVectorPool<CascadeOrderRule>> =
-        RefCell::new(SharedVectorPool::new(MemoryCategory::RuleProgram));
-    static SHARED_DISPATCH_BINDINGS: RefCell<SharedVectorPool<DispatchEntryBinding>> =
-        RefCell::new(SharedVectorPool::new(MemoryCategory::RuleProgram));
-    static SHARED_CASCADE_ORDERS: RefCell<SharedVectorPool<u32>> =
-        RefCell::new(SharedVectorPool::new(MemoryCategory::RuleProgram));
-    static SHARED_CASCADE_PROPERTIES: RefCell<SharedVectorPool<u16>> =
-        RefCell::new(SharedVectorPool::new(MemoryCategory::RuleProgram));
-    static SHARED_CASCADE_ENTRIES: RefCell<SharedVectorPool<CascadeEntryData>> =
-        RefCell::new(SharedVectorPool::new(MemoryCategory::RuleProgram));
+/// The pools for the rule bindings and cascade projections of dispatches.
+pub(super) struct DispatchStoragePools {
+    cascade_rule_pages: SharedVectorPool<CascadeOrderRule>,
+    dispatch_bindings: SharedVectorPool<DispatchEntryBinding>,
+    cascade_orders: SharedVectorPool<u32>,
+    cascade_properties: SharedVectorPool<u16>,
+    cascade_entries: SharedVectorPool<CascadeEntryData>,
+    pub(super) prefixes: super::prefix::PrefixPools,
+}
+
+impl Default for DispatchStoragePools {
+    fn default() -> Self {
+        Self {
+            cascade_rule_pages: SharedVectorPool::new(MemoryCategory::RuleProgram),
+            dispatch_bindings: SharedVectorPool::new(MemoryCategory::RuleProgram),
+            cascade_orders: SharedVectorPool::new(MemoryCategory::RuleProgram),
+            cascade_properties: SharedVectorPool::new(MemoryCategory::RuleProgram),
+            cascade_entries: SharedVectorPool::new(MemoryCategory::RuleProgram),
+            prefixes: super::prefix::PrefixPools::default(),
+        }
+    }
 }
 
 pub struct RuleDispatch {
@@ -2505,12 +2464,6 @@ pub struct RuleDispatch {
     cascade_entries: SharedVector<CascadeEntryData>,
     topology: Arc<RuleDispatchTopology>,
     residency: MemoryLease,
-}
-
-impl Drop for RuleDispatchEntries {
-    fn drop(&mut self) {
-        super::matching::forget_dead_shared_dispatches();
-    }
 }
 
 /// Weak references to the actual shared storage, independent of a particular scope wrapper.
@@ -2535,12 +2488,6 @@ impl WeakRuleDispatch {
             cascade_entries: SharedVector::default(),
             residency: MemoryLease::new(MemoryCategory::RuleProgram),
         })
-    }
-}
-
-impl Drop for RuleDispatchTopology {
-    fn drop(&mut self) {
-        super::matching::forget_dead_shared_dispatches();
     }
 }
 
@@ -2777,7 +2724,7 @@ impl RuleDispatch {
         }
     }
 
-    pub(super) fn finish_prefixes(&mut self) {
+    pub(super) fn finish_prefixes(&mut self, pools: &mut super::prefix::PrefixPools) {
         debug_assert!(!self.topology.finalized, "a dispatch can only be finalized once");
         // Finished templates are cloned before extension, so their spare builder capacity
         // does not contribute to subsequent edits.
@@ -2791,7 +2738,7 @@ impl RuleDispatch {
             entries.entry_tails = Vec::new();
         }
         self.entry_bindings.make_mut().shrink_to_fit();
-        self.topology_mut().prefixes.finish();
+        self.topology_mut().prefixes.finish(pools);
         self.finalize_bucket_directories();
         self.rebuild_universal_with_parent_filter();
         self.rebuild_non_prefix_index();
@@ -3015,8 +2962,9 @@ impl RuleDispatch {
     ///
     /// Cascade matching reads this directly while walking candidates. Keeping it in the immutable
     /// dispatch avoids looking the rule up through several program maps for every element.
-    pub fn assign_cascade_properties<Properties: ExactSizeIterator<Item = u16>>(
+    pub(super) fn assign_cascade_properties<Properties: ExactSizeIterator<Item = u16>>(
         &mut self,
+        pools: &mut DispatchStoragePools,
         mut blocks_pruning: impl FnMut(DispatchEntry) -> bool,
         mut properties_of: impl FnMut(DispatchEntry) -> Option<Properties>,
     ) {
@@ -3049,12 +2997,12 @@ impl RuleDispatch {
         // These complete projections retain only numeric identities and declaration inventories.
         // Equal bindings can share across scopes while their mutable match results stay separate.
         for page in self.cascade_order_rule_pages.iter_mut().flatten() {
-            page.share(&SHARED_CASCADE_RULE_PAGES);
+            page.share(&mut pools.cascade_rule_pages);
         }
-        self.entry_bindings.share(&SHARED_DISPATCH_BINDINGS);
-        self.cascade_orders_by_rule_entry.share(&SHARED_CASCADE_ORDERS);
-        self.cascade_properties.share(&SHARED_CASCADE_PROPERTIES);
-        self.cascade_entries.share(&SHARED_CASCADE_ENTRIES);
+        self.entry_bindings.share(&mut pools.dispatch_bindings);
+        self.cascade_orders_by_rule_entry.share(&mut pools.cascade_orders);
+        self.cascade_properties.share(&mut pools.cascade_properties);
+        self.cascade_entries.share(&mut pools.cascade_entries);
     }
 
     #[must_use]
@@ -3345,13 +3293,13 @@ impl RuleDispatch {
 /// selected rows.
 type ElementDeclaredProperties = Box<[DeclaredProperty]>;
 
+#[derive(Default)]
 struct ElementDeclarationRow {
     by_kind: [Option<ElementDeclaredProperties>; ElementDeclarationKind::COUNT],
     /// The value each declaration was written with, parallel to `by_kind`, when the block's
     /// publication carried them; a consumer computing from the declarations reads the spelling.
     written_by_kind: [Option<Box<[RetainedStyleValueData]>>; ElementDeclarationKind::COUNT],
     written_checks_by_kind: [Box<[super::publication::WrittenValueChecks]>; ElementDeclarationKind::COUNT],
-    complete: [bool; ElementDeclarationKind::COUNT],
     /// The custom properties the inline style declares, in declaration order. Only the `style`
     /// attribute declares custom properties.
     custom_declarations: Option<Box<[CustomDeclaration]>>,
@@ -3359,17 +3307,12 @@ struct ElementDeclarationRow {
     custom_written_values: Option<Box<[RetainedStyleValueData]>>,
 }
 
-impl Default for ElementDeclarationRow {
-    fn default() -> Self {
-        Self {
-            by_kind: Default::default(),
-            written_by_kind: Default::default(),
-            written_checks_by_kind: Default::default(),
-            complete: [true; ElementDeclarationKind::COUNT],
-            custom_declarations: None,
-            custom_written_values: None,
-        }
-    }
+pub(super) struct HiddenInlineDeclarations {
+    declared: Option<ElementDeclaredProperties>,
+    written: Option<Box<[RetainedStyleValueData]>>,
+    checks: Box<[super::publication::WrittenValueChecks]>,
+    custom: Option<Box<[CustomDeclaration]>>,
+    custom_written: Option<Box<[RetainedStyleValueData]>>,
 }
 
 impl ElementDeclarationRow {
@@ -3403,9 +3346,7 @@ impl ElementDeclarationRow {
     }
 
     fn is_empty(&self) -> bool {
-        self.by_kind.iter().all(Option::is_none)
-            && self.complete.iter().all(|&complete| complete)
-            && self.custom_declarations.is_none()
+        self.by_kind.iter().all(Option::is_none) && self.custom_declarations.is_none()
     }
 }
 
@@ -3431,21 +3372,8 @@ impl ElementDeclarationRows {
         };
         (
             row.by_kind[kind.index()].as_deref().unwrap_or(&[]),
-            row.complete[kind.index()]
-                && (kind != ElementDeclarationKind::InlineStyle || row.custom_declarations.is_none()),
+            kind != ElementDeclarationKind::InlineStyle || row.custom_declarations.is_none(),
         )
-    }
-
-    /// Whether the longhand declarations of one kind are all published, whatever custom
-    /// properties the inline style declares beside them.
-    fn complete_but_for_custom(&self, node: StyleNodeID, kind: ElementDeclarationKind) -> bool {
-        let Some(index) = node.element_index().map(|index| index as usize) else {
-            return true;
-        };
-        let Some(row) = self.rows.get(index).and_then(Option::as_ref) else {
-            return true;
-        };
-        row.complete[kind.index()]
     }
 
     /// The values the declarations of one kind were written with, parallel to `get`, or nothing
@@ -3466,10 +3394,9 @@ impl ElementDeclarationRows {
         kind: ElementDeclarationKind,
         declared: Vec<DeclaredProperty>,
         written_values: Vec<RetainedStyleValueData>,
-        declarations_are_complete: bool,
     ) {
         let index = node.element_index().expect("only elements carry element declarations") as usize;
-        if declared.is_empty() && declarations_are_complete {
+        if declared.is_empty() {
             self.remove_kind(node, kind);
             return;
         }
@@ -3484,7 +3411,6 @@ impl ElementDeclarationRows {
         row.written_by_kind[kind.index()] =
             (!declared.is_empty() && written_values.len() == declared.len()).then(|| written_values.into_boxed_slice());
         row.by_kind[kind.index()] = (!declared.is_empty()).then(|| declared.into_boxed_slice());
-        row.complete[kind.index()] = declarations_are_complete;
         let after = row.storage_bytes();
         self.payload_bytes = self.payload_bytes - before + after;
     }
@@ -3565,7 +3491,6 @@ impl ElementDeclarationRows {
         row.by_kind[kind.index()] = None;
         row.written_by_kind[kind.index()] = None;
         row.written_checks_by_kind[kind.index()] = Box::default();
-        row.complete[kind.index()] = true;
         if kind == ElementDeclarationKind::InlineStyle {
             if row.custom_declarations.take().is_some() {
                 self.rows_with_custom_declarations -= 1;
@@ -3642,6 +3567,11 @@ pub struct ElementFactStore {
     /// proportional to the stylesheet rather than to the document times the stylesheet.
     custom_property_name_sets: super::intern_table::InternTable<CustomPropertyNameSetID, Box<[StyleAtomID]>>,
     custom_property_name_set_vacancies: Vec<u32>,
+    /// The set each custom-property environment's declared names were interned as, and how many
+    /// names that is, by the environment's identity, which is never reused. Every element under a
+    /// theme hands the engine the theme's names, and this spares hashing and comparing them each
+    /// time. Forgotten as the sets are swept, which is also the only time atoms are reclaimed.
+    custom_property_name_sets_by_environment: HashMap<u64, (u32, usize)>,
     custom_property_set_ids_by_name: PagedOwnedColumn<Vec<u32>>,
     /// Authoritative semantic references from committed fact rows and per-element metadata. This
     /// is indexed by atom so a lifetime sweep visits distinct identities rather than every live
@@ -3650,8 +3580,6 @@ pub struct ElementFactStore {
     language_live_counts: PagedCopyColumn<u32>,
     attribute_name_live_counts: PagedCopyColumn<u32>,
     attribute_value_live_counts: PagedCopyColumn<u32>,
-    /// Changes whenever a newly published value can change an attribute-value query plan.
-    attribute_value_catalog_version: u64,
     custom_property_set_live_counts: Vec<u64>,
     /// Attribute-name forms and value text shared by the primary and each bounded fact batch.
     ///
@@ -4019,12 +3947,12 @@ impl Default for ElementFactStore {
             settled_non_apply_capacity_bytes: 0,
             custom_property_name_sets: super::intern_table::InternTable::default(),
             custom_property_name_set_vacancies: Vec::new(),
+            custom_property_name_sets_by_environment: HashMap::default(),
             custom_property_set_ids_by_name: PagedOwnedColumn::default(),
             atom_live_counts: PagedCopyColumn::default(),
             language_live_counts: PagedCopyColumn::default(),
             attribute_name_live_counts: PagedCopyColumn::default(),
             attribute_value_live_counts: PagedCopyColumn::default(),
-            attribute_value_catalog_version: 1,
             custom_property_set_live_counts: vec![0],
             element_declared_properties: ElementDeclarationRows::default(),
         };
@@ -4607,6 +4535,21 @@ impl ElementFactStore {
             .map(|attribute| attribute.name)
     }
 
+    pub fn substitution_attributes(&self, node: StyleNodeID) -> Vec<(&[u16], &[u16])> {
+        self.rows
+            .row_of(node)
+            .map_or(&[][..], |row| self.rows.attributes_of(row))
+            .iter()
+            .filter(|attribute| self.attribute_name_has_no_namespace(attribute.name))
+            .filter_map(|attribute| {
+                Some((
+                    self.attribute_name_text(attribute.name)?,
+                    self.attribute_value_text(attribute.value)?,
+                ))
+            })
+            .collect()
+    }
+
     #[must_use]
     pub fn states_of_node(&self, node: StyleNodeID) -> StateSet {
         if let Some(row) = self.staging.get(node) {
@@ -4633,6 +4576,15 @@ impl ElementFactStore {
         self.rows
             .row_of(node)
             .map_or(StyleAtomID::NONE, |row| self.rows.language_of(row))
+    }
+
+    /// The element's resolved language tag, empty when it has none. It is recorded once per
+    /// language atom, so the casing is the one the first element spelling that language used.
+    #[must_use]
+    pub fn language_tag_of(&self, node: StyleNodeID) -> &[u16] {
+        self.rows
+            .row_of(node)
+            .map_or(&[][..], |row| self.rows.language_tag_of(row))
     }
 
     #[must_use]
@@ -4789,6 +4741,12 @@ impl ElementFactStore {
         self.metadata_mut(node).animation_names = sorted;
     }
 
+    /// Whether this element's last style resolution read a custom function.
+    pub fn uses_custom_functions(&self, node: StyleNodeID) -> bool {
+        self.metadata_of(node)
+            .is_some_and(|metadata| metadata.uses_custom_functions)
+    }
+
     /// Whether this element's style resolution called a custom function.
     pub fn set_uses_custom_functions(&mut self, node: StyleNodeID, uses: bool, memory: &mut MemoryController) {
         if self
@@ -4854,6 +4812,52 @@ impl ElementFactStore {
         // element resolved to.
         debug_assert!(names.windows(2).all(|pair| pair[0].0 < pair[1].0));
         let set = self.intern_custom_property_name_set(names);
+        self.set_custom_property_name_set(node, set, memory);
+    }
+
+    /// Like [`Self::set_custom_property_names`], for names that are exactly the declared names of
+    /// the custom-property environment `environment` (or of none, where it is zero).
+    pub fn set_environment_custom_property_names(
+        &mut self,
+        node: StyleNodeID,
+        environment: u64,
+        names: &[u32],
+        memory: &mut MemoryController,
+        counters: &mut Counters,
+    ) {
+        self.memory_dirty = true;
+        let remembered = self
+            .custom_property_name_sets_by_environment
+            .get(&environment)
+            .copied()
+            .filter(|&(_, count)| environment != 0 && count == names.len());
+        let set = match remembered {
+            Some((set, _)) => {
+                debug_assert!(
+                    set == 0
+                        || self.custom_property_name_sets[CustomPropertyNameSetID(set)]
+                            .iter()
+                            .map(|atom| atom.0)
+                            .eq(names.iter().copied())
+                );
+                set
+            }
+            None => {
+                counters.bump(Counter::CustomPropertyNameSetsLookedUp);
+                let names = names.iter().copied().map(StyleAtomID).collect::<Vec<_>>();
+                debug_assert!(names.windows(2).all(|pair| pair[0].0 < pair[1].0));
+                let set = self.intern_custom_property_name_set(&names);
+                if environment != 0 {
+                    self.custom_property_name_sets_by_environment
+                        .insert(environment, (set, names.len()));
+                }
+                set
+            }
+        };
+        self.set_custom_property_name_set(node, set, memory);
+    }
+
+    fn set_custom_property_name_set(&mut self, node: StyleNodeID, set: u32, memory: &mut MemoryController) {
         let previous = self
             .metadata_of(node)
             .map_or(0, |metadata| metadata.custom_property_set);
@@ -4982,46 +4986,6 @@ impl ElementFactStore {
         }
     }
 
-    pub(super) fn matching_attribute_values(&self, test: AttributeTest, literal: &[u16]) -> Vec<StyleAtomID> {
-        if test.operator == AttributeOperator::Exact
-            && test.case == AttributeCase::Sensitive
-            && !test.value_atom.is_none()
-        {
-            return vec![test.value_atom];
-        }
-
-        let insensitive = test.case != AttributeCase::Sensitive;
-        let mut values = Vec::new();
-        for (index, text) in self.attribute_catalogs.value_texts.indexed_iter() {
-            let Some(text) = text else {
-                continue;
-            };
-            if !attribute_value_may_match(text, literal, test.operator, insensitive) {
-                continue;
-            }
-            let value = StyleAtomID(u32::try_from(index).expect("attribute-value atom index exceeds u32"));
-            values.push(value);
-        }
-        values
-    }
-
-    pub(super) fn attribute_value_candidates(&self, values: &[StyleAtomID]) -> Option<Vec<StyleNodeID>> {
-        let mut candidates = Vec::new();
-        for &value in values {
-            match self.postings.lookup(SelectorPostingKey::AttributeValue(value)) {
-                Lookup::Known(posting) => posting.append_candidates_to(&mut candidates),
-                Lookup::KnownAbsent => {}
-                Lookup::Missing(_) => return None,
-            }
-        }
-        Some(candidates)
-    }
-
-    #[must_use]
-    pub(super) fn attribute_value_catalog_version(&self) -> u64 {
-        self.attribute_value_catalog_version
-    }
-
     /// Whether any attribute the node still carries is indexed under `key`.
     #[must_use]
     fn node_answers_to_attribute_name(&self, node: StyleNodeID, key: StyleAtomID) -> bool {
@@ -5040,11 +5004,10 @@ impl ElementFactStore {
         kind: ElementDeclarationKind,
         declared: Vec<DeclaredProperty>,
         written_values: Vec<RetainedStyleValueData>,
-        declarations_are_complete: bool,
     ) {
         self.memory_dirty = true;
         self.element_declared_properties
-            .set(node, kind, declared, written_values, declarations_are_complete);
+            .set(node, kind, declared, written_values);
     }
 
     /// Record the custom properties the node's inline style declares, with the values they were
@@ -5079,17 +5042,6 @@ impl ElementFactStore {
         self.element_declared_properties.rows_with_custom_declarations != 0
     }
 
-    /// Whether one kind of the node's element declarations is complete once the custom properties
-    /// the inline style declares are set aside.
-    #[must_use]
-    pub fn element_declarations_are_complete_but_for_custom_properties(
-        &self,
-        node: StyleNodeID,
-        kind: ElementDeclarationKind,
-    ) -> bool {
-        self.element_declared_properties.complete_but_for_custom(node, kind)
-    }
-
     pub(super) fn element_written_value_checks(
         &self,
         node: StyleNodeID,
@@ -5122,6 +5074,56 @@ impl ElementFactStore {
         self.element_declared_properties.get(node, kind)
     }
 
+    /// Temporarily remove the inline declaration while a private demand cascades the node.
+    /// The row is restored before the demand releases its matching batch.
+    pub(super) fn hide_inline_declarations_for_demand(
+        &mut self,
+        node: StyleNodeID,
+    ) -> Option<HiddenInlineDeclarations> {
+        let index = node.element_index()? as usize;
+        let row = self.element_declared_properties.rows.get_mut(index)?.as_mut()?;
+        let before = row.storage_bytes();
+        let kind = ElementDeclarationKind::InlineStyle.index();
+        let hidden = HiddenInlineDeclarations {
+            declared: row.by_kind[kind].take(),
+            written: row.written_by_kind[kind].take(),
+            checks: std::mem::take(&mut row.written_checks_by_kind[kind]),
+            custom: row.custom_declarations.take(),
+            custom_written: row.custom_written_values.take(),
+        };
+        if hidden.custom.is_some() {
+            self.element_declared_properties.rows_with_custom_declarations -= 1;
+        }
+        self.element_declared_properties.payload_bytes =
+            self.element_declared_properties.payload_bytes - before + row.storage_bytes();
+        self.memory_dirty = true;
+        Some(hidden)
+    }
+
+    pub(super) fn restore_inline_declarations_after_demand(
+        &mut self,
+        node: StyleNodeID,
+        hidden: HiddenInlineDeclarations,
+    ) {
+        let index = node.element_index().expect("only elements carry inline declarations") as usize;
+        let row = self.element_declared_properties.rows[index]
+            .as_mut()
+            .expect("the private demand preserves its element declaration row");
+        let before = row.storage_bytes();
+        let kind = ElementDeclarationKind::InlineStyle.index();
+        row.by_kind[kind] = hidden.declared;
+        row.written_by_kind[kind] = hidden.written;
+        row.written_checks_by_kind[kind] = hidden.checks;
+        row.custom_declarations = hidden.custom;
+        row.custom_written_values = hidden.custom_written;
+        if row.custom_declarations.is_some() {
+            self.element_declared_properties.rows_with_custom_declarations += 1;
+        }
+        self.element_declared_properties.payload_bytes =
+            self.element_declared_properties.payload_bytes - before + row.storage_bytes();
+        self.memory_dirty = true;
+    }
+
     /// Record what one attribute-value atom spells, so a value operator can test it.
     ///
     /// Values repeat heavily across a document, so the text is held once per distinct value.
@@ -5130,9 +5132,25 @@ impl ElementFactStore {
     /// Published where the two atoms are minted, which is the only place that knows the pair. It is
     /// idempotent and total: every attribute name goes through it, including one in no namespace,
     /// whose local form is still an atom of its own.
-    pub fn note_attribute_name_forms(&mut self, name: StyleAtomID, forms: AttributeNameForms) {
+    pub fn note_attribute_name(
+        &mut self,
+        name: StyleAtomID,
+        forms: AttributeNameForms,
+        local_name: &[u16],
+        has_no_namespace: bool,
+    ) {
         self.memory_dirty = true;
-        self.attribute_catalogs_mut().name_forms.insert(name.0 as usize, forms);
+        let catalogs = self.attribute_catalogs_mut();
+        catalogs.name_forms.insert(name.0 as usize, forms);
+        catalogs.name_texts.insert(name.0 as usize, Some(local_name.into()));
+        catalogs
+            .names_without_namespace
+            .insert(name.0 as usize, has_no_namespace);
+    }
+
+    #[cfg(test)]
+    pub fn note_attribute_name_forms(&mut self, name: StyleAtomID, forms: AttributeNameForms) {
+        self.note_attribute_name(name, forms, &[], false);
     }
 
     /// The other names an attribute name answers to, all `NONE` if the name has not been published.
@@ -5144,6 +5162,30 @@ impl ElementFactStore {
             .unwrap_or_default()
     }
 
+    #[must_use]
+    pub fn attribute_name_text(&self, name: StyleAtomID) -> Option<&[u16]> {
+        self.attribute_catalogs
+            .name_texts
+            .get(name.0 as usize)
+            .and_then(Option::as_deref)
+    }
+
+    #[must_use]
+    pub fn attribute_name_has_no_namespace(&self, name: StyleAtomID) -> bool {
+        self.attribute_catalogs
+            .names_without_namespace
+            .get(name.0 as usize)
+            .unwrap_or(false)
+    }
+
+    #[must_use]
+    pub fn attribute_value_text(&self, value: StyleAtomID) -> Option<&[u16]> {
+        self.attribute_catalogs
+            .value_texts
+            .get(value.0 as usize)
+            .and_then(Option::as_deref)
+    }
+
     /// Every atom an attribute of this name is indexed under, without repeats.
     pub fn attribute_name_keys(&self, name: StyleAtomID) -> impl Iterator<Item = StyleAtomID> + use<> {
         let forms = self.attribute_name_forms(name);
@@ -5153,25 +5195,30 @@ impl ElementFactStore {
             .filter_map(move |(index, key)| (!key.is_none() && !keys[..index].contains(&key)).then_some(key))
     }
 
-    pub fn set_attribute_value_text(&mut self, value: StyleAtomID, text: &[u16]) {
+    /// Records what a value atom spells, unless it is recorded already, in which case `text` is not
+    /// read. The catalog version, which selector plans are keyed by, moves the first time a name a
+    /// selector reads needs the text: a value atom is shared by every name that spells it, so text
+    /// an `attr()` asked for is still new to the selectors when one of their names comes to spell
+    /// it, and finds it recorded.
+    pub fn set_attribute_value_text(&mut self, value: StyleAtomID, text: &[u16], read_by_selectors: bool) {
         let index = value.0 as usize;
-        if value.is_none()
-            || self
-                .attribute_catalogs
-                .value_texts
-                .get(index)
-                .is_some_and(Option::is_some)
-        {
+        if value.is_none() {
+            return;
+        }
+        let catalogs = &self.attribute_catalogs;
+        let recorded = catalogs.value_texts.get(index).is_some_and(Option::is_some);
+        let selectors_read_it = catalogs.value_texts_read_by_selectors.get(index).unwrap_or(false);
+        if recorded && (selectors_read_it || !read_by_selectors) {
             return;
         }
         self.memory_dirty = true;
-        self.attribute_catalogs_mut()
-            .value_texts
-            .insert(index, Some(text.into()));
-        self.attribute_value_catalog_version = self
-            .attribute_value_catalog_version
-            .checked_add(1)
-            .expect("attribute-value catalog version overflow");
+        let catalogs = self.attribute_catalogs_mut();
+        if !recorded {
+            catalogs.value_texts.insert(index, Some(text.into()));
+        }
+        if read_by_selectors {
+            catalogs.value_texts_read_by_selectors.insert(index, true);
+        }
     }
 
     #[must_use]
@@ -5334,7 +5381,6 @@ impl ElementFactStore {
     }
 
     /// Whether a borrowed primary view (an active or prepared traversal) shares the fact rows.
-    #[cfg(test)]
     pub(super) fn primary_rows_are_shared(&self) -> bool {
         Arc::strong_count(&self.rows) != 1
     }
@@ -5353,6 +5399,9 @@ impl ElementFactStore {
         for (index, text) in attribute_catalogs.value_texts.indexed_iter_mut() {
             if self.attribute_value_live_counts.get(index).unwrap_or(0) == 0 {
                 *text = None;
+                if attribute_catalogs.value_texts_read_by_selectors.get(index).is_some() {
+                    attribute_catalogs.value_texts_read_by_selectors.insert(index, false);
+                }
             }
         }
 
@@ -5360,6 +5409,7 @@ impl ElementFactStore {
             *sets = Vec::new();
         }
         self.custom_property_name_set_vacancies.clear();
+        self.custom_property_name_sets_by_environment.clear();
         for id in 1..=self.custom_property_name_sets.len() {
             if self.custom_property_set_live_counts.get(id).copied().unwrap_or(0) == 0 {
                 let identity = CustomPropertyNameSetID(id as u32);
@@ -5398,8 +5448,17 @@ impl ElementFactStore {
             if catalogs.name_forms.get(index).is_some() {
                 catalogs.name_forms.insert(index, AttributeNameForms::default());
             }
+            if let Some(text) = catalogs.name_texts.get_mut(index) {
+                *text = None;
+            }
+            if catalogs.names_without_namespace.get(index).is_some() {
+                catalogs.names_without_namespace.insert(index, false);
+            }
             if let Some(text) = catalogs.value_texts.get_mut(index) {
                 *text = None;
+            }
+            if catalogs.value_texts_read_by_selectors.get(index).is_some() {
+                catalogs.value_texts_read_by_selectors.insert(index, false);
             }
             if let Some(text) = catalogs.language_texts.get_mut(index) {
                 *text = None;
@@ -5497,11 +5556,19 @@ impl ElementFactStore {
             .flatten()
             .map(|text| text.len() * size_of::<u16>())
             .sum::<usize>();
+        let attribute_name_payloads = self
+            .attribute_catalogs
+            .name_texts
+            .iter()
+            .flatten()
+            .map(|text| text.len() * size_of::<u16>())
+            .sum::<usize>();
 
         capacity_bytes! {
             shallow [
                 self.custom_property_name_sets,
                 self.custom_property_name_set_vacancies,
+                self.custom_property_name_sets_by_environment,
                 self.custom_property_set_ids_by_name,
                 self.atom_live_counts,
                 self.language_live_counts,
@@ -5511,6 +5578,9 @@ impl ElementFactStore {
                 self.attribute_catalogs.language_texts,
                 self.attribute_catalogs.value_texts,
                 self.attribute_catalogs.name_forms,
+                self.attribute_catalogs.name_texts,
+                self.attribute_catalogs.names_without_namespace,
+                self.attribute_catalogs.value_texts_read_by_selectors,
             ];
             cached [];
             nested [
@@ -5520,6 +5590,7 @@ impl ElementFactStore {
                 custom_property_name_index_payloads,
                 language_payloads,
                 attribute_value_payloads,
+                attribute_name_payloads,
             ];
             skip [];
         }
@@ -5551,6 +5622,7 @@ impl ElementFactStore {
                 self.staging,
                 self.custom_property_name_sets,
                 self.custom_property_name_set_vacancies,
+                self.custom_property_name_sets_by_environment,
                 self.custom_property_set_ids_by_name,
                 self.atom_live_counts,
                 self.language_live_counts,
@@ -5610,10 +5682,6 @@ impl ElementFactStore {
         self.memory.resize_required_to(memory, current);
         self.memory_dirty = false;
         self.rebuild_missing_postings(memory);
-    }
-
-    pub fn prepare_selector_query(&mut self, memory: &mut MemoryController) {
-        self.apply_staged(memory);
     }
 
     /// Snapshot the committed rows which staged local facts will replace at the barrier.
@@ -5974,7 +6042,7 @@ mod tests {
 
         let metadata = facts.capacity_bytes();
         facts.set_language_text(StyleAtomID(10), &[1, 2, 3, 4]);
-        facts.set_attribute_value_text(StyleAtomID(11), &[5, 6, 7, 8]);
+        facts.set_attribute_value_text(StyleAtomID(11), &[5, 6, 7, 8], true);
         facts.note_attribute_name_forms(
             StyleAtomID(12),
             AttributeNameForms {
@@ -6054,7 +6122,7 @@ mod tests {
             facts.set_language_text(language, &[index as u16]);
             facts.set_language(node, language);
             facts.note_attribute_name_forms(attribute_name, name_forms);
-            facts.set_attribute_value_text(attribute_value, &[index as u16]);
+            facts.set_attribute_value_text(attribute_value, &[index as u16], true);
             facts.set_attribute(node, attribute_name, attribute_value, true, &mut memory);
             facts.set_custom_property_names(node, &[custom_property], &mut memory);
             facts.apply_staged(&mut memory);
@@ -6099,33 +6167,30 @@ mod tests {
             inline,
             vec![declared(1, false, 10), declared(2, true, 20)],
             Vec::new(),
-            true,
         );
-        facts.set_element_declared_properties(first, hints, vec![declared(3, false, 30)], Vec::new(), false);
-        facts.set_element_declared_properties(later, svg, vec![declared(4, false, 40)], Vec::new(), true);
-        facts.set_element_declared_properties(later, inline, Vec::new(), Vec::new(), false);
+        facts.set_element_declared_properties(first, hints, vec![declared(3, false, 30)], Vec::new());
+        facts.set_element_declared_properties(later, svg, vec![declared(4, false, 40)], Vec::new());
+        facts.set_element_declared_properties(later, inline, Vec::new(), Vec::new());
         assert_eq!(
             facts.element_declared_properties.get(first, inline),
             (&[declared(1, false, 10), declared(2, true, 20)][..], true)
         );
         assert_eq!(
             facts.element_declared_properties.get(first, hints),
-            (&[declared(3, false, 30)][..], false)
+            (&[declared(3, false, 30)][..], true)
         );
         assert_eq!(
             facts.element_declared_properties.get(later, svg),
             (&[declared(4, false, 40)][..], true)
         );
-        assert_eq!(facts.element_declared_properties.get(later, inline), (&[][..], false));
+        assert_eq!(facts.element_declared_properties.get(later, inline), (&[][..], true));
         assert_eq!(facts.element_declared_properties.rows.len(), 65);
-        facts.set_element_declared_properties(first, inline, Vec::new(), Vec::new(), true);
+        facts.set_element_declared_properties(first, inline, Vec::new(), Vec::new());
         assert!(facts.element_declared_properties.get(first, inline).0.is_empty());
         assert_eq!(
             facts.element_declared_properties.get(first, hints),
-            (&[declared(3, false, 30)][..], false)
+            (&[declared(3, false, 30)][..], true)
         );
-        facts.set_element_declared_properties(later, inline, Vec::new(), Vec::new(), true);
-        assert_eq!(facts.element_declared_properties.get(later, inline), (&[][..], true));
 
         // Declaration rows can exist without a resident selector-fact row. Retirement still has to
         // clear them before the dense identity is reused.
@@ -6249,7 +6314,7 @@ mod tests {
     }
 
     #[test]
-    fn selector_queries_defer_posting_rebuilds_while_admission_is_closed() {
+    fn applying_staged_facts_defers_posting_rebuilds_while_admission_is_closed() {
         let mut memory = MemoryController::new(DeviceClass::ForegroundDesktop);
         let mut facts = ElementFactStore::new();
         let node = StyleNodeID::element(1);
@@ -6267,7 +6332,7 @@ mod tests {
         assert!(!memory.is_tier3_admitting(MemoryCategory::FeaturePosting));
 
         for _ in 0..3 {
-            facts.prepare_selector_query(&mut memory);
+            facts.apply_staged(&mut memory);
             assert!(facts.classes_of_node(node).is_empty());
             // NB: Even resolving an empty missing posting requires scanning the facts.
             assert!(matches!(facts.postings().lookup(key), Lookup::Missing(gap) if gap == key));
@@ -6275,7 +6340,7 @@ mod tests {
 
         memory.set_tier3_limit_for_test(u64::MAX);
         memory.begin_tier3_quota_period();
-        facts.prepare_selector_query(&mut memory);
+        facts.apply_staged(&mut memory);
         assert!(matches!(facts.postings().lookup(key), Lookup::KnownAbsent));
     }
 
@@ -6664,7 +6729,7 @@ mod tests {
             entry(2, Some(DispatchKey::Class(StyleAtomID(11)))),
         );
         dispatch.insert(DispatchKey::Universal, entry(3, None));
-        dispatch.finish_prefixes();
+        dispatch.finish_prefixes(&mut Default::default());
 
         let mut facts = StyleNodeFacts::new();
         facts.push_row(
@@ -6877,9 +6942,9 @@ mod tests {
         let new_text: Vec<u16> = "new".encode_utf16().collect();
         let newest_text: Vec<u16> = "newest".encode_utf16().collect();
         let mut store = ElementFactStore::new();
-        store.set_attribute_value_text(old, &old_text);
-        store.set_attribute_value_text(new, &new_text);
-        store.set_attribute_value_text(newest, &newest_text);
+        store.set_attribute_value_text(old, &old_text, true);
+        store.set_attribute_value_text(new, &new_text, true);
+        store.set_attribute_value_text(newest, &newest_text, true);
         store.set_attribute(node, name, old, true, &mut memory);
         store.apply_staged(&mut memory);
         store.release_staging(&mut memory);
@@ -6902,6 +6967,45 @@ mod tests {
     }
 
     #[test]
+    fn substitution_attributes_follow_committed_no_namespace_facts() {
+        let mut memory = MemoryController::new(DeviceClass::ForegroundDesktop);
+        let mut tree = StyleNodeTree::new(&mut memory);
+        let node = tree.allocate_element(&mut memory);
+        let plain_name = StyleAtomID(40);
+        let namespaced_name = StyleAtomID(41);
+        let old_value = StyleAtomID(50);
+        let new_value = StyleAtomID(51);
+        let namespaced_value = StyleAtomID(52);
+        let plain_text: Vec<u16> = "data-size".encode_utf16().collect();
+        let namespaced_text: Vec<u16> = "size".encode_utf16().collect();
+        let old_text: Vec<u16> = "10px".encode_utf16().collect();
+        let new_text: Vec<u16> = "20px".encode_utf16().collect();
+        let namespaced_value_text: Vec<u16> = "30px".encode_utf16().collect();
+        let mut store = ElementFactStore::new();
+        store.note_attribute_name(plain_name, AttributeNameForms::default(), &plain_text, true);
+        store.note_attribute_name(namespaced_name, AttributeNameForms::default(), &namespaced_text, false);
+        store.set_attribute_value_text(old_value, &old_text, true);
+        store.set_attribute_value_text(new_value, &new_text, true);
+        store.set_attribute_value_text(namespaced_value, &namespaced_value_text, true);
+        store.set_attribute(node, plain_name, old_value, true, &mut memory);
+        store.set_attribute(node, namespaced_name, namespaced_value, true, &mut memory);
+        store.apply_staged(&mut memory);
+
+        assert_eq!(
+            store.substitution_attributes(node),
+            vec![(plain_text.as_slice(), old_text.as_slice())]
+        );
+
+        store.release_staging(&mut memory);
+        store.set_attribute(node, plain_name, new_value, true, &mut memory);
+        store.apply_staged(&mut memory);
+        assert_eq!(
+            store.substitution_attributes(node),
+            vec![(plain_text.as_slice(), new_text.as_slice())]
+        );
+    }
+
+    #[test]
     fn reclaimed_atoms_leave_no_catalog_or_posting_rows_for_reuse() {
         let mut memory = MemoryController::new(DeviceClass::ForegroundDesktop);
         let mut store = ElementFactStore::new();
@@ -6914,7 +7018,7 @@ mod tests {
                 folded_local: StyleAtomID(43),
             },
         );
-        store.set_attribute_value_text(atom, &[1, 2, 3]);
+        store.set_attribute_value_text(atom, &[1, 2, 3], true);
         store.set_language_text(atom, &[4, 5, 6]);
         store
             .postings
@@ -6940,7 +7044,7 @@ mod tests {
                 ..AttributeNameForms::default()
             },
         );
-        store.set_attribute_value_text(atom, &[7, 8]);
+        store.set_attribute_value_text(atom, &[7, 8], true);
         store.set_language_text(atom, &[9, 10]);
         assert_eq!(store.attribute_name_forms(atom).local, StyleAtomID(60));
         assert_eq!(
@@ -7076,10 +7180,22 @@ mod tests {
 
         for raw in 1..=128 {
             let atom = StyleAtomID(raw);
-            store.set_attribute_value_text(atom, &[raw as u16]);
+            store.set_attribute_value_text(atom, &[raw as u16], true);
         }
 
         assert_eq!(store.attribute_catalog_copies(), 1);
+    }
+
+    #[test]
+    fn attribute_text_an_attr_asked_for_is_not_recorded_again_for_a_selector_name() {
+        let mut store = ElementFactStore::new();
+        store.set_attribute_value_text(StyleAtomID(1), &[1, 2, 3], false);
+
+        // A value atom is shared by every name that spells it: text an attr() asked for is not recorded again once one
+        // of the selectors' names spells it.
+        store.set_attribute_value_text(StyleAtomID(1), &[], true);
+        store.set_attribute_value_text(StyleAtomID(1), &[], true);
+        assert_eq!(store.attribute_value_text(StyleAtomID(1)), Some(&[1, 2, 3][..]));
     }
 
     #[test]
@@ -7087,7 +7203,7 @@ mod tests {
         let mut store = ElementFactStore::new();
         let atom = StyleAtomID(1_000_000);
         store.note_attribute_name_forms(atom, AttributeNameForms::default());
-        store.set_attribute_value_text(atom, &[1, 2, 3]);
+        store.set_attribute_value_text(atom, &[1, 2, 3], true);
         store.set_language_text(atom, &[4, 5, 6]);
         ElementFactStore::increment_atom_count(&mut store.atom_live_counts, atom);
         store.custom_property_set_ids_by_name.entry(atom.0 as usize).push(1);

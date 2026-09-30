@@ -9,11 +9,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
 use std::hash::BuildHasher;
-use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 
 use super::index::StyleAtomID;
 
@@ -153,6 +150,43 @@ fn global_atoms() -> &'static Mutex<GlobalAtoms> {
     GLOBAL_ATOMS.get_or_init(|| Mutex::new(GlobalAtoms::default()))
 }
 
+/// Acquire the process-global atom for a name the host holds, for a document to adopt with its next
+/// transaction ([`DocumentAtoms::adopt_cpp_raw`]). The reference taken here is the one the adoption
+/// hands to the document, so the atom cannot be reclaimed and handed to another name in between.
+/// No document is touched: the table is shared by every document and locked.
+pub(super) fn acquire_raw_for_adoption(raw: usize) -> StyleAtomID {
+    global_atoms()
+        .lock()
+        .expect("process-global style atom lock is poisoned")
+        .acquire_raw(raw, RawAtomLifetime::RetainedFlyString)
+}
+
+/// Give up the reference [`acquire_raw_for_adoption`] took for an adoption that never happened.
+pub(super) fn release_raw_without_adoption(raw: usize, atom: StyleAtomID) {
+    global_atoms()
+        .lock()
+        .expect("process-global style atom lock is poisoned")
+        .release_raw(raw, atom);
+}
+
+/// Acquire the process-global atom for the name `name` qualified by `namespace`, for a document
+/// to adopt with its next transaction. Touches no document.
+pub(super) fn acquire_qualified_for_adoption(namespace: StyleAtomID, name: StyleAtomID) -> StyleAtomID {
+    global_atoms()
+        .lock()
+        .expect("process-global style atom lock is poisoned")
+        .acquire_qualified(namespace, name)
+}
+
+/// Give up the reference [`acquire_qualified_for_adoption`] took for an adoption that never
+/// happened, or that found the document already holding the atom.
+pub(super) fn release_qualified_without_adoption(namespace: StyleAtomID, name: StyleAtomID, atom: StyleAtomID) {
+    global_atoms()
+        .lock()
+        .expect("process-global style atom lock is poisoned")
+        .release_qualified((namespace.0, name.0), atom);
+}
+
 #[derive(Clone, Copy)]
 enum AtomScope {
     #[cfg(test)]
@@ -165,72 +199,24 @@ pub(super) struct DocumentAtoms {
     cpp_memoized_raws: HashSet<usize>,
     qualified: HashMap<(u32, u32), StyleAtomID>,
     scope: AtomScope,
-    pins: Arc<AtomPins>,
+    /// Atoms a render-side publication names, and how many publications name each.
+    ///
+    /// A name the document carries is kept live by the state that carries it, but a published
+    /// fact can name an atom no live element answers to - an SVG reference to an id that is not
+    /// in the document. Nothing else roots such an atom, so a sweep would hand its number out
+    /// again and the publication would then read as naming whatever took it.
+    published: HashMap<StyleAtomID, u64>,
     #[cfg(test)]
     available: BTreeSet<u32>,
     #[cfg(test)]
     next: u32,
     sweep_at: usize,
-    reported_pin_releases: AtomicU64,
-}
-
-pub(super) struct PinnedAtoms {
-    atoms: Box<[StyleAtomID]>,
-    pins: Arc<AtomPins>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ReclaimedStyleAtom {
     pub raw: usize,
     pub atom: StyleAtomID,
-}
-
-/// Transient pins on atoms a host call is holding, and how many pin handles have been released
-/// since the last sweep.
-///
-/// Both are shared with every live `PinnedAtoms` handle, and the owner of this table is on the
-/// read side an evaluation step borrows, which has to be `Sync`. Pinning happens at a host
-/// boundary and never inside a walk, so the lock is never contended; it is here so the compiler
-/// can prove the read side shareable.
-#[derive(Default)]
-struct AtomPins {
-    counts: Mutex<HashMap<StyleAtomID, u64>>,
-    releases: AtomicU64,
-}
-
-impl AtomPins {
-    fn counts(&self) -> std::sync::MutexGuard<'_, HashMap<StyleAtomID, u64>> {
-        self.counts
-            .lock()
-            .expect("the atom pin table is never held across a panic")
-    }
-}
-
-pub(super) struct AtomSweepDecision {
-    pub should_sweep: bool,
-    pub skipped_pin_releases: u64,
-}
-
-pub(super) const PIN_RELEASES_PER_SWEEP: u64 = 256;
-
-impl Drop for PinnedAtoms {
-    fn drop(&mut self) {
-        if self.atoms.is_empty() {
-            return;
-        }
-        let mut pinned = self.pins.counts();
-        for atom in &self.atoms {
-            let Entry::Occupied(mut entry) = pinned.entry(*atom) else {
-                unreachable!("a pinned atom must have a live count");
-            };
-            let count = entry.get_mut();
-            *count = count.checked_sub(1).expect("pinned atom count underflow");
-            if *count == 0 {
-                entry.remove();
-            }
-        }
-        self.pins.releases.fetch_add(1, Ordering::Relaxed);
-    }
 }
 
 impl DocumentAtoms {
@@ -252,13 +238,12 @@ impl DocumentAtoms {
             cpp_memoized_raws: HashSet::new(),
             qualified: HashMap::new(),
             scope,
-            pins: Arc::new(AtomPins::default()),
+            published: HashMap::new(),
             #[cfg(test)]
             available: BTreeSet::new(),
             #[cfg(test)]
             next: 0,
             sweep_at: 256,
-            reported_pin_releases: AtomicU64::new(0),
         }
     }
 
@@ -281,6 +266,52 @@ impl DocumentAtoms {
     pub(super) fn intern_cpp_raw(&mut self, raw: usize) -> StyleAtomID {
         self.cpp_memoized_raws.insert(raw);
         self.intern_raw(raw)
+    }
+
+    /// Take into the document an atom the host acquired for it ([`acquire_raw_for_adoption`]), with
+    /// the reference the acquisition took. A document that interned the name itself meanwhile holds
+    /// a reference of its own already, and the acquisition's is given back.
+    pub(super) fn adopt_cpp_raw(&mut self, raw: usize, atom: StyleAtomID) {
+        self.cpp_memoized_raws.insert(raw);
+        match self.raw.entry(raw) {
+            Entry::Occupied(held) => {
+                assert_eq!(
+                    *held.get(),
+                    atom,
+                    "a raw name has one process-global atom while it is held"
+                );
+                match self.scope {
+                    #[cfg(test)]
+                    AtomScope::Document => {}
+                    AtomScope::Process(_) => release_raw_without_adoption(raw, atom),
+                }
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(atom);
+            }
+        }
+    }
+
+    /// Takes the qualified atom the host acquired with [`acquire_qualified_for_adoption`], with the
+    /// reference the acquisition took, unless the document already holds it.
+    pub(super) fn adopt_qualified(&mut self, namespace: StyleAtomID, name: StyleAtomID, atom: StyleAtomID) {
+        match self.qualified.entry((namespace.0, name.0)) {
+            Entry::Occupied(held) => {
+                assert_eq!(
+                    *held.get(),
+                    atom,
+                    "a qualified name has one process-global atom while it is held"
+                );
+                match self.scope {
+                    #[cfg(test)]
+                    AtomScope::Document => {}
+                    AtomScope::Process(_) => release_qualified_without_adoption(namespace, name, atom),
+                }
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(atom);
+            }
+        }
     }
 
     pub(super) fn intern_qualified(&mut self, namespace: StyleAtomID, name: StyleAtomID) -> StyleAtomID {
@@ -309,43 +340,38 @@ impl DocumentAtoms {
         StyleAtomID(self.next)
     }
 
-    pub(super) fn pin(&self, atoms: impl IntoIterator<Item = StyleAtomID>) -> PinnedAtoms {
-        let atoms = atoms.into_iter().filter(|atom| !atom.is_none()).collect::<Box<[_]>>();
-        let mut pinned = self.pins.counts();
-        for &atom in &atoms {
-            *pinned.entry(atom).or_default() += 1;
+    /// Keep `atom` out of every sweep until the publication naming it is cleared or replaced.
+    pub(super) fn retain_published(&mut self, atom: StyleAtomID) {
+        if atom.is_none() {
+            return;
         }
-        drop(pinned);
-        PinnedAtoms {
-            atoms,
-            pins: Arc::clone(&self.pins),
-        }
+        *self.published.entry(atom).or_default() += 1;
     }
 
-    pub(super) fn sweep_decision(&self) -> AtomSweepDecision {
-        let growth_requires_sweep = self.raw.len() + self.qualified.len() >= self.sweep_at;
-        let pin_releases = self.pins.releases.load(Ordering::Relaxed);
-        let pin_releases_require_sweep = pin_releases >= PIN_RELEASES_PER_SWEEP;
-        let skipped_pin_releases = if growth_requires_sweep || pin_releases_require_sweep {
-            0
-        } else {
-            pin_releases
-                .checked_sub(self.reported_pin_releases.load(Ordering::Relaxed))
-                .expect("reported atom pin releases exceed releases")
+    pub(super) fn release_published(&mut self, atom: StyleAtomID) {
+        if atom.is_none() {
+            return;
+        }
+        let Entry::Occupied(mut entry) = self.published.entry(atom) else {
+            unreachable!("a published atom must have a live count");
         };
-        self.reported_pin_releases.store(pin_releases, Ordering::Relaxed);
-        AtomSweepDecision {
-            should_sweep: growth_requires_sweep || pin_releases_require_sweep,
-            skipped_pin_releases,
+        let count = entry.get_mut();
+        *count = count.checked_sub(1).expect("published atom count underflow");
+        if *count == 0 {
+            entry.remove();
         }
     }
 
-    /// Add transient pins and the raw components of every live qualified name.
+    pub(super) fn should_sweep(&self) -> bool {
+        self.raw.len() + self.qualified.len() >= self.sweep_at
+    }
+
+    /// Add published names and the raw components of every live qualified name.
     pub(super) fn mark_sweep_dependencies<S>(&self, live: &mut HashSet<StyleAtomID, S>)
     where
         S: BuildHasher,
     {
-        live.extend(self.pins.counts().keys().copied());
+        live.extend(self.published.keys().copied());
         for (&(namespace, name), &qualified) in &self.qualified {
             if live.contains(&qualified) {
                 if namespace != 0 {
@@ -383,8 +409,6 @@ impl DocumentAtoms {
     }
 
     pub(super) fn finish_sweep(&mut self, reclaimable: &[StyleAtomID]) -> Vec<ReclaimedStyleAtom> {
-        self.pins.releases.store(0, Ordering::Relaxed);
-        self.reported_pin_releases.store(0, Ordering::Relaxed);
         if reclaimable.is_empty() {
             self.schedule_next_sweep();
             return Vec::new();
@@ -560,26 +584,34 @@ mod tests {
     }
 
     #[test]
-    fn pins_delay_reclamation_until_their_owner_is_destroyed() {
+    fn a_published_name_survives_a_sweep_that_no_other_owner_reaches() {
         let mut atoms = DocumentAtoms::for_live_engine();
-        let atom = atoms.intern_cpp_raw(0x1000);
-        let pin = atoms.pin([atom]);
-        assert!(prepare_sweep(&atoms, &mut HashSet::new()).is_empty());
-        drop(pin);
-        let decision = atoms.sweep_decision();
-        assert!(!decision.should_sweep);
-        assert_eq!(decision.skipped_pin_releases, 1);
-        assert_eq!(atoms.sweep_decision().skipped_pin_releases, 0);
-        for _ in 1..PIN_RELEASES_PER_SWEEP {
-            drop(atoms.pin([atom]));
-        }
-        assert!(atoms.sweep_decision().should_sweep);
+        let referenced = atoms.intern_cpp_raw(0x1000);
+        let other = atoms.intern_cpp_raw(0x2000);
+        atoms.retain_published(referenced);
+        assert_eq!(prepare_sweep(&atoms, &mut HashSet::new()), [other]);
+
+        // The publication is replaced by one naming a different name, so the old one becomes
+        // reclaimable and its number can be issued again.
+        let replacement = atoms.intern_cpp_raw(0x3000);
+        atoms.retain_published(replacement);
+        atoms.release_published(referenced);
         let reclaimable = prepare_sweep(&atoms, &mut HashSet::new());
-        assert_eq!(reclaimable, [atom]);
-        assert_eq!(
-            atoms.finish_sweep(&reclaimable),
-            [ReclaimedStyleAtom { raw: 0x1000, atom }]
-        );
+        assert_eq!(reclaimable, [referenced, other]);
+        atoms.finish_sweep(&reclaimable);
+        assert_eq!(atoms.intern_raw(0x4000), referenced);
+    }
+
+    #[test]
+    fn two_publications_of_one_name_each_keep_it() {
+        let mut atoms = DocumentAtoms::for_live_engine();
+        let referenced = atoms.intern_cpp_raw(0x1000);
+        atoms.retain_published(referenced);
+        atoms.retain_published(referenced);
+        atoms.release_published(referenced);
+        assert!(prepare_sweep(&atoms, &mut HashSet::new()).is_empty());
+        atoms.release_published(referenced);
+        assert_eq!(prepare_sweep(&atoms, &mut HashSet::new()), [referenced]);
     }
 
     #[test]

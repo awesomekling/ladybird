@@ -607,13 +607,12 @@ impl<'a> SelectorParser<'a> {
         let qualified_name = self.parse_qualified_name(&mut stream, false).ok_or(())?;
         stream.discard_whitespace();
         if stream.is_empty() {
-            return Ok(SimpleSelector::Attribute(Box::new(AttributeSelector {
-                match_type: AttributeMatchType::HasAttribute,
+            return Ok(SimpleSelector::Attribute(Box::new(AttributeSelector::new(
+                AttributeMatchType::HasAttribute,
                 qualified_name,
-                value: SelectorString::default(),
-                value_identity: RetainedUtf16FlyString::from_utf16(&[]),
-                case_type: AttributeCaseType::Default,
-            })));
+                SelectorString::default(),
+                AttributeCaseType::Default,
+            ))));
         }
 
         let first = stream.next().ok_or(())?;
@@ -655,13 +654,12 @@ impl<'a> SelectorParser<'a> {
         if !stream.is_empty() {
             return Err(());
         }
-        Ok(SimpleSelector::Attribute(Box::new(AttributeSelector {
+        Ok(SimpleSelector::Attribute(Box::new(AttributeSelector::new(
             match_type,
             qualified_name,
-            value_identity: value.to_fly_string(),
             value,
             case_type,
-        })))
+        ))))
     }
 
     fn parse_pseudo_class(&mut self, stream: &mut Stream<'_>) -> Result<SimpleSelector, ()> {

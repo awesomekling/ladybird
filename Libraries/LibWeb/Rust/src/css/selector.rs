@@ -114,6 +114,46 @@ pub struct AttributeSelector {
     pub value: SelectorString,
     pub value_identity: RetainedUtf16FlyString,
     pub case_type: AttributeCaseType,
+    /// Whether this names, in no namespace, a legacy HTML attribute whose value compares ASCII case-insensitively on
+    /// an HTML element in an HTML document when no case is given.
+    pub names_legacy_case_insensitive_attribute: bool,
+}
+
+impl AttributeSelector {
+    pub fn new(
+        match_type: AttributeMatchType,
+        qualified_name: QualifiedName,
+        value: SelectorString,
+        case_type: AttributeCaseType,
+    ) -> Self {
+        let names_legacy_case_insensitive_attribute =
+            matches!(
+                qualified_name.namespace_type,
+                NamespaceType::Default | NamespaceType::None
+            ) && is_ascii_case_insensitive_html_attribute(&qualified_name.name);
+        Self {
+            match_type,
+            qualified_name,
+            value_identity: value.to_fly_string(),
+            value,
+            case_type,
+            names_legacy_case_insensitive_attribute,
+        }
+    }
+
+    /// Whether matching may read the text of the value: an atom answers only presence and an exact case-sensitive
+    /// comparison, and a legacy HTML attribute given no case compares ASCII case-insensitively on an HTML element.
+    fn reads_value_text(&self) -> bool {
+        match (self.match_type, self.case_type) {
+            (AttributeMatchType::HasAttribute, _) | (AttributeMatchType::ExactValue, AttributeCaseType::Sensitive) => {
+                false
+            }
+            (AttributeMatchType::ExactValue, AttributeCaseType::Default) => {
+                self.names_legacy_case_insensitive_attribute
+            }
+            _ => true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -191,12 +231,6 @@ fn equals_ascii_case_insensitive(value: &[u16], expected: &[u8]) -> bool {
 }
 
 include!(concat!(env!("OUT_DIR"), "/selector_pseudo_generated.rs"));
-
-/// Crate-visible access to the generated pseudo-element code mapping, for the
-/// style computation core's pseudo-element decisions.
-pub(crate) fn pseudo_element_type_from_code(value: u8) -> PseudoElementType {
-    pseudo_element_from_ffi(value)
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LanguageRange {
@@ -353,6 +387,34 @@ impl CompiledSelector {
 
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// Visits the ASCII-lowercase local name of every attribute the selector, nested ones included, tests the
+    /// value of by its text: all the names its compiled program reads value text of, and a few more, as a name is
+    /// visited whatever its namespace.
+    pub(crate) fn visit_attribute_value_text_names(&self, visit: &mut impl FnMut(&RetainedUtf16FlyString)) {
+        for simple_selector in self
+            .compound_selectors
+            .iter()
+            .flat_map(|compound| &compound.simple_selectors)
+        {
+            match simple_selector {
+                SimpleSelector::Attribute(attribute) if attribute.reads_value_text() => {
+                    visit(&attribute.qualified_name.lowercase_name);
+                }
+                SimpleSelector::PseudoClass(pseudo_class) => {
+                    for selector in &pseudo_class.argument_selector_list {
+                        selector.visit_attribute_value_text_names(visit);
+                    }
+                }
+                SimpleSelector::PseudoElement(pseudo_element) => {
+                    if let PseudoElementValue::CompoundSelector(selector) = &pseudo_element.value {
+                        selector.visit_attribute_value_text_names(visit);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// https://www.w3.org/TR/selectors-4/#specificity-rules
@@ -578,7 +640,7 @@ pub fn language_range_matches_tag(language_range: &[u16], language_tag: &[u16]) 
 // https://html.spec.whatwg.org/multipage/semantics-other.html#case-sensitivity-of-selectors
 // Attribute selectors on an HTML element in an HTML document must treat the values of attributes
 // with the following names as ASCII case-insensitive:
-pub fn is_ascii_case_insensitive_html_attribute(name: &RetainedUtf16FlyString) -> bool {
+fn is_ascii_case_insensitive_html_attribute(name: &RetainedUtf16FlyString) -> bool {
     let name = super::css_tokenizer::TokenizerInput::from(name);
     const NAMES: &[&[u8]] = &[
         b"accept",

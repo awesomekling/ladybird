@@ -5,11 +5,11 @@
  */
 
 use smallvec::SmallVec;
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use super::batch_matcher::{append_selector_truth_matches, insert_scope_rule};
+use super::batch_matcher::insert_scope_rule;
 use super::cascade::CascadeContinuationID;
 use super::prefix::{PrefixTransitionContext, PrefixTransitionContexts};
-use super::selector::{AttributeCase, AttributeOperator};
 use super::*;
 
 const MIN_SHARED_CASCADE_COMPLETION_DECLARATIONS: usize = 8;
@@ -52,72 +52,33 @@ struct SharedDispatches {
     memory: memory::MemoryController,
 }
 
-thread_local! {
-    static SHARED_DISPATCHES: RefCell<SharedDispatches> = RefCell::new(SharedDispatches {
-        templates: HashMap::default(),
-        memory: memory::MemoryController::new(memory::DeviceClass::ForegroundDesktop),
-    });
-}
-
-pub(super) fn forget_dead_shared_dispatches() {
-    let _ = SHARED_DISPATCHES.try_with(|shared| {
-        if let Ok(mut shared) = shared.try_borrow_mut() {
-            shared.templates.retain(|_, template| template.is_alive());
+impl Default for SharedDispatches {
+    fn default() -> Self {
+        Self {
+            templates: HashMap::default(),
+            memory: memory::MemoryController::new(memory::DeviceClass::ForegroundDesktop),
         }
-    });
-}
-
-#[derive(Default)]
-pub(crate) struct SelectorQueryCache {
-    attribute_value_catalog_version: u64,
-    attribute_values: Vec<Option<Vec<StyleAtomID>>>,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct SelectorQueryContext {
-    pub(crate) root: StyleNodeID,
-    pub(crate) include_root: bool,
-    pub(crate) scope_root: Option<StyleNodeID>,
-    pub(crate) shadow_root: Option<StyleNodeID>,
-    pub(crate) has_document_root: bool,
-}
-
-impl SelectorQueryCache {
-    #[must_use]
-    pub(crate) fn capacity_bytes(&self) -> u64 {
-        (self.attribute_values.capacity() * size_of::<Option<Vec<StyleAtomID>>>()
-            + self
-                .attribute_values
-                .iter()
-                .flatten()
-                .map(|values| values.capacity() * size_of::<StyleAtomID>())
-                .sum::<usize>()) as u64
     }
 }
 
-fn verify_match_answer_against_cold(
-    engine: &mut RetainedState,
-    answer: &[RuleMatch],
-    node: StyleNodeID,
-    description: &str,
-    counters: &mut Counters,
-) {
-    verify_style_answer_patch(engine, counters, |verifier| {
-        verifier.verify_match_answer(answer, node, description);
-    });
+/// The interning pools of selector dispatches, shared by every engine in the process.
+#[derive(Default)]
+struct DispatchPools {
+    dispatches: SharedDispatches,
+    scope_shapes: catalog::ScopeShapePools,
+    storage: index::DispatchStoragePools,
 }
 
-fn verify_cascade_answer_against_cold(
-    engine: &mut RetainedState,
-    answer: &[RuleMatch],
-    node: StyleNodeID,
-    description: &str,
-    counters: &mut Counters,
-) {
-    verify_style_answer_patch(engine, counters, |verifier| {
-        verifier.verify_cascade_answer(answer, node, description);
-    });
+fn dispatch_pools() -> MutexGuard<'static, DispatchPools> {
+    // Every engine interns through the same pools, from whichever thread runs it. Values never
+    // reach back into a pool when they are dropped, so the lock is only held while interning.
+    static DISPATCH_POOLS: OnceLock<Mutex<DispatchPools>> = OnceLock::new();
+    DISPATCH_POOLS.get_or_init(Mutex::default).lock().unwrap()
 }
+
+/// The pseudo-element kinds whose winner states can travel with a node's winner state: ::after,
+/// ::backdrop, ::before, ::first-letter, ::marker and ::selection.
+const SETTLED_PSEUDO_WINNER_KINDS: u64 = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 5) | (1 << 6);
 
 impl RetainedState {
     fn retained_answer_delta_memo_key(
@@ -150,8 +111,10 @@ impl RetainedState {
 
     /// The pseudo-element winner states a node settled this flush for the kinds the engine
     /// settles pseudo-elements from, to travel with the node's winner state: ::before, ::after,
-    /// ::first-letter and ::selection. The rules for the other kinds match every element, and a
-    /// row for each of them on every element would cost the memory the winner groups have.
+    /// ::first-letter, ::marker, ::selection and ::backdrop. The user agent's rules for ::marker
+    /// and ::backdrop match every element, and a row for each of them on every element would cost
+    /// the memory the winner groups have, so those travel only from a node holding a record for
+    /// that pseudo-element: a list item's marker, or a backdrop in the top layer.
     fn settled_pseudo_winner_states(
         &self,
         effects: &AnswerEffects,
@@ -162,10 +125,23 @@ impl RetainedState {
             .view(&self.winner_groups)
             .pseudo_states(node)
             .filter(|&(pseudo, version, _, priority_current)| {
-                matches!(pseudo.kind.0, 0 | 2 | 3 | 6) && version == self.program.version() && priority_current
+                let kind = pseudo.kind.0;
+                let travels = match kind {
+                    1 | 5 => self.computed_group_sets.pseudo_style_record(node, kind as u8).is_some(),
+                    _ => kind < 64 && SETTLED_PSEUDO_WINNER_KINDS & (1 << kind) != 0,
+                };
+                travels && version == self.program.version() && priority_current
             })
             .map(|(pseudo, _, state, _)| (pseudo, state))
             .collect()
+    }
+
+    fn flipped_pseudo_kinds(&self, deltas: &[SelectorTruthDelta]) -> u64 {
+        deltas
+            .iter()
+            .filter_map(|delta| self.programs.entry(delta.entry).1.pseudo_element)
+            .filter_map(|pseudo| 1_u64.checked_shl(u32::from(pseudo.kind.0)))
+            .fold(0, |kinds, bit| kinds | bit)
     }
 
     fn remember_retained_answer_delta_transition(
@@ -193,352 +169,6 @@ impl RetainedState {
             // the unrelated transition already stored under the fixed-size probe key.
             Entry::Occupied(_) => {}
         }
-    }
-
-    pub(crate) fn selector_query_matches(
-        &mut self,
-        program: &SelectorProgram,
-        node: StyleNodeID,
-        scope_root: Option<StyleNodeID>,
-        shadow_root: Option<StyleNodeID>,
-        has_document_root: bool,
-        counters: &mut Counters,
-    ) -> Result<bool, Incomplete> {
-        let share_sibling_geometry = program.has_positional_test();
-        if share_sibling_geometry && self.query_workspace_generation != self.selector_query_generation {
-            self.query_match_workspace = MatchScratch::for_selector_query();
-            self.query_workspace_generation = self.selector_query_generation;
-        }
-        let mut evaluator = MatchEvaluator::new(&self.tree, self.facts.primary());
-        if share_sibling_geometry {
-            evaluator = evaluator.with_match_workspace(&mut self.query_match_workspace, MatchEvaluationSide::Current);
-        }
-        if !has_document_root {
-            evaluator = evaluator.without_document_root();
-        }
-        if let Some(scope_root) = scope_root {
-            evaluator = evaluator.with_scope_root(scope_root);
-        }
-        if let Some(shadow_root) = shadow_root {
-            evaluator = evaluator.in_shadow_tree(shadow_root);
-        }
-        for entry in program.entries() {
-            if entry.pseudo_element.is_none() && evaluator.matches_entry(program, entry, node, counters)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
-    pub(crate) fn selector_query_all(
-        &mut self,
-        program: &SelectorProgram,
-        cache: &mut SelectorQueryCache,
-        context: SelectorQueryContext,
-        counters: &mut Counters,
-    ) -> Result<Vec<StyleNodeID>, Incomplete> {
-        let matches = self.evaluate_selector_query(program, cache, context, counters)?;
-        if matches.len() <= 1 {
-            return Ok(matches.into_iter().collect());
-        }
-
-        let match_count = matches.len();
-        let mut ordered_matches = Vec::with_capacity(match_count);
-        for node in self.tree.preorder(context.root) {
-            if matches.contains(&node) {
-                ordered_matches.push(node);
-                if ordered_matches.len() == match_count {
-                    break;
-                }
-            }
-        }
-        debug_assert_eq!(ordered_matches.len(), match_count);
-        Ok(ordered_matches)
-    }
-
-    /// The first match in tree order, or None. One engine call serves a whole querySelector:
-    /// candidate enumeration, evaluation, and tree ordering all stay on this side of the
-    /// boundary — instead of one boundary crossing per walked element.
-    ///
-    /// When every entry's subject carries posting-backed dispatch keys, only posted candidates
-    /// are evaluated, in tree order, stopping at the first hit. Otherwise, the subtree is walked
-    /// in tree order, and each element evaluated — still one boundary crossing for the query.
-    pub(crate) fn selector_query_first(
-        &mut self,
-        program: &SelectorProgram,
-        context: SelectorQueryContext,
-        counters: &mut Counters,
-    ) -> Result<Option<StyleNodeID>, Incomplete> {
-        let share_sibling_geometry = program.has_positional_test();
-        if share_sibling_geometry && self.query_workspace_generation != self.selector_query_generation {
-            self.query_match_workspace = MatchScratch::for_selector_query();
-            self.query_workspace_generation = self.selector_query_generation;
-        }
-        let candidates_are_known = self.ensure_sorted_query_candidates(program, context.root);
-
-        let mut evaluator = MatchEvaluator::new(&self.tree, self.facts.primary());
-        if share_sibling_geometry {
-            evaluator = evaluator.with_match_workspace(&mut self.query_match_workspace, MatchEvaluationSide::Current);
-        }
-        if !context.has_document_root {
-            evaluator = evaluator.without_document_root();
-        }
-        if let Some(scope_root) = context.scope_root {
-            evaluator = evaluator.with_scope_root(scope_root);
-        }
-        if let Some(shadow_root) = context.shadow_root {
-            evaluator = evaluator.in_shadow_tree(shadow_root);
-        }
-
-        if candidates_are_known {
-            // With a single dispatch key, membership in its posting proved that feature on every
-            // candidate — but only for key kinds where the posting means exactly what the feature
-            // tests. An id or class key does: the posting holds the elements carrying that very
-            // atom. A tag-name key is folded while the feature test is case-sensitive for foreign
-            // elements, and an attribute-name key proves presence while the feature may compare a
-            // value — those must still be evaluated.
-            let proven_key = match &self.query_sorted_candidates_stamp {
-                Some(stamp)
-                    if stamp.keys.len() == 1 && matches!(stamp.keys[0], DispatchKey::Id(_) | DispatchKey::Class(_)) =>
-                {
-                    Some(stamp.keys[0])
-                }
-                _ => None,
-            };
-            for index in 0..self.query_sorted_candidates.len() {
-                let node = self.query_sorted_candidates[index];
-                if !context.include_root && node == context.root {
-                    continue;
-                }
-                for entry in program.entries() {
-                    if entry.pseudo_element.is_some() {
-                        continue;
-                    }
-                    let matched = match proven_key {
-                        Some(key) => evaluator.matches_entry_after_dispatch(program, entry, key, node, counters)?,
-                        None => evaluator.matches_entry(program, entry, node, counters)?,
-                    };
-                    if matched {
-                        return Ok(Some(node));
-                    }
-                }
-            }
-            return Ok(None);
-        }
-
-        for node in self.tree.preorder(context.root) {
-            if !context.include_root && node == context.root {
-                continue;
-            }
-            for entry in program.entries() {
-                if entry.pseudo_element.is_none() && evaluator.matches_entry(program, entry, node, counters)? {
-                    return Ok(Some(node));
-                }
-            }
-        }
-        Ok(None)
-    }
-
-    /// Refresh `query_sorted_candidates` for this program's subject keys under `root` — or report
-    /// that postings can't name every entry's candidates, and the caller has to walk.
-    fn ensure_sorted_query_candidates(&mut self, program: &SelectorProgram, root: StyleNodeID) -> bool {
-        let mut keys: SmallVec<[DispatchKey; 1]> = SmallVec::new();
-        for (entry_index, entry) in program.entries().iter().enumerate() {
-            if entry.pseudo_element.is_some() {
-                continue;
-            }
-            let dispatch_keys = program.subject_dispatch_keys(entry_index);
-            if dispatch_keys.is_empty() {
-                return false;
-            }
-            for &key in dispatch_keys {
-                if !key.has_selector_posting() {
-                    return false;
-                }
-                keys.push(key);
-            }
-        }
-        if keys.is_empty() {
-            return false;
-        }
-        keys.sort_unstable();
-        keys.dedup();
-        let generation = self.selector_query_generation;
-        if let Some(stamp) = &self.query_sorted_candidates_stamp
-            && stamp.generation == generation
-            && stamp.root == root
-            && stamp.keys == keys.as_slice()
-        {
-            return true;
-        }
-        // The union of every key's posting is a superset of every entry's true matches. Missing
-        // means the facts haven't materialized that posting; the walk is the correct fallback —
-        // rather than forcing a materialization from the query path.
-        let mut candidates: Vec<StyleNodeID> = Vec::new();
-        for &key in &keys {
-            match self.facts.postings().lookup(key) {
-                Lookup::Known(posting) => posting.append_candidates_to(&mut candidates),
-                Lookup::KnownAbsent => {}
-                Lookup::Missing(_) => return false,
-            }
-        }
-        if !candidates.is_empty() {
-            self.ensure_query_preorder_ranks(root);
-        }
-        let ranks = &self.query_preorder_ranks;
-        // A candidate without a rank lies outside the queried subtree.
-        let mut ranked: Vec<(u32, StyleNodeID)> = candidates
-            .into_iter()
-            .filter_map(|node| ranks.get(&node).map(|&rank| (rank, node)))
-            .collect();
-        ranked.sort_unstable();
-        if keys.len() > 1 {
-            ranked.dedup();
-        }
-        self.query_sorted_candidates.clear();
-        self.query_sorted_candidates
-            .extend(ranked.into_iter().map(|(_, node)| node));
-        self.query_sorted_candidates_stamp = Some(QuerySortedCandidatesStamp {
-            generation,
-            root,
-            keys: keys.into_vec(),
-        });
-        true
-    }
-
-    fn ensure_query_preorder_ranks(&mut self, root: StyleNodeID) {
-        let generation = self.selector_query_generation;
-        if self.query_preorder_ranks_stamp == Some((generation, root)) {
-            return;
-        }
-        self.query_preorder_ranks.clear();
-        for (rank, node) in self.tree.preorder(root).enumerate() {
-            self.query_preorder_ranks
-                .insert(node, u32::try_from(rank).unwrap_or(u32::MAX));
-        }
-        self.query_preorder_ranks_stamp = Some((generation, root));
-    }
-
-    fn evaluate_selector_query(
-        &mut self,
-        program: &SelectorProgram,
-        cache: &mut SelectorQueryCache,
-        context: SelectorQueryContext,
-        counters: &mut Counters,
-    ) -> Result<HashSet<StyleNodeID>, Incomplete> {
-        let attribute_value_catalog_version = self.facts.attribute_value_catalog_version();
-        if cache.attribute_value_catalog_version != attribute_value_catalog_version
-            || cache.attribute_values.len() != program.entries().len()
-        {
-            cache.attribute_values.clear();
-            cache.attribute_values.reserve(program.entries().len());
-            for entry_index in 0..program.entries().len() {
-                let values = program
-                    .subject_attribute_value_test(entry_index)
-                    .filter(|test| test.operator != AttributeOperator::Presence)
-                    .map(|test| {
-                        if test.operator != AttributeOperator::Exact || test.case != AttributeCase::Sensitive {
-                            counters.bump(Counter::SelectorQueryAttributeValueCatalogScans);
-                        }
-                        self.facts
-                            .matching_attribute_values(test, program.literal(test.value_offset, test.value_length))
-                    });
-                cache.attribute_values.push(values);
-            }
-            cache.attribute_value_catalog_version = attribute_value_catalog_version;
-        } else {
-            counters.add(
-                Counter::SelectorQueryAttributeValuePlanHits,
-                u64::try_from(cache.attribute_values.iter().flatten().count()).unwrap_or(u64::MAX),
-            );
-        }
-
-        // The same tree serves every candidate of this query, so sibling geometry and positional
-        // answers are shared across the candidate loop below - exactly as the per-node entry
-        // point shares them across the calls of one query.
-        let share_sibling_geometry = program.has_positional_test();
-        if share_sibling_geometry && self.query_workspace_generation != self.selector_query_generation {
-            self.query_match_workspace = MatchScratch::for_selector_query();
-            self.query_workspace_generation = self.selector_query_generation;
-        }
-        let mut matches = HashSet::default();
-        let mut evaluator = MatchEvaluator::new(&self.tree, self.facts.primary());
-        if share_sibling_geometry {
-            evaluator = evaluator.with_match_workspace(&mut self.query_match_workspace, MatchEvaluationSide::Current);
-        }
-        if !context.has_document_root {
-            evaluator = evaluator.without_document_root();
-        }
-        if let Some(scope_root) = context.scope_root {
-            evaluator = evaluator.with_scope_root(scope_root);
-        }
-        if let Some(shadow_root) = context.shadow_root {
-            evaluator = evaluator.in_shadow_tree(shadow_root);
-        }
-
-        for (entry_index, entry) in program.entries().iter().enumerate() {
-            if entry.pseudo_element.is_some() {
-                continue;
-            }
-
-            let dispatch_keys = program.subject_dispatch_keys(entry_index);
-            let mut candidates = Vec::new();
-            let mut used_attribute_value_posting = false;
-            if let Some(values) = &cache.attribute_values[entry_index]
-                && let Some(value_candidates) = self.facts.attribute_value_candidates(values)
-            {
-                candidates = value_candidates;
-                used_attribute_value_posting = true;
-            }
-            let mut use_all_nodes = !used_attribute_value_posting && dispatch_keys.is_empty();
-            if !used_attribute_value_posting && !use_all_nodes {
-                for &key in dispatch_keys {
-                    if !key.has_selector_posting() {
-                        use_all_nodes = true;
-                        break;
-                    }
-                    match self.facts.postings().lookup(key) {
-                        Lookup::Known(posting) => {
-                            posting.append_candidates_to(&mut candidates);
-                        }
-                        Lookup::KnownAbsent => {}
-                        Lookup::Missing(_) => {
-                            use_all_nodes = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if use_all_nodes {
-                candidates.clear();
-                candidates.extend(
-                    self.tree
-                        .preorder(context.root)
-                        .filter(|&node| context.include_root || node != context.root),
-                );
-            } else {
-                candidates.retain(|&node| {
-                    (context.include_root || node != context.root) && self.tree.is_in_subtree_of(node, context.root)
-                });
-            }
-            candidates.sort_unstable();
-            candidates.dedup();
-            counters.add(
-                Counter::SelectorQueryCandidateRows,
-                u64::try_from(candidates.len()).unwrap_or(u64::MAX),
-            );
-
-            for node in candidates {
-                if matches.contains(&node) {
-                    continue;
-                }
-                counters.bump(Counter::SelectorQueryEvaluations);
-                if evaluator.matches_entry(program, entry, node, counters)? {
-                    matches.insert(node);
-                }
-            }
-        }
-        Ok(matches)
     }
 
     pub(super) fn materialize_cold_matching_batch(
@@ -601,8 +231,7 @@ impl RetainedState {
         }
     }
 
-    pub(super) fn discard_published_match_answers(&mut self, counters: &mut Counters) {
-        self.computed_group_sets.clear_shared_style_records();
+    pub(super) fn discard_published_match_answers(&mut self) {
         if let Some(traversal) = self.batch_matching_traversal.as_mut() {
             let effects = std::mem::take(&mut traversal.answer_effects);
             effects.install_observations(&mut self.published_match_answers);
@@ -613,14 +242,6 @@ impl RetainedState {
         let effects = std::mem::take(&mut published.answer_effects);
         effects.install_observations(&mut published);
         effects.release_pending_all(&mut self.match_answers, &mut self.winner_groups);
-        verify_published_style_transaction(self, |_| {
-            assert!(
-                published.entries.is_empty()
-                    || counters.get(Counter::MatchElementCallsDuringPublishedStyleTransaction)
-                        == published.match_element_calls_at_publication,
-                "a style transaction called match_element() after publishing complete match answers"
-            );
-        });
         if published.discard_unobserved_retained_answers {
             for answer in published.entries.iter().filter(|answer| !answer.observed) {
                 self.retained_match_answers.forget(&mut self.match_answers, answer.node);
@@ -629,10 +250,38 @@ impl RetainedState {
         published.release();
     }
 
+    /// A demand rematches this node from current facts. Its previous batch answer must not be
+    /// consumed, while answers for other nodes remain available to their batch consumers.
+    pub(super) fn forget_node_match_answer_for_demand(&mut self, node: StyleNodeID) {
+        self.install_pending_matching_context();
+        let effects = std::mem::take(&mut self.published_match_answers.answer_effects);
+        self.install_answer_effects(effects);
+        self.published_match_answers
+            .entries
+            .retain(|answer| answer.node != node);
+        self.published_match_answers.memory.resize_required_to(
+            &mut self.memory,
+            self.published_match_answers.recompute_capacity_bytes(),
+        );
+        self.retained_match_answers.forget(&mut self.match_answers, node);
+    }
+
     pub(super) fn discard_retained_prefix_caches(&mut self) {
         let mut caches = self.prefix_caches.borrow_mut();
         caches.states.release();
         caches.answers.release(&mut self.match_answers);
+    }
+
+    /// Frees what the render owner built as it matched and cascaded, most of what the engine holds, as the owner lets
+    /// go of the engine for good. None of it holds what only the document thread may release: the custom property
+    /// data, font memos and group payloads stay for the engine's drop there.
+    pub(super) fn discard_owner_built_tables(&mut self) {
+        self.discard_retained_prefix_caches();
+        self.winner_groups.evict();
+        self.facts = ElementFactStore::new();
+        self.match_answers = MatchAnswerCatalog::default();
+        self.specified_values = SpecifiedValues::new();
+        self.program = StyleSheetProgram::new();
     }
 
     pub(super) fn retain_prefix_states(&mut self) {
@@ -680,7 +329,6 @@ impl RetainedState {
         } else {
             CompletionExactness::AllowPruning
         };
-        let materialize_timer = flush::PassTimer::start();
         let batch = prefer_complete_batch
             .then(|| {
                 self.prepared_batch_matching_traversal
@@ -696,8 +344,6 @@ impl RetainedState {
         let relation_dispatch = batch
             .as_ref()
             .map(|_| self.prepare_scope_program(TreeScopeID::DOCUMENT));
-        materialize_timer.stop(Counter::CompletionBatchMaterializeMicroseconds, counters);
-        let relation_timer = flush::PassTimer::start();
         // The walk that just converged left the retained states describing THIS transaction,
         // so the completion batch can extend the warm automaton instead of re-deriving every
         // upquery spine. Without a current walk the retained states describe the previous
@@ -729,7 +375,12 @@ impl RetainedState {
                         None,
                         None,
                     );
-                    Box::new(dispatch.prefixes().build_relation(&mut evaluation, root, counters))
+                    Box::new(dispatch.prefixes().build_relation(
+                        &mut evaluation,
+                        root,
+                        &mut dispatch_pools().storage.prefixes.relation_program_memory,
+                        counters,
+                    ))
                 });
                 relation.install_answers(states);
                 states.relation = Some(relation);
@@ -740,7 +391,6 @@ impl RetainedState {
         if let Some(facts) = batch.as_ref() {
             self.prepare_prefix_rows_for_batch(facts, &mut prefix_contexts);
         }
-        relation_timer.stop(Counter::CompletionBatchRelationMicroseconds, counters);
         self.batch_matching_traversal = Some(Box::new(BatchMatchingTraversal {
             pending_published: PublishedMatchAnswers::default(),
             answer_effects: AnswerEffects::default(),
@@ -751,7 +401,7 @@ impl RetainedState {
             reuse_retained_match_answers: false,
             retained_answer_dispatch: None,
             ancestor_requirements,
-            prefix_caches: Rc::clone(&self.prefix_caches),
+            prefix_caches: std::sync::Arc::clone(&self.prefix_caches),
             match_workspace: MatchScratch::default(),
             match_workspace_bytes: 0,
             dispatch_workspace: DispatchCandidateWorkspace::default(),
@@ -842,7 +492,7 @@ impl RetainedState {
             reuse_retained_match_answers,
             retained_answer_dispatch,
             ancestor_requirements,
-            prefix_caches: Rc::clone(&self.prefix_caches),
+            prefix_caches: std::sync::Arc::clone(&self.prefix_caches),
             match_workspace,
             match_workspace_bytes,
             dispatch_workspace: DispatchCandidateWorkspace::default(),
@@ -942,7 +592,7 @@ impl RetainedState {
             reuse_retained_match_answers,
             retained_answer_dispatch,
             ancestor_requirements: AncestorRequirementsCache::default(),
-            prefix_caches: Rc::clone(&self.prefix_caches),
+            prefix_caches: std::sync::Arc::clone(&self.prefix_caches),
             match_workspace,
             match_workspace_bytes,
             dispatch_workspace: DispatchCandidateWorkspace::default(),
@@ -970,7 +620,7 @@ impl RetainedState {
                         None,
                         None,
                     );
-                    let prefix_caches = Rc::clone(&self.prefix_caches);
+                    let prefix_caches = std::sync::Arc::clone(&self.prefix_caches);
                     let mut caches = prefix_caches.borrow_mut();
                     caches.states.make_scratch(&mut self.memory);
                     let states = caches.states.prepare_program(scope_program);
@@ -1065,9 +715,35 @@ impl RetainedState {
             self.memory
                 .release(MemoryCategory::BatchScratch, traversal.dispatch_workspace_bytes);
             traversal.cascade_compaction_workspace_memory.release();
-            self.discard_published_match_answers(counters);
+            self.discard_published_match_answers();
             self.finish_memory_evaluation_loop();
         }
+    }
+
+    pub(super) fn discard_private_record_demand_matching_batch(&mut self) {
+        let Some(mut traversal) = self.batch_matching_traversal.take() else {
+            return;
+        };
+        std::mem::take(&mut traversal.answer_effects)
+            .release_pending_all(&mut self.match_answers, &mut self.winner_groups);
+        traversal.pending_published.release();
+        if let Some(batch) = traversal.batch {
+            self.memory
+                .release(MemoryCategory::BatchScratch, batch.capacity_bytes());
+        }
+        if let Some(topology) = traversal.topology {
+            self.memory
+                .release(MemoryCategory::BatchScratch, topology.capacity_bytes());
+        }
+        traversal.ancestor_requirements.release(&mut self.memory);
+        self.memory
+            .release(MemoryCategory::BatchScratch, traversal.match_workspace_bytes);
+        self.memory
+            .release(MemoryCategory::BatchScratch, traversal.dispatch_workspace_bytes);
+        traversal.cascade_compaction_workspace_memory.release();
+        let mut caches = self.prefix_caches.borrow_mut();
+        caches.states.release();
+        caches.answers.release(&mut self.match_answers);
     }
 
     /// Every element the document holds, shadow trees included, in tree order per tree.
@@ -1167,26 +843,26 @@ impl RetainedState {
                 .collect(),
             layer_order: self.program.layer_order_key(scope),
         };
-        cascade_shape.share();
+        cascade_shape.share(&mut dispatch_pools().scope_shapes);
         // Preserve source ordering in the cascade key, while equivalent selector multisets
         // share matching topology regardless of stylesheet order.
         super::batch_matcher::canonicalize_scope_dispatch(&mut shape, &mut rules, &self.programs);
-        shape.share();
+        shape.share(&mut dispatch_pools().scope_shapes);
         let cascade_template = self.scope_cascade_templates.get(&cascade_shape).cloned();
         // Document-local selector and entry numbers are embedded in the topology. Share only
-        // when those numbers AND their process-interned semantic payloads agree. Rule bindings,
+        // when those numbers AND their interned semantic payloads agree. Rule bindings,
         // cascade ranks, and every element-dependent result are rebuilt for this document.
         let shared_key = SharedDispatchKey::new(&shape, &self.programs);
         let exact_template = self.scope_dispatch_templates.get(&shape).cloned().or_else(|| {
             let key = shared_key.as_ref()?;
-            SHARED_DISPATCHES.with_borrow_mut(|shared| {
-                shared.templates.retain(|_, template| template.is_alive());
-                shared
-                    .templates
-                    .get(key)
-                    .and_then(index::WeakRuleDispatch::upgrade)
-                    .map(Arc::new)
-            })
+            let mut pools = dispatch_pools();
+            let shared = &mut pools.dispatches;
+            shared.templates.retain(|_, template| template.is_alive());
+            shared
+                .templates
+                .get(key)
+                .and_then(index::WeakRuleDispatch::upgrade)
+                .map(Arc::new)
         });
         let extension_template = exact_template.is_none().then(|| {
             // Extending a template copies its topology first. Require the retained prefix to cover
@@ -1220,7 +896,7 @@ impl RetainedState {
                     rule_index = dispatch.entry_count();
                 }
                 assert_eq!(rule_index, rules.len());
-                dispatch.finish_prefixes();
+                dispatch.finish_prefixes(&mut dispatch_pools().storage.prefixes);
                 dispatch
             }
             (None, None) => {
@@ -1240,7 +916,7 @@ impl RetainedState {
                     rule_index = dispatch.entry_count();
                 }
                 assert_eq!(rule_index, rules.len());
-                dispatch.finish_prefixes();
+                dispatch.finish_prefixes(&mut dispatch_pools().storage.prefixes);
                 let ancestor_shape = dispatch.ancestor_dispatch_shape();
                 if let Some(template) = self.ancestor_dispatch_templates.get(&ancestor_shape) {
                     dispatch.share_ancestor_topology_with(template);
@@ -1254,12 +930,13 @@ impl RetainedState {
         } else {
             dispatch.assign_cascade_order(|candidate| {
                 let entry = &self.programs.get(candidate.program).entries()[candidate.entry as usize];
-                self.cascade_priority_of(candidate.rule, scope, entry.specificity, u32::MAX, false)
+                self.cascade_priority_of(None, candidate.rule, scope, entry.specificity, u32::MAX, false)
             });
         }
         // A rule declaring custom properties beside its longhands contributes those longhands
         // as any rule does: the environment its custom properties decide is computed apart.
         dispatch.assign_cascade_properties(
+            &mut dispatch_pools().storage,
             |candidate| {
                 self.program.rule_is_gated_by_container_query(candidate.rule)
                     || !self.program.declarations_are_complete_for(candidate.rule)
@@ -1283,14 +960,12 @@ impl RetainedState {
             },
         );
         if shared_key.is_some() {
-            SHARED_DISPATCHES.with_borrow_mut(|shared| dispatch.settle_topology_memory(&mut shared.memory));
+            dispatch.settle_topology_memory(&mut dispatch_pools().dispatches.memory);
         }
         dispatch.settle_memory(&mut self.memory);
         let dispatch = Arc::new(dispatch);
         if let Some(key) = shared_key {
-            SHARED_DISPATCHES.with_borrow_mut(|shared| {
-                shared.templates.insert(key, dispatch.downgrade());
-            });
+            dispatch_pools().dispatches.templates.insert(key, dispatch.downgrade());
         }
         self.scope_cascade_templates
             .entry(cascade_shape)
@@ -1560,7 +1235,7 @@ impl RetainedState {
         dispatch_workspace: &mut DispatchCandidateWorkspace,
         matches: &mut RuleMatches,
         requirements: Option<&AncestorRequirements>,
-        shared_prefix_caches: Option<&Rc<RefCell<PrefixCaches>>>,
+        shared_prefix_caches: Option<&std::sync::Arc<SharedPrefixCaches>>,
         prefix_contexts: &mut PrefixTransitionContexts,
         match_workspace: Option<&mut MatchScratch>,
         mut retry: BatchMatchRetry<'_>,
@@ -2121,41 +1796,23 @@ impl RetainedState {
         self.remember_prepared_retained_match_answer_with_effects(effects, node, answer, counters);
     }
 
+    #[cfg(test)]
+    pub(super) fn remember_prepared_retained_match_answer(
+        &mut self,
+        node: StyleNodeID,
+        answer: Vec<RetainedRuleMatch>,
+        counters: &mut Counters,
+    ) {
+        let mut effects = AnswerEffects::default();
+        self.remember_prepared_retained_match_answer_with_effects(&mut effects, node, answer, counters);
+        self.install_answer_effects(effects);
+    }
+
     pub(super) fn remember_prepared_retained_match_answer_with_effects(
         &mut self,
         effects: &mut AnswerEffects,
         node: StyleNodeID,
         answer: Vec<RetainedRuleMatch>,
-        counters: &mut Counters,
-    ) {
-        self.remember_prepared_retained_match_answer_with_truth_with_effects(effects, node, answer, None, counters);
-    }
-
-    #[cfg(test)]
-    pub(super) fn remember_prepared_retained_match_answer_with_truth(
-        &mut self,
-        node: StyleNodeID,
-        answer: Vec<RetainedRuleMatch>,
-        selector_truth: Option<Vec<SelectorTruth>>,
-        counters: &mut Counters,
-    ) {
-        let mut effects = AnswerEffects::default();
-        self.remember_prepared_retained_match_answer_with_truth_with_effects(
-            &mut effects,
-            node,
-            answer,
-            selector_truth,
-            counters,
-        );
-        self.install_answer_effects(effects);
-    }
-
-    pub(super) fn remember_prepared_retained_match_answer_with_truth_with_effects(
-        &mut self,
-        effects: &mut AnswerEffects,
-        node: StyleNodeID,
-        answer: Vec<RetainedRuleMatch>,
-        selector_truth: Option<Vec<SelectorTruth>>,
         counters: &mut Counters,
     ) {
         if !self.match_answer_is_retainable(node) {
@@ -2164,49 +1821,6 @@ impl RetainedState {
         let tree_scope = self.tree.tree_scope(node);
         if answer.iter().any(|entry| entry.tree_scope != tree_scope) {
             return;
-        }
-        let reused_derived_answer = verify_selector_truth_derivation_is_enabled().then(|| {
-            let truth = selector_truth.unwrap_or_else(|| prepare_selector_truth_set(&answer, &self.programs));
-            let truth_rows = truth.len();
-            let (identity, reused_truth) = self.selector_truth_sets.intern_prepared(truth);
-            counters.bump(if reused_truth {
-                Counter::SelectorTruthSetHits
-            } else {
-                Counter::SelectorTruthSetMisses
-            });
-            if !reused_truth {
-                counters.add(
-                    Counter::SelectorTruthSetRows,
-                    u64::try_from(truth_rows).expect("selector truth row count exceeds u64"),
-                );
-            }
-            let truth = Arc::clone(self.selector_truth_sets.get(identity));
-            let dispatch = self.build_ranked_scope_dispatch(tree_scope);
-            let mut derived = RuleMatches::new();
-            append_selector_truth_matches(
-                &mut derived,
-                node,
-                &self.program,
-                &self.programs,
-                &dispatch,
-                &truth,
-                counters,
-            );
-            let derived = prepare_retained_match_answer(derived.as_slice().iter().copied());
-            let mut retained = RuleMatches::new();
-            append_retained_matches(&mut retained, node, tree_scope, &self.programs, &dispatch, &answer)
-                .expect("a retained answer must still exist in its ranked dispatch");
-            let retained = prepare_retained_match_answer(retained.as_slice().iter().copied());
-            assert_eq!(retained, derived, "selector truth derivation differs for {node:?}");
-            self.selector_truth_sets
-                .verify_derived_answer(identity, tree_scope, self.program.version(), &retained)
-        });
-        if let Some(reused) = reused_derived_answer {
-            counters.bump(if reused {
-                Counter::SelectorTruthDerivedAnswerHits
-            } else {
-                Counter::SelectorTruthDerivedAnswerMisses
-            });
         }
         if node.element_index().is_some()
             && (effects.answer_identity(&self.retained_match_answers, node).is_some()
@@ -2919,7 +2533,7 @@ impl RetainedState {
             scope_program,
             dispatch,
             match_workspace: MatchScratch::default(),
-            prefix_caches: Rc::clone(&self.prefix_caches),
+            prefix_caches: std::sync::Arc::clone(&self.prefix_caches),
             dispatch_workspace,
             always_emit: selection.always_emit,
             has_non_selector_inputs: selection.has_non_selector_inputs,
@@ -2974,7 +2588,8 @@ impl RetainedState {
             })
             .collect::<Option<_>>()?;
         exact_answer = self.in_cascade_order(exact_answer, false);
-        let cascade_winners_are_complete = self.cascade_winner_inventory_is_complete(&exact_answer, Some(node));
+        let cascade_winners_are_complete =
+            self.cascade_winner_inventory_is_complete_in_transaction(effects, &exact_answer, node);
         if exact_answer.iter().any(|entry| {
             entry.pseudo_element.is_some() && patch.cascade_update_rules.binary_search(&entry.rule).is_ok()
         }) {
@@ -3119,6 +2734,7 @@ impl RetainedState {
                             return false;
                         }
                         let priority = self.cascade_priority_of(
+                            None,
                             delta.rule,
                             TreeScopeID::DOCUMENT,
                             entry.specificity,
@@ -3322,6 +2938,13 @@ impl RetainedState {
                     &mut self.memory,
                 );
             }
+            effects.winners.mark_pseudo_rows_not_carried(
+                &mut self.winner_groups,
+                node,
+                transition.flipped_pseudo_kinds,
+                &transition.pseudo_winner_states,
+                &mut self.memory,
+            );
             self.publish_cascade_input_with_effects(effects, node, transition.new_cascade_input);
             counters.bump(Counter::RetainedMatchAnswerDeltaPatches);
             if stopped {
@@ -3378,6 +3001,7 @@ impl RetainedState {
                         new_cascade_input: old_cascade_input,
                         winner_state,
                         pseudo_winner_states: pseudo_winner_states.into_boxed_slice(),
+                        flipped_pseudo_kinds: self.flipped_pseudo_kinds(deltas),
                         winners_updated: false,
                         cascade_winners_are_complete: false,
                     },
@@ -3398,9 +3022,8 @@ impl RetainedState {
             materialized.push(entry.materialize(node, &self.programs, cascade_order)?);
         }
         let materialized = self.in_cascade_order(materialized, false);
-        let cascade_winners_are_complete = self.cascade_winner_inventory_is_complete(&materialized, Some(node));
-
-        verify_match_answer_against_cold(self, &materialized, node, "a retained match answer delta", counters);
+        let cascade_winners_are_complete =
+            self.cascade_winner_inventory_is_complete_in_transaction(effects, &materialized, node);
 
         self.remember_prepared_retained_match_answer_with_effects(effects, node, answer, counters);
         let cascade_winners_updated = self.apply_cascade_winner_match_deltas(
@@ -3461,6 +3084,7 @@ impl RetainedState {
                     new_cascade_input,
                     winner_state,
                     pseudo_winner_states: pseudo_winner_states.into_boxed_slice(),
+                    flipped_pseudo_kinds: self.flipped_pseudo_kinds(deltas),
                     winners_updated: cascade_winners_updated,
                     cascade_winners_are_complete,
                 },
@@ -3493,7 +3117,7 @@ impl RetainedState {
         let affected_keys: &[(RuleID, SelectorProgramID)] = narrowed_keys.unwrap_or(&patch.rule_keys);
         counters.bump(Counter::SelectorTruthRepairUpqueries);
         let mut matches = RuleMatches::new();
-        let prefix_caches = Rc::clone(&patch.prefix_caches);
+        let prefix_caches = std::sync::Arc::clone(&patch.prefix_caches);
         let mut caches = prefix_caches.borrow_mut();
         let mut states = caches
             .states
@@ -3737,8 +3361,6 @@ impl RetainedState {
 
         let patched_answer = self.in_cascade_order(patched_answer, false);
 
-        verify_match_answer_against_cold(self, &patched_answer, node, "a retained match answer patch", counters);
-
         // Most patches end where they began: the filtered match returns exactly the entries it
         // displaced. An identical answer keeps its stored cascade input, so skip re-deriving and
         // re-interning its cascade expansion.
@@ -3861,7 +3483,6 @@ impl RetainedState {
         )
     }
 
-    #[cfg(test)]
     pub(super) fn complete_published_match_answer(
         &mut self,
         node: StyleNodeID,
@@ -3919,7 +3540,8 @@ impl RetainedState {
                     entry.materialize(node, &self.programs, cascade_order)
                 })
                 .collect::<Option<Vec<_>>>()?;
-            let cascade_winners_are_complete = self.cascade_winner_inventory_is_complete(&exact_answer, Some(node));
+            let cascade_winners_are_complete =
+                self.cascade_winner_inventory_is_complete_in_transaction(effects, &exact_answer, node);
             Some((exact_answer, cascade_winners_are_complete))
         });
         let (matches, cascade_winners_are_complete, compact_answer) =
@@ -4110,29 +3732,6 @@ impl RetainedState {
         Some(cascade_input)
     }
 
-    pub(super) fn retained_cascade_input_is_exact(
-        &mut self,
-        effects: &AnswerEffects,
-        node: StyleNodeID,
-        cascade_input: MatchAnswerID,
-        counters: &mut Counters,
-    ) -> bool {
-        let Ok((full_answer, verification_winner_groups)) = self.exact_cascade_answer_for_verification(node, counters)
-        else {
-            return false;
-        };
-        let prepared_answer = prepare_retained_match_answer(full_answer.into_iter());
-        let answer_is_equal = self
-            .match_answers
-            .answer(cascade_input)
-            .is_some_and(|retained_answer| retained_answer.as_ref() == prepared_answer);
-        let winner_rows_are_equal = effects
-            .winners
-            .view(&self.winner_groups)
-            .node_rows_are_semantically_equal(&verification_winner_groups, node, self.program.version());
-        answer_is_equal && winner_rows_are_equal
-    }
-
     /// Whether any entry of the answer observes sibling or positional relations, whose truth is
     /// maintained state in the prefix automaton.
     pub(super) fn answer_observes_sibling_relations(&self, input: MatchAnswerID) -> bool {
@@ -4256,6 +3855,7 @@ impl RetainedState {
                     return false;
                 }
                 let priority = self.cascade_priority_of(
+                    Some(node),
                     added.rule,
                     added.tree_scope,
                     entry.specificity,
@@ -4270,19 +3870,6 @@ impl RetainedState {
         }
         counters.bump(Counter::TransitionProofConfirmed);
         true
-    }
-
-    pub(super) fn verify_retained_cascade_input(
-        &mut self,
-        effects: &AnswerEffects,
-        node: StyleNodeID,
-        cascade_input: MatchAnswerID,
-        counters: &mut Counters,
-    ) {
-        assert!(
-            self.retained_cascade_input_is_exact(effects, node, cascade_input, counters),
-            "retained cascade identity stop diverged from exact matching"
-        );
     }
 
     pub fn complete_published_match_answers_for_closure(
@@ -4314,12 +3901,6 @@ impl RetainedState {
                 }
                 let answer = if let Some(cascade_input) = self.retained_closure_cascade_input(&effects, node) {
                     counters.bump(Counter::PublishedClosureRetainedIdentityStops);
-                    // NB: Verify mode proves the identity stop against the full completion on the
-                    // side instead of disabling it; the check's own work must not disturb engine
-                    // counters, so they are restored around it.
-                    verify_style_answer_patch(self, counters, |verifier| {
-                        verifier.verify_retained_cascade_input(&effects, node, cascade_input);
-                    });
                     PublishedMatchAnswer {
                         node,
                         cascade_input: Some(cascade_input),
@@ -4529,94 +4110,10 @@ impl RetainedState {
             return None;
         };
         let answer = self.matches_for_cascade(effects, exact_answer, false, Some(node), counters);
-        verify_cascade_answer_against_cold(self, &answer, node, "a retained match answer", counters);
         self.remember_cascade_input_with_effects(effects, node, &answer, counters);
         counters.bump(Counter::RetainedMatchAnswerReuses);
         counters.bump(Counter::PublishedMatchAnswerConsumptions);
         Some(answer)
-    }
-
-    /// Stream a published answer into its consumer. A materialized payload needs no copy; an
-    /// identity-only payload is restored in cascade order before it crosses the bridge.
-    pub(super) fn consume_published_match_answer_with(
-        &mut self,
-        node: StyleNodeID,
-        capacity: usize,
-        mut consume: impl FnMut(
-            usize,
-            StyleNodeID,
-            RuleID,
-            SemanticDeclarationID,
-            Option<tree::PseudoElementTarget>,
-            u32,
-            u32,
-        ),
-        counters: &mut Counters,
-    ) -> Option<usize> {
-        if let Some((owner, published)) = Self::published_answer_lookup(
-            &self.published_match_answers,
-            self.batch_matching_traversal.as_deref(),
-            node,
-        ) {
-            let cascade_input = published.cascade_input;
-            let materialized_len = owner.matches_for(published).map(<[RuleMatch]>::len);
-            let compact_len = cascade_input
-                .filter(|_| materialized_len.is_none())
-                .and_then(|identity| self.match_answers.answer(identity))
-                .map(|matches| matches.len());
-            if let Some(len) = materialized_len {
-                self.mark_published_answer_observed(node);
-                counters.bump(Counter::PublishedMatchAnswerConsumptions);
-                if len > capacity {
-                    return Some(len);
-                }
-                let (owner, published) = Self::published_answer_lookup(
-                    &self.published_match_answers,
-                    self.batch_matching_traversal.as_deref(),
-                    node,
-                )
-                .expect("a published answer remains live until the transaction ends");
-                let matches = owner
-                    .matches_for(published)
-                    .expect("a materialized published answer remains live until the transaction ends");
-                for (index, matched) in matches.iter().enumerate() {
-                    consume(
-                        index,
-                        node,
-                        matched.rule,
-                        self.program.ensure_semantic_declaration(matched.rule),
-                        matched.pseudo_element,
-                        self.cascade_context_host(matched.rule, matched.tree_scope),
-                        matched.scope_proximity,
-                    );
-                }
-                return Some(len);
-            }
-            if let Some(len) = compact_len
-                && len > capacity
-            {
-                self.mark_published_answer_observed(node);
-                counters.bump(Counter::PublishedMatchAnswerConsumptions);
-                return Some(len);
-            }
-        }
-
-        let matches = self.consume_published_match_answer(node, counters)?;
-        let len = matches.len();
-        if len <= capacity {
-            for (index, matched) in matches.iter().enumerate() {
-                consume(
-                    index,
-                    node,
-                    matched.rule,
-                    self.program.ensure_semantic_declaration(matched.rule),
-                    matched.pseudo_element,
-                    self.cascade_context_host(matched.rule, matched.tree_scope),
-                    matched.scope_proximity,
-                );
-            }
-        }
-        Some(len)
     }
 
     /// Read the shareable identity of one answer from the immediately preceding style transaction.
@@ -4702,8 +4199,11 @@ impl RetainedState {
                         })
                 })
                 .all(|(pseudo, version, state, priority_current)| {
+                    // A state with custom declarations resolves them against the registrations as
+                    // well, which move without its rows: it cannot vouch for its environment.
                     version == self.program.version()
                         && priority_current
+                        && winner_groups.custom_declarations_of(state) == Default::default()
                         && u8::try_from(pseudo.kind.0).ok().is_some_and(|pseudo_kind| {
                             self.computed_group_sets
                                 .pseudo_retained_cascade_states(node)
@@ -4761,7 +4261,11 @@ impl RetainedState {
         Ok(answer)
     }
 
-    fn exact_match_answer(&mut self, node: StyleNodeID, counters: &mut Counters) -> Result<Vec<RuleMatch>, Incomplete> {
+    pub(super) fn exact_match_answer(
+        &mut self,
+        node: StyleNodeID,
+        counters: &mut Counters,
+    ) -> Result<Vec<RuleMatch>, Incomplete> {
         let scope = self.tree.tree_scope(node);
         let inner_scope = self
             .tree
@@ -4802,66 +4306,6 @@ impl RetainedState {
 
         let can_have_scope_duplicates = inner_scope.is_some() || !slotted_scopes.is_empty() || !part_scopes.is_empty();
         Ok(self.in_cascade_order(matches, can_have_scope_duplicates))
-    }
-
-    pub(super) fn exact_match_answer_for_verification(
-        &mut self,
-        node: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<Vec<RuleMatch>, Incomplete> {
-        self.prepare_scope_programs_for_nodes([node]);
-        let counters_before_verification = counters.clone();
-        let answer = self.exact_match_answer(node, counters);
-        *counters = counters_before_verification;
-        answer
-    }
-
-    pub(super) fn exact_cascade_answer_for_verification(
-        &mut self,
-        node: StyleNodeID,
-        counters: &mut Counters,
-    ) -> Result<(Vec<RuleMatch>, WinnerGroups), Incomplete> {
-        self.prepare_scope_programs_for_nodes([node]);
-        let counters_before_verification = counters.clone();
-        let exact_answer = match self.exact_match_answer(node, counters) {
-            Ok(answer) => answer,
-            Err(incomplete) => {
-                *counters = counters_before_verification;
-                return Err(incomplete);
-            }
-        };
-        let mut verification_winner_groups = self.winner_groups.verification_copy();
-        let mut verification_memory = self.memory.verification_copy();
-        let mut verification_compaction_scratch = ordering::CascadeCompactionWorkspace::default();
-        let mut verification_compaction_scratch_memory = MemoryLease::new(MemoryCategory::BatchScratch);
-        std::mem::swap(&mut self.winner_groups, &mut verification_winner_groups);
-        std::mem::swap(&mut self.memory, &mut verification_memory);
-        std::mem::swap(
-            &mut self.cascade_compaction_scratch,
-            &mut verification_compaction_scratch,
-        );
-        std::mem::swap(
-            &mut self.cascade_compaction_scratch_memory,
-            &mut verification_compaction_scratch_memory,
-        );
-        let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.matches_for_cascade_immediately(exact_answer, false, Some(node), counters)
-        }));
-        std::mem::swap(
-            &mut self.cascade_compaction_scratch_memory,
-            &mut verification_compaction_scratch_memory,
-        );
-        std::mem::swap(
-            &mut self.cascade_compaction_scratch,
-            &mut verification_compaction_scratch,
-        );
-        std::mem::swap(&mut self.memory, &mut verification_memory);
-        std::mem::swap(&mut self.winner_groups, &mut verification_winner_groups);
-        *counters = counters_before_verification;
-        match answer {
-            Ok(answer) => Ok((answer, verification_winner_groups)),
-            Err(payload) => std::panic::resume_unwind(payload),
-        }
     }
 
     pub(super) fn match_element_for_purpose_with_compact_answer(
@@ -4987,12 +4431,9 @@ impl RetainedState {
             .is_some_and(|batch| batch.row_of(node).is_some());
         if prepared_batch_contains_node {
             let traversal = traversal.as_deref_mut().unwrap();
-            let prefix_caches = Rc::clone(&traversal.prefix_caches);
+            let prefix_caches = std::sync::Arc::clone(&traversal.prefix_caches);
             let facts = traversal.batch.as_ref().unwrap();
             let mut matches = RuleMatches::new();
-            if compact_for_cascade && verify_selector_truth_derivation_is_enabled() {
-                matches.enable_selector_truth();
-            }
             // OPTIMIZATION: Identical sheet sets share a scope program, so the prefix automaton's
             // answer can be reused across otherwise independent shadow trees.
             let can_defer_prefix_matches =
@@ -5038,7 +4479,6 @@ impl RetainedState {
                 inner_scope.is_some() || !slotted_scopes.is_empty() || !part_scopes.is_empty();
             let mut cascade_input = None;
             let mut retained_match_answer = None;
-            let mut retained_selector_truth = None;
             let mut retained_match_answer_reused = false;
             let mut retained_match_answer_key_to_remember = None;
             let mut cached_cascade_winner_inventory_is_complete = None;
@@ -5046,9 +4486,6 @@ impl RetainedState {
             let mut non_prefix_matches_charge = None;
             let all = match (result, deferred_prefix_matches) {
                 (Ok(()), Some(prefix_matches)) => {
-                    if retained_match_answer_is_exact {
-                        retained_selector_truth = matches.take_prepared_selector_truth(&mut self.memory);
-                    }
                     let (scope_program, _) = self.prepared_scope_program(scope);
                     non_prefix_matches.extend(
                         matches
@@ -5338,9 +4775,11 @@ impl RetainedState {
                                 {
                                     published_winner_rows = true;
                                 }
+                                let carried_pseudo_winner_groups = pseudo_winner_groups
+                                    .filter(|&(generation, _)| generation == self.winner_groups.generation())
+                                    .map(|(_, pseudo_winner_groups)| pseudo_winner_groups);
                                 if scope == TreeScopeID::DOCUMENT
-                                    && let Some((generation, pseudo_winner_groups)) = pseudo_winner_groups
-                                    && generation == self.winner_groups.generation()
+                                    && let Some(pseudo_winner_groups) = &carried_pseudo_winner_groups
                                 {
                                     for &(pseudo, state) in pseudo_winner_groups.iter() {
                                         let _ = effects.winners.set_pseudo(
@@ -5353,6 +4792,15 @@ impl RetainedState {
                                         );
                                     }
                                     published_winner_rows = true;
+                                }
+                                if scope == TreeScopeID::DOCUMENT {
+                                    effects.winners.mark_pseudo_rows_not_carried(
+                                        &mut self.winner_groups,
+                                        node,
+                                        u64::MAX,
+                                        carried_pseudo_winner_groups.as_deref().unwrap_or_default(),
+                                        &mut self.memory,
+                                    );
                                 }
                                 if published_winner_rows {
                                     self.winner_groups.settle_memory(&mut self.memory);
@@ -5394,25 +4842,31 @@ impl RetainedState {
                                     Lookup::Missing(_) => None,
                                 };
                                 // The rows the engine settles pseudo-elements from travel with
-                                // the group: ::before, ::after, ::first-letter and ::selection.
-                                // The rules for ::marker, ::backdrop and the element-backed
-                                // pseudo-elements match every element, and a row for every
-                                // element would only cost the memory the winner groups have.
+                                // the group, ::marker and ::backdrop only from a node holding a
+                                // record for them. A cohort hit marks its own rows for every kind
+                                // the group does not carry stale.
                                 let pseudo_winner_groups = self.settled_pseudo_winner_states(effects, node);
                                 let pseudo_winner_groups = (!pseudo_winner_groups.is_empty())
                                     .then(|| (self.winner_groups.generation(), Arc::from(pseudo_winner_groups)));
                                 let answer_cascade_input = self.intern_cascade_input(&answer, counters);
                                 let cascade_winner_inventory_is_complete =
                                     self.cascade_winner_inventory_is_complete(&answer, Some(node));
-                                prefix_caches.borrow_mut().answers.remember(
-                                    &mut self.match_answers,
-                                    key,
-                                    &answer,
-                                    winner_group,
-                                    pseudo_winner_groups,
-                                    answer_cascade_input,
-                                    cascade_winner_inventory_is_complete,
-                                );
+                                // The winners of an answer holding a gated rule are this node's: its
+                                // containers decided them, and another node's may not.
+                                if !answer
+                                    .iter()
+                                    .any(|entry| self.program.rule_is_gated_by_container_query(entry.rule))
+                                {
+                                    prefix_caches.borrow_mut().answers.remember(
+                                        &mut self.match_answers,
+                                        key,
+                                        &answer,
+                                        winner_group,
+                                        pseudo_winner_groups,
+                                        answer_cascade_input,
+                                        cascade_winner_inventory_is_complete,
+                                    );
+                                }
                                 cascade_input = Some(answer_cascade_input);
                                 answer
                             }
@@ -5424,7 +4878,6 @@ impl RetainedState {
                 (Ok(()), None) => {
                     if retained_match_answer_is_exact {
                         retained_match_answer = Some(prepare_retained_match_answer(matches.as_slice().iter().copied()));
-                        retained_selector_truth = matches.take_prepared_selector_truth(&mut self.memory);
                     }
                     if compact_for_cascade {
                         self.compact_matches_for_cascade_with_scratch(
@@ -5463,11 +4916,10 @@ impl RetainedState {
             );
             if let Ok(matches) = &all {
                 if let Some(retained_match_answer) = retained_match_answer {
-                    self.remember_prepared_retained_match_answer_with_truth_with_effects(
+                    self.remember_prepared_retained_match_answer_with_effects(
                         effects,
                         node,
                         retained_match_answer,
-                        retained_selector_truth,
                         counters,
                     );
                     if let Some(key) = retained_match_answer_key_to_remember
@@ -5493,7 +4945,11 @@ impl RetainedState {
                 }
             }
             drop(non_prefix_matches_charge);
-            return all;
+            // A selector can read a row the prepared batch did not cover. The adaptive path
+            // below widens its own facts until the answer is exact.
+            if all.is_ok() {
+                return all;
+            }
         }
 
         // Which other nodes a selector reads is a property of the selectors, not of the element:
@@ -5527,16 +4983,13 @@ impl RetainedState {
         }
         let mut sibling_window = INITIAL_SIBLING_FACT_WINDOW;
         let mut matches = RuleMatches::new();
-        if compact_for_cascade && verify_selector_truth_derivation_is_enabled() {
-            matches.enable_selector_truth();
-        }
         let mut completed_by_scope: Column<Vec<bool>> = Column::default();
         let mut dispatch_workspace = DispatchCandidateWorkspace::default();
         let prefix_caches_return_to_completion_batch = traversal.is_some();
         let prefix_caches = traversal
             .as_deref()
-            .map(|traversal| Rc::clone(&traversal.prefix_caches))
-            .unwrap_or_else(|| Rc::new(RefCell::new(PrefixCaches::default())));
+            .map(|traversal| std::sync::Arc::clone(&traversal.prefix_caches))
+            .unwrap_or_default();
         let mut completion_scratch_bytes = 0;
         let mut retained_match_answer_is_exact = compact_for_cascade;
         let mut facts = StyleNodeFacts::new();
@@ -5626,10 +5079,7 @@ impl RetainedState {
                     if retained_match_answer_is_exact {
                         self.order_matches_in_cascade(matches.as_mut_vec(), can_have_scope_duplicates);
                         let retained = prepare_retained_match_answer(matches.as_slice().iter().copied());
-                        let truth = matches.take_prepared_selector_truth(&mut self.memory);
-                        self.remember_prepared_retained_match_answer_with_truth_with_effects(
-                            effects, node, retained, truth, counters,
-                        );
+                        self.remember_prepared_retained_match_answer_with_effects(effects, node, retained, counters);
                     } else if compact_for_cascade {
                         // A cascade-only shortcut can answer the current style without proving the
                         // complete selector answer. Do not leave an older exact answer resident.
@@ -5678,24 +5128,6 @@ impl RetainedState {
                     }
                 }
             }
-        }
-    }
-}
-
-impl StyleEngineState {
-    pub fn prepare_selector_query(&mut self, counters: &mut Counters) {
-        let has_staged_structure = !(self.host.tree_staging.is_empty() || self.host.tree_staging.is_applied());
-        self.apply_staged_tree_deltas(counters);
-        self.discard_prepared_batch_matching_traversal();
-        self.retained.facts.prepare_selector_query(&mut self.retained.memory);
-        // Every candidate of the coming query shares one tree — so its sibling positions are computed once, and reused.
-        // They stay valid until something changes: Every mutation reaches this engine either as a staged-tree delta or
-        // as a non-empty style transaction — and the second is what advances the transaction version. A run of queries
-        // with neither in between — the querySelector-in-a-loop shape — keeps one workspace for the whole run.
-        let settled_version = self.retained.next_style_transaction_version;
-        if has_staged_structure || settled_version != self.retained.query_settled_transaction_version {
-            self.retained.selector_query_generation = self.retained.selector_query_generation.wrapping_add(1);
-            self.retained.query_settled_transaction_version = settled_version;
         }
     }
 }
