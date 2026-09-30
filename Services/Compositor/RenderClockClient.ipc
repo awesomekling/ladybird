@@ -1,0 +1,6 @@
+#include <LibCompositing/Types.h>
+
+endpoint RenderClockClient
+{
+    clock_tick(Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double frame_interval_milliseconds) =|
+}

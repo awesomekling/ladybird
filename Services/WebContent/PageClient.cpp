@@ -40,6 +40,7 @@
 #include <LibWeb/Geolocation/GeolocationPositionError.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/LocalTraversableNavigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
@@ -51,7 +52,6 @@
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Infra/SerializedURL.h>
 #include <LibWeb/InvalidateDisplayList.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
@@ -156,6 +156,8 @@ void PageClient::visit_edges(JS::Cell::Visitor& visitor)
         visitor.visit(promise.value);
     for (auto& check : m_pending_unload_checks)
         visitor.visit(check.value);
+    for (auto& navigable : m_child_navigables_pending_destruction)
+        visitor.visit(navigable.value);
     for (auto& controller : m_download_controllers)
         visitor.visit(controller.value);
     for (auto& reader : m_download_readers)
@@ -461,6 +463,9 @@ void PageClient::set_window_size(Compositing::DevicePixelSize size)
 
 void PageClient::compositor_process_lost()
 {
+    // The render clock lost its channel with the Compositor, and everything armed on it. The rendering update that
+    // follows the reconnect grants the leases anew.
+    Web::HTML::main_thread_event_loop().frame_scheduler().revoke_all_clock_leases();
     page().notify_all_webgl_contexts_lost();
     page().detach_all_media_element_video_sinks_after_compositor_lost();
 
@@ -789,12 +794,17 @@ void PageClient::did_finish_rendering_update()
     request_rendering_opportunity_if_needed();
 }
 
-void PageClient::set_manual_rendering_opportunities(bool enabled)
+void PageClient::set_manual_rendering_opportunities(bool enabled, bool with_clock_ticks)
 {
-    if (m_manual_rendering_opportunities == enabled)
+    with_clock_ticks &= enabled;
+    if (m_manual_rendering_opportunities == enabled && m_manual_clock_ticks == with_clock_ticks)
         return;
 
+    // Frames and display ticks come from the test alone, or from the display alone: the leases the render clock or the
+    // test ticked end, and the rendering update that follows grants them anew.
+    Web::HTML::main_thread_event_loop().frame_scheduler().revoke_all_clock_leases();
     m_manual_rendering_opportunities = enabled;
+    m_manual_clock_ticks = with_clock_ticks;
     if (enabled) {
         m_frame_timer->stop();
         m_frame_timer_purpose = FrameTimerPurpose::Inactive;
@@ -819,6 +829,29 @@ void PageClient::inject_rendering_opportunity(double frame_time)
         return;
 
     grant_rendering_opportunity(frame_time, Web::HTML::EventLoop::RenderingOpportunitySource::Manual);
+}
+
+bool PageClient::arm_render_clock(Compositing::CompositorContextId context_id)
+{
+    // Under manual rendering opportunities, the display ticks come from the test alone (internals.injectClockTick()), if
+    // it hands any.
+    if (m_manual_rendering_opportunities)
+        return m_manual_clock_ticks;
+    if (!client().compositor_process_connection())
+        return false;
+    auto* render_clock = client().render_clock();
+    if (!render_clock)
+        return false;
+    render_clock->arm(context_id, m_maximum_frames_per_second);
+    return true;
+}
+
+void PageClient::disarm_render_clock(Compositing::CompositorContextId context_id)
+{
+    if (m_manual_rendering_opportunities)
+        return;
+    if (auto* render_clock = client().render_clock())
+        render_clock->disarm(context_id);
 }
 
 void PageClient::set_maximum_frames_per_second(double maximum_frames_per_second)
@@ -1572,7 +1605,19 @@ void PageClient::page_did_request_history_operation(Web::HTML::CrossProcessId op
 
 void PageClient::page_did_request_child_navigable_unload(Web::HTML::CrossProcessId navigable_id)
 {
+    // The child has already been marked as destroyed, so a lookup through the page no longer finds it.
+    GC::Ptr<Web::HTML::Navigable> navigable = Web::HTML::local_navigable_with_id(navigable_id);
+    if (!navigable || &navigable->page() != &page())
+        navigable = Web::HTML::remote_navigable_with_id(page(), navigable_id);
+    VERIFY(navigable);
+    m_child_navigables_pending_destruction.set(navigable_id, *navigable);
     client().async_request_child_navigable_unload(m_id, navigable_id);
+}
+
+void PageClient::continue_child_navigable_destruction(Web::HTML::CrossProcessId navigable_id)
+{
+    if (auto navigable = m_child_navigables_pending_destruction.take(navigable_id); navigable.has_value())
+        Web::HTML::NavigableContainer::continue_destroying_the_child_navigable(*navigable);
 }
 
 void PageClient::page_did_request_remote_document_abort(Web::HTML::CrossProcessId navigable_id)

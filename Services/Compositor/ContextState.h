@@ -182,6 +182,15 @@ public:
     bool rendering_opportunity_is_due(MonotonicTime frame_time, double display_refresh_rate) const;
     void did_deliver_rendering_opportunity(MonotonicTime frame_time);
 
+    // The display ticks a render clock asks for are paced apart from the rendering opportunities: a tick delivered
+    // to the clock must not push back the context's next rendering opportunity.
+    bool request_clock_tick(double maximum_frames_per_second);
+    bool clock_tick_requested() const { return m_clock_tick_requested; }
+    void cancel_clock_tick_request() { m_clock_tick_requested = false; }
+    double clock_tick_frame_interval(double display_refresh_rate) const { return m_clock_tick_pacer.frame_interval(display_refresh_rate); }
+    bool clock_tick_is_due(MonotonicTime frame_time, double display_refresh_rate) const { return m_clock_tick_pacer.is_due(frame_time, display_refresh_rate); }
+    void did_deliver_clock_tick(MonotonicTime frame_time);
+
     void queue_present_frame(PendingFrame);
     Optional<Gfx::IntRect> pending_present_frame_viewport_rect() const;
     void mark_pending_present_frame_scheduled();
@@ -354,6 +363,9 @@ private:
 
     bool m_rendering_opportunity_requested { false };
     FramePacer m_rendering_opportunity_pacer;
+
+    bool m_clock_tick_requested { false };
+    FramePacer m_clock_tick_pacer;
 
     Optional<PendingFrame> m_pending_present_frame;
     bool m_pending_present_frame_scheduled { false };

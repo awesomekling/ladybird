@@ -146,6 +146,7 @@ public:
     void navigate_to_a_javascript_url(Web::HTML::CrossProcessId navigable_id, URL::URL const&, Web::HTML::HistoryHandlingBehavior, URL::Origin const& initiator_origin, Web::HTML::NavigationSourceSnapshot const&, Web::HTML::UserNavigationInvolvement, Web::ContentSecurityPolicy::Directives::Directive::NavigationType csp_navigation_type, Utf16String navigation_id);
     void run_navigation_unload_check(Web::HTML::CrossProcessId navigable_id, Utf16String const& navigation_id, Web::HTML::UnloadPromptShown);
     void did_receive_unload_check_result(Web::HTML::CrossProcessId check_id, Web::HTML::HistoryStepResult);
+    void continue_child_navigable_destruction(Web::HTML::CrossProcessId navigable_id);
     void create_navigation_params(Web::HTML::NavigationPopulationRequest);
     void navigate_navigable(Web::HTML::CrossProcessId navigable_id, Web::HTML::PreparedNavigationDescriptor);
     void deliver_posted_message(Web::HTML::CrossProcessId navigable_id, Web::HTML::PostedMessageDescriptor);
@@ -218,8 +219,10 @@ private:
     virtual void will_begin_rendering_update() override;
     virtual bool has_rendering_opportunity() const override;
     virtual void did_finish_rendering_update() override;
-    virtual void set_manual_rendering_opportunities(bool enabled) override;
+    virtual void set_manual_rendering_opportunities(bool enabled, bool with_clock_ticks) override;
     virtual void inject_rendering_opportunity(double frame_time) override;
+    virtual bool arm_render_clock(Compositing::CompositorContextId) override;
+    virtual void disarm_render_clock(Compositing::CompositorContextId) override;
     virtual void page_did_request_cursor_change(Gfx::Cursor const&) override;
     virtual void page_did_change_title(Utf16String const&) override;
     virtual void page_did_update_editing_history_state(bool can_undo, bool can_redo) override;
@@ -372,6 +375,9 @@ private:
     u64 m_next_delete_all_cookies_request_id { 1 };
     HashMap<u64, GC::Ref<Web::WebIDL::Promise>> m_pending_delete_all_cookies_promises;
     HashMap<Web::HTML::CrossProcessId, GC::Ref<GC::Function<void(Web::HTML::CheckIfUnloadingIsCanceledResult)>>> m_pending_unload_checks;
+    // A destroyed child navigable has left its container, and its destruction goes on once the UI process has unloaded
+    // its documents. Nothing else keeps it alive until then.
+    HashMap<Web::HTML::CrossProcessId, GC::Ref<Web::HTML::Navigable>> m_child_navigables_pending_destruction;
     HashMap<u64, GC::Ref<Web::Fetch::Infrastructure::FetchController>> m_download_controllers;
     HashMap<u64, GC::Ref<Web::Streams::ReadableStreamDefaultReader>> m_download_readers;
     HashTable<u64> m_canceled_downloads;
@@ -400,6 +406,9 @@ private:
     bool m_rendering_opportunity_granted { false };
     bool m_rendering_opportunity_for_current_update { false };
     bool m_manual_rendering_opportunities { false };
+    // Whether the leases a render clock would tick take the display ticks the test injects, under manual rendering
+    // opportunities.
+    bool m_manual_clock_ticks { false };
     Optional<double> m_granted_rendering_opportunity_time;
     Web::HTML::EventLoop::RenderingOpportunitySource m_granted_rendering_opportunity_source { Web::HTML::EventLoop::RenderingOpportunitySource::LocalTimer };
     Queue<PendingDOMMutation> m_pending_dom_mutations;

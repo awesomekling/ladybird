@@ -23,6 +23,7 @@
 #include <LibJS/Forward.h>
 #include <LibWeb/Bindings/Navigation.h>
 #include <LibWeb/Bindings/NavigationType.h>
+#include <LibWeb/Compositor/RenderClock.h>
 #include <LibWeb/ContentSecurityPolicy/Directives/Directive.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/HTML/SessionHistoryEntry.h>
@@ -71,6 +72,8 @@ public:
     PageHost& page_host() { return *m_page_host; }
     PageHost const& page_host() const { return *m_page_host; }
     Web::Compositor::CompositorConnection* compositor_process_connection() const;
+    // The render clock that ticks clock leases at display ticks, without the main thread.
+    Web::Compositor::RenderClock* render_clock() const { return m_render_clock.ptr(); }
     void did_destroy_compositor_context(Compositing::CompositorContextId);
 
     Function<void(IPC::TransportHandle const&)> on_request_server_connection;
@@ -96,6 +99,7 @@ private:
 
     virtual Messages::WebContentServer::InitTransportResponse init_transport(int peer_pid) override;
     virtual void set_font_catalog(IPC::File, u64 size, u64 generation) override;
+    virtual void set_renderer_font_service_transport(IPC::TransportHandle) override;
     virtual void initialize(Compositing::PageId initial_page_id, Vector<Web::HTML::RemoteNavigableDescriptor> remote_navigables, Web::HTML::CrossProcessId root_navigable_id, Web::HTML::CrossProcessIdAllocator cross_process_id_allocator, Web::HTML::SessionHistoryEntryDescriptor initial_history_entry, Web::HTML::VisibilityState system_visibility_state) override;
     virtual void create_representing_page(Compositing::PageId page_id, Vector<Web::HTML::RemoteNavigableDescriptor> remote_navigables) override;
     virtual void create_embedded_page(Compositing::PageId page_id, Vector<Web::HTML::RemoteNavigableDescriptor> remote_navigables, Web::HTML::CrossProcessId root_navigable_id, Web::HTML::SessionHistoryEntryDescriptor initial_history_entry, Web::HTML::VisibilityState system_visibility_state) override;
@@ -120,6 +124,7 @@ private:
     virtual void connect_to_compositor_process(IPC::TransportHandle handle) override;
     virtual void set_site_compatibility_data(JsonValue data) override;
     virtual void compositor_process_reconnected() override;
+    void attach_render_clock();
     virtual void update_system_theme(Compositing::PageId page_id, Core::AnonymousBuffer) override;
     virtual void update_screen_rects(Compositing::PageId page_id, Vector<Compositing::DevicePixelRect>, u32) override;
     virtual void populate_navigation(Compositing::PageId page_id, Web::HTML::NavigationPopulationRequest, Web::HTML::NavigationPopulationResult) override;
@@ -321,6 +326,8 @@ private:
 
     RefPtr<TestConnection> m_test_connection;
     RefPtr<Web::Compositor::CompositorConnection> m_compositor_connection;
+    // NB: Destroyed before the Compositor connection and the pages: its thread ticks their documents' leases.
+    OwnPtr<Web::Compositor::RenderClock> m_render_clock;
     NonnullOwnPtr<PageHost> m_page_host;
     OwnPtr<DevToolsDebugger> m_devtools_debugger;
 

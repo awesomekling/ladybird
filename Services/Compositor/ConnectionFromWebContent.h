@@ -12,6 +12,7 @@
 #include <Compositor/CompositorState.h>
 #include <Compositor/CompositorWebContentClientEndpoint.h>
 #include <Compositor/CompositorWebContentServerEndpoint.h>
+#include <Compositor/RenderClockConnection.h>
 #include <LibCompositing/DisplayList/DisplayList.h>
 #include <LibCompositing/DisplayList/DisplayListResourceStorage.h>
 #include <LibCompositing/WebGL/Types.h>
@@ -28,7 +29,7 @@ class ConnectionFromWebContent final
     C_OBJECT(ConnectionFromWebContent);
 
 public:
-    virtual ~ConnectionFromWebContent() override = default;
+    virtual ~ConnectionFromWebContent() override;
     void notify_compositor_lost();
     void set_on_death(Function<void(ConnectionFromWebContent&)> handler) { m_on_death = move(handler); }
 
@@ -39,6 +40,9 @@ private:
 
     virtual Messages::CompositorWebContentServer::InitTransportResponse init_transport(int peer_pid) override;
     virtual void offer_video_presentation_channel(IPC::TransportHandle handle) override;
+    virtual void offer_render_clock_channel(IPC::TransportHandle handle) override;
+    void request_clock_tick(Compositing::CompositorContextId, double maximum_frames_per_second);
+    void shut_down_render_clock_channel();
     virtual void add_video_sink(Media::VideoSinkHandle) override;
     virtual void remove_video_sink(Media::VideoSinkHandle) override;
     virtual void set_video_sink_ticking(Media::VideoSinkHandle, bool should_tick) override;
@@ -84,6 +88,7 @@ private:
     virtual void dispatch_key_event_to_web_content(u64 page_id, Compositing::KeyEvent const&) override;
     virtual void request_rendering_update() override;
     virtual void rendering_opportunity(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double frame_interval_milliseconds) override;
+    virtual void clock_tick(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double frame_interval_milliseconds) override;
     virtual void async_scroll_updates(Compositing::CompositorContextId, Compositing::PendingAsyncScrollUpdates const&) override;
     virtual void create_video_edge(Media::VideoSinkHandle) override;
     virtual void release_video_edge(Media::VideoSinkHandle) override;
@@ -96,6 +101,9 @@ private:
 
     // The presentation client end of this WebContent's video presentation channel (connect-only for now).
     RefPtr<Media::VideoPresentationClientConnection> m_video_presentation_connection;
+
+    // The channel this WebContent's RenderClock thread asks for, and is delivered, display ticks on.
+    RefPtr<RenderClockConnection> m_render_clock_connection;
 };
 
 }
