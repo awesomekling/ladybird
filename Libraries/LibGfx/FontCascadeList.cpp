@@ -4,10 +4,96 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Atomic.h>
+#include <AK/HashMap.h>
+#include <AK/Mutex.h>
+#include <AK/Singleton.h>
+#include <LibGfx/Font/Typeface.h>
 #include <LibGfx/FontCascadeList.h>
 #include <LibUnicode/CharacterTypes.h>
 
+extern "C" {
+void const* ladybird_gfx_frozen_font_list_build(void const* list);
+void ladybird_gfx_frozen_font_list_release(void const* frozen);
+bool ladybird_gfx_request_wanted_pending_face(u64 face_id, bool has_been_retried);
+}
+
 namespace Gfx {
+
+// NB: A render pass never touches a pending face: the frozen cascade it reads carries only the
+//     number, and the document turns numbers back into faces after the pass has ended. Faces are
+//     still created and destroyed from wherever a cascade is built, and that is no longer only the
+//     document thread, so the registry is guarded.
+static Singleton<Mutex> s_pending_faces_mutex;
+static Singleton<HashMap<u64, FontCascadeList::PendingFace*>> s_pending_faces_by_id;
+
+static Atomic<u64> s_next_pending_face_id { 1 };
+
+static thread_local u32 s_published_pending_face_scope_depth { 0 };
+
+PublishedPendingFaceScope::PublishedPendingFaceScope()
+{
+    ++s_published_pending_face_scope_depth;
+}
+
+PublishedPendingFaceScope::~PublishedPendingFaceScope()
+{
+    VERIFY(s_published_pending_face_scope_depth > 0);
+    --s_published_pending_face_scope_depth;
+}
+
+Font const* FontCascadeList::PendingFace::resolved_font() const
+{
+    // A face's live state belongs to the document thread, which also fills m_font; a scope that reads
+    // only what was published leaves both alone and finds the face as the table recorded it: pending.
+    if (s_published_pending_face_scope_depth != 0)
+        return nullptr;
+    if (!m_font && m_resolved_font)
+        m_font = m_resolved_font();
+    return m_font.ptr();
+}
+
+FontCascadeList::PendingFace::PendingFace(UnicodeRange enclosing, Vector<UnicodeRange> ranges, Function<PendingFontState()> resolve, Function<RefPtr<Font const>()> resolved_font, Function<PendingFontState()> peek_state)
+    : m_enclosing_range(enclosing)
+    , m_unicode_ranges(move(ranges))
+    , m_resolve(move(resolve))
+    , m_resolved_font(move(resolved_font))
+    , m_peek_state(move(peek_state))
+    , m_id(s_next_pending_face_id.fetch_add(1, AK::MemoryOrder::memory_order_relaxed))
+{
+    MutexLocker locker { *s_pending_faces_mutex };
+    s_pending_faces_by_id->set(m_id, this);
+}
+
+FontCascadeList::PendingFace::~PendingFace()
+{
+    MutexLocker locker { *s_pending_faces_mutex };
+    s_pending_faces_by_id->remove(m_id);
+}
+
+RefPtr<FontCascadeList::PendingFace> FontCascadeList::PendingFace::with_id(u64 id)
+{
+    MutexLocker locker { *s_pending_faces_mutex };
+    auto it = s_pending_faces_by_id->find(id);
+    if (it == s_pending_faces_by_id->end())
+        return nullptr;
+    // NB: A face whose last reference is being dropped on another thread stays registered until its
+    //     destructor takes the mutex, so it must not be revived.
+    if (!it->value->try_ref())
+        return nullptr;
+    return adopt_ref(*it->value);
+}
+
+void request_wanted_pending_face(u64 face_id, bool has_been_retried)
+{
+    (void)ladybird_gfx_request_wanted_pending_face(face_id, has_been_retried);
+}
+
+FontCascadeList::~FontCascadeList()
+{
+    if (m_frozen_list)
+        ladybird_gfx_frozen_font_list_release(m_frozen_list);
+}
 
 EmojiPresentationResult emoji_presentation_for_code_point(u32 code_point, Optional<u32> next_code_point)
 {
@@ -25,13 +111,13 @@ EmojiPresentationResult emoji_presentation_for_code_point(u32 code_point, Option
 
 void FontCascadeList::add(NonnullRefPtr<Font const> font)
 {
-    m_first_available_font_cache = nullptr;
+    m_first_available_font_cache.store(nullptr, AK::MemoryOrder::memory_order_relaxed);
     m_fonts.append({ move(font), {} });
 }
 
 void FontCascadeList::add(NonnullRefPtr<Font const> font, Vector<UnicodeRange> unicode_ranges)
 {
-    m_first_available_font_cache = nullptr;
+    m_first_available_font_cache.store(nullptr, AK::MemoryOrder::memory_order_relaxed);
     if (unicode_ranges.is_empty()) {
         m_fonts.append({ move(font), {} });
         return;
@@ -51,7 +137,7 @@ void FontCascadeList::add(NonnullRefPtr<Font const> font, Vector<UnicodeRange> u
         } });
 }
 
-void FontCascadeList::add_pending_face(Vector<UnicodeRange> unicode_ranges, Function<PendingFontState()> resolve, Function<RefPtr<Font const>()> resolved_font)
+void FontCascadeList::add_pending_face(Vector<UnicodeRange> unicode_ranges, Function<PendingFontState()> resolve, Function<RefPtr<Font const>()> resolved_font, Function<PendingFontState()> peek_state)
 {
     m_ascii_cache.fill(nullptr);
     if (unicode_ranges.is_empty())
@@ -64,13 +150,13 @@ void FontCascadeList::add_pending_face(Vector<UnicodeRange> unicode_ranges, Func
         highest_code_point = max(highest_code_point, range.max_code_point());
     }
 
-    m_pending_faces.append({ m_fonts.size(), adopt_ref(*new PendingFace(UnicodeRange { lowest_code_point, highest_code_point }, move(unicode_ranges), move(resolve), move(resolved_font))) });
+    m_pending_faces.append({ m_fonts.size(), adopt_ref(*new PendingFace(UnicodeRange { lowest_code_point, highest_code_point }, move(unicode_ranges), move(resolve), move(resolved_font), move(peek_state))) });
 }
 
 void FontCascadeList::extend(FontCascadeList const& other)
 {
     m_ascii_cache.fill(nullptr);
-    m_first_available_font_cache = nullptr;
+    m_first_available_font_cache.store(nullptr, AK::MemoryOrder::memory_order_relaxed);
     for (auto const& pending : other.m_pending_faces)
         m_pending_faces.append({ m_fonts.size() + pending.font_index, pending.face });
     m_fonts.extend(other.m_fonts);
@@ -84,9 +170,18 @@ void FontCascadeList::extend_fallback(FontCascadeList const& other)
 // https://drafts.csswg.org/css-fonts/#first-available-font
 Gfx::Font const& FontCascadeList::first_available_font() const
 {
-    if (m_first_available_font_cache && m_pending_faces.is_empty())
-        return *m_first_available_font_cache;
+    // NB: A cascade the font memo holds is read by style font batches on any thread, so the cache is
+    //     atomic. Every thread that fills it stores a font this list owns.
+    if (auto const* cached = m_first_available_font_cache.load(AK::MemoryOrder::memory_order_relaxed); cached && m_pending_faces.is_empty())
+        return *cached;
 
+    auto const& font = find_first_available_font();
+    m_first_available_font_cache.store(&font, AK::MemoryOrder::memory_order_relaxed);
+    return font;
+}
+
+Gfx::Font const& FontCascadeList::find_first_available_font() const
+{
     // The first available font, used for example in the definition of font-relative lengths such as ex or in the
     // definition of the line-height property, is defined to be the first font for which the character U+0020 (space)
     // is not excluded by a unicode-range, given the font families in the font-family list (or a user agent’s default
@@ -108,33 +203,24 @@ Gfx::Font const& FontCascadeList::first_available_font() const
     };
 
     for (size_t font_index = 0; font_index < m_fonts.size(); ++font_index) {
-        if (auto* font = resolve_pending_faces(font_index)) {
-            m_first_available_font_cache = font;
+        if (auto* font = resolve_pending_faces(font_index))
             return *font;
-        }
         auto const& entry = m_fonts[font_index];
-        if (!entry.range_data.has_value()) {
-            m_first_available_font_cache = entry.font.ptr();
-            return *m_first_available_font_cache;
-        }
+        if (!entry.range_data.has_value())
+            return *entry.font;
         if (!entry.range_data->enclosing_range.contains(space_code_point))
             continue;
 
         for (auto const& range : entry.range_data->unicode_ranges) {
-            if (range.contains(space_code_point)) {
-                m_first_available_font_cache = entry.font.ptr();
-                return *m_first_available_font_cache;
-            }
+            if (range.contains(space_code_point))
+                return *entry.font;
         }
     }
 
-    if (auto* font = resolve_pending_faces(m_fonts.size())) {
-        m_first_available_font_cache = font;
+    if (auto* font = resolve_pending_faces(m_fonts.size()))
         return *font;
-    }
 
-    m_first_available_font_cache = m_last_resort_font.ptr();
-    return *m_first_available_font_cache;
+    return *m_last_resort_font;
 }
 
 Gfx::Font const& FontCascadeList::font_for_code_point(u32 code_point, EmojiPresentationResult emoji_presentation) const
@@ -250,6 +336,60 @@ Gfx::Font const& FontCascadeList::font_for_code_point(u32 code_point, EmojiPrese
     return cache_and_return(*m_last_resort_font);
 }
 
+Vector<FontCascadeList::SnapshotEntry> FontCascadeList::snapshot_entries(Vector<Entry> const& fonts, bool include_pending_faces) const
+{
+    Vector<SnapshotEntry> entries;
+    entries.ensure_capacity(fonts.size() + (include_pending_faces ? m_pending_faces.size() : 0));
+
+    size_t pending_index = 0;
+    auto take_pending_faces_up_to = [&](size_t font_index) {
+        if (!include_pending_faces)
+            return;
+        while (pending_index < m_pending_faces.size() && m_pending_faces[pending_index].font_index <= font_index) {
+            auto const& face = m_pending_faces[pending_index++].face;
+            auto state = face->peek_state();
+            // A face whose display period has failed never contributes a glyph and never blocks the
+            // faces after it, so the frozen cascade simply does not carry it.
+            if (state == PendingFontState::Failed)
+                continue;
+            entries.append({
+                .font = face->resolved_font(),
+                .unicode_ranges = face->unicode_ranges(),
+                .pending_face_id = face->id(),
+                .pending_state = state,
+            });
+        }
+    };
+
+    for (size_t font_index = 0; font_index < fonts.size(); ++font_index) {
+        take_pending_faces_up_to(font_index);
+        auto const& entry = fonts[font_index];
+        entries.append({
+            .font = entry.font.ptr(),
+            .unicode_ranges = entry.range_data.has_value() ? entry.range_data->unicode_ranges.span() : ReadonlySpan<UnicodeRange> {},
+        });
+    }
+    take_pending_faces_up_to(fonts.size());
+
+    return entries;
+}
+
+Vector<FontCascadeList::SnapshotEntry> FontCascadeList::snapshot_entries() const
+{
+    return snapshot_entries(m_fonts, true);
+}
+
+Vector<FontCascadeList::SnapshotEntry> FontCascadeList::snapshot_fallback_entries() const
+{
+    return snapshot_entries(m_fallback_fonts, false);
+}
+
+void FontCascadeList::freeze()
+{
+    VERIFY(!m_frozen_list);
+    m_frozen_list = ladybird_gfx_frozen_font_list_build(this);
+}
+
 bool FontCascadeList::equals(FontCascadeList const& other) const
 {
     if (!m_pending_faces.is_empty() || !other.m_pending_faces.is_empty())
@@ -265,11 +405,49 @@ bool FontCascadeList::equals(FontCascadeList const& other) const
 
 }
 
+namespace Gfx::FFI {
+
+// Mirrored by libgfx_rust::font.
+struct FfiCascadeSnapshotHeader {
+    size_t entry_count;
+    size_t range_count;
+    size_t fallback_entry_count;
+    size_t fallback_range_count;
+    void const* last_resort_font;
+    float system_fallback_point_size;
+    u16 system_fallback_weight;
+    u16 system_fallback_width;
+    u8 system_fallback_slope;
+    bool has_system_fallback;
+};
+
+struct FfiCascadeSnapshotEntry {
+    void const* font;
+    size_t range_offset;
+    size_t range_count;
+    u64 pending_face_id;
+    u8 pending_state;
+};
+
+struct FfiCascadeSnapshotRange {
+    u32 first_code_point;
+    u32 last_code_point;
+};
+
+}
+
 extern "C" {
 void const* ladybird_gfx_font_cascade_list_font_for_code_point(void const*, u32, bool, bool);
 void ladybird_gfx_font_cascade_list_ref(void const*);
 void ladybird_gfx_font_cascade_list_unref(void const*);
 u8 ladybird_gfx_emoji_presentation_for_code_point(u32, u32, bool);
+void const* ladybird_gfx_font_cascade_list_frozen(void const*);
+bool ladybird_gfx_font_cascade_list_equals(void const*, void const*);
+void const* ladybird_gfx_cascade_snapshot_begin(void const*);
+void ladybird_gfx_cascade_snapshot_header(void const*, Gfx::FFI::FfiCascadeSnapshotHeader*);
+void ladybird_gfx_cascade_snapshot_fill(void const*, bool, Gfx::FFI::FfiCascadeSnapshotEntry*, Gfx::FFI::FfiCascadeSnapshotRange*);
+void ladybird_gfx_cascade_snapshot_end(void const*);
+bool ladybird_gfx_resolve_pending_face(u64);
 }
 
 extern "C" void const* ladybird_gfx_font_cascade_list_font_for_code_point(void const* list, u32 code_point, bool emoji_presentation, bool forced_presentation)
@@ -304,4 +482,118 @@ extern "C" u8 ladybird_gfx_emoji_presentation_for_code_point(u32 code_point, u32
     if (result.forced == Gfx::ForcedPresentation::Yes)
         encoded |= 2;
     return encoded;
+}
+
+namespace {
+
+struct CascadeSnapshot {
+    Vector<Gfx::FontCascadeList::SnapshotEntry> entries;
+    Vector<Gfx::FontCascadeList::SnapshotEntry> fallback_entries;
+    Gfx::Font const* last_resort_font { nullptr };
+    bool has_system_fallback { false };
+    float system_fallback_point_size { 0 };
+    u16 system_fallback_weight { 0 };
+    u16 system_fallback_width { 0 };
+    u8 system_fallback_slope { 0 };
+};
+
+size_t total_range_count(Vector<Gfx::FontCascadeList::SnapshotEntry> const& entries)
+{
+    size_t count = 0;
+    for (auto const& entry : entries)
+        count += entry.unicode_ranges.size();
+    return count;
+}
+
+}
+
+extern "C" bool ladybird_gfx_font_cascade_list_equals(void const* list, void const* other)
+{
+    VERIFY(list);
+    VERIFY(other);
+    return static_cast<Gfx::FontCascadeList const*>(list)->equals(*static_cast<Gfx::FontCascadeList const*>(other));
+}
+
+extern "C" void const* ladybird_gfx_font_cascade_list_frozen(void const* list)
+{
+    VERIFY(list);
+    return static_cast<Gfx::FontCascadeList const*>(list)->frozen_list();
+}
+
+extern "C" void const* ladybird_gfx_cascade_snapshot_begin(void const* list)
+{
+    VERIFY(list);
+    auto const& cascade_list = *static_cast<Gfx::FontCascadeList const*>(list);
+    auto* snapshot = new CascadeSnapshot {
+        .entries = cascade_list.snapshot_entries(),
+        .fallback_entries = cascade_list.snapshot_fallback_entries(),
+        .last_resort_font = cascade_list.last_resort_font(),
+        .has_system_fallback = cascade_list.has_system_font_fallback_callback(),
+    };
+    if (snapshot->has_system_fallback && !cascade_list.is_empty()) {
+        // The system fallback matches against the cascade's first font, exactly as the lookup does.
+        auto const& reference_font = cascade_list.first();
+        snapshot->system_fallback_point_size = reference_font.point_size();
+        snapshot->system_fallback_weight = static_cast<u16>(reference_font.weight());
+        snapshot->system_fallback_width = reference_font.typeface().width();
+        snapshot->system_fallback_slope = static_cast<u8>(reference_font.slope());
+    }
+    return snapshot;
+}
+
+extern "C" void ladybird_gfx_cascade_snapshot_header(void const* handle, Gfx::FFI::FfiCascadeSnapshotHeader* out_header)
+{
+    VERIFY(handle);
+    VERIFY(out_header);
+    auto const& snapshot = *static_cast<CascadeSnapshot const*>(handle);
+    *out_header = {
+        .entry_count = snapshot.entries.size(),
+        .range_count = total_range_count(snapshot.entries),
+        .fallback_entry_count = snapshot.fallback_entries.size(),
+        .fallback_range_count = total_range_count(snapshot.fallback_entries),
+        .last_resort_font = snapshot.last_resort_font,
+        .system_fallback_point_size = snapshot.system_fallback_point_size,
+        .system_fallback_weight = snapshot.system_fallback_weight,
+        .system_fallback_width = snapshot.system_fallback_width,
+        .system_fallback_slope = snapshot.system_fallback_slope,
+        .has_system_fallback = snapshot.has_system_fallback,
+    };
+}
+
+extern "C" void ladybird_gfx_cascade_snapshot_fill(void const* handle, bool fallback, Gfx::FFI::FfiCascadeSnapshotEntry* out_entries, Gfx::FFI::FfiCascadeSnapshotRange* out_ranges)
+{
+    VERIFY(handle);
+    auto const& snapshot = *static_cast<CascadeSnapshot const*>(handle);
+    auto const& entries = fallback ? snapshot.fallback_entries : snapshot.entries;
+    size_t range_offset = 0;
+    for (size_t index = 0; index < entries.size(); ++index) {
+        auto const& entry = entries[index];
+        out_entries[index] = {
+            .font = entry.font,
+            .range_offset = range_offset,
+            .range_count = entry.unicode_ranges.size(),
+            .pending_face_id = entry.pending_face_id,
+            .pending_state = to_underlying(entry.pending_state),
+        };
+        for (auto const& range : entry.unicode_ranges) {
+            out_ranges[range_offset++] = {
+                .first_code_point = range.min_code_point(),
+                .last_code_point = range.max_code_point(),
+            };
+        }
+    }
+}
+
+extern "C" void ladybird_gfx_cascade_snapshot_end(void const* handle)
+{
+    delete static_cast<CascadeSnapshot const*>(handle);
+}
+
+extern "C" bool ladybird_gfx_resolve_pending_face(u64 id)
+{
+    auto face = Gfx::FontCascadeList::PendingFace::with_id(id);
+    if (!face)
+        return false;
+    (void)face->resolve();
+    return true;
 }

@@ -4,24 +4,23 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <Compositor/CompositorFontClientEndpoint.h>
-#include <Compositor/CompositorFontServerEndpoint.h>
 #include <LibCore/EventLoop.h>
 #include <LibCore/System.h>
-#include <LibGfx/Font/Font.h>
 #include <LibIPC/ConnectionFromClient.h>
 #include <LibIPC/Transport.h>
 #include <LibThreading/Thread.h>
-#include <LibWebView/CompositorFontServiceConnection.h>
 #include <LibWebView/FontService.h>
+#include <LibWebView/RendererFontServiceConnection.h>
+#include <WebContent/RendererFontClientEndpoint.h>
+#include <WebContent/RendererFontServerEndpoint.h>
 
 namespace WebView {
 
-class FontServerConnection final
-    : public IPC::ConnectionFromClient<CompositorFontClientEndpoint, CompositorFontServerEndpoint> {
+class RendererFontServerConnection final
+    : public IPC::ConnectionFromClient<RendererFontClientEndpoint, RendererFontServerEndpoint> {
 public:
-    FontServerConnection(NonnullOwnPtr<IPC::Transport> transport, FontService& font_service)
-        : IPC::ConnectionFromClient<CompositorFontClientEndpoint, CompositorFontServerEndpoint>(*this, move(transport), 1)
+    RendererFontServerConnection(NonnullOwnPtr<IPC::Transport> transport, FontService& font_service)
+        : IPC::ConnectionFromClient<RendererFontClientEndpoint, RendererFontServerEndpoint>(*this, move(transport), 1)
         , m_font_service(font_service)
     {
     }
@@ -32,7 +31,7 @@ private:
         Core::EventLoop::current().quit(0);
     }
 
-    virtual Messages::CompositorFontServer::InitTransportResponse init_transport([[maybe_unused]] int peer_pid) override
+    virtual Messages::RendererFontServer::InitTransportResponse init_transport([[maybe_unused]] int peer_pid) override
     {
 #ifdef AK_OS_WINDOWS
         m_transport->set_peer_pid(peer_pid);
@@ -41,38 +40,36 @@ private:
         VERIFY_NOT_REACHED();
     }
 
-    virtual Messages::CompositorFontServer::OpenSystemFontResponse open_system_font(u64 generation, u64 face_id) override
-    {
-        auto font = m_font_service.open_font(generation, face_id);
-        return { move(font) };
-    }
-
-    virtual Messages::CompositorFontServer::MatchSystemFontResponse match_system_font(String family, u16 weight, u16 width, u8 slope) override
-    {
-        auto font = m_font_service.match_font(family, weight, width, slope);
-        return { move(font) };
-    }
-
-    virtual Messages::CompositorFontServer::MatchSystemFontForCodePointResponse match_system_font_for_code_point(u32 code_point, u16 weight, u16 width, u8 slope, bool prefer_color_emoji) override
+    virtual Messages::RendererFontServer::MatchSystemFontForCodePointResponse match_system_font_for_code_point(u32 code_point, u16 weight, u16 width, u8 slope, bool prefer_color_emoji) override
     {
         auto font = m_font_service.match_font_for_code_point(code_point, weight, width, slope, prefer_color_emoji);
-        return { move(font) };
+        return { move(font), m_font_service.catalog_generation() };
     }
 
-    virtual Messages::CompositorFontServer::ResolveGenericFontResponse resolve_generic_font(String family, u16 weight, u8 slope) override
+    virtual Messages::RendererFontServer::OpenSystemFontResponse open_system_font(u64 generation, u64 face_id) override
     {
-        auto resolved = m_font_service.resolve_generic_family(family, weight, slope);
-        if (!resolved.has_value())
+        return m_font_service.open_font(generation, face_id);
+    }
+
+    virtual Messages::RendererFontServer::MatchSystemFontResponse match_system_font(String family, u16 weight, u16 width, u8 slope) override
+    {
+        return m_font_service.match_font(family, weight, width, slope);
+    }
+
+    virtual Messages::RendererFontServer::ResolveGenericFontResponse resolve_generic_font(String family, u16 weight, u8 slope) override
+    {
+        auto resolved_family = m_font_service.resolve_generic_family(family, weight, slope);
+        if (!resolved_family.has_value())
             return Optional<String> {};
-        return Optional<String> { resolved->to_string() };
+        return Optional<String> { resolved_family->to_string() };
     }
 
     FontService& m_font_service;
 };
 
-ErrorOr<NonnullRefPtr<CompositorFontServiceConnection>> CompositorFontServiceConnection::create(FontService& font_service)
+ErrorOr<NonnullRefPtr<RendererFontServiceConnection>> RendererFontServiceConnection::create(FontService& font_service)
 {
-    auto connection = adopt_ref(*new CompositorFontServiceConnection(font_service));
+    auto connection = adopt_ref(*new RendererFontServiceConnection(font_service));
 
     Optional<Error> initialization_error;
     {
@@ -86,16 +83,16 @@ ErrorOr<NonnullRefPtr<CompositorFontServiceConnection>> CompositorFontServiceCon
     return connection;
 }
 
-CompositorFontServiceConnection::CompositorFontServiceConnection(FontService& font_service)
+RendererFontServiceConnection::RendererFontServiceConnection(FontService& font_service)
     : m_font_service(font_service)
-    , m_thread(Threading::Thread::construct("Compositor font IPC"sv, [this] {
+    , m_thread(Threading::Thread::construct("Renderer font IPC"sv, [this] {
         return thread_main();
     }))
 {
     m_thread->start();
 }
 
-CompositorFontServiceConnection::~CompositorFontServiceConnection()
+RendererFontServiceConnection::~RendererFontServiceConnection()
 {
     RefPtr<Core::WeakEventLoopReference> event_loop;
     {
@@ -114,14 +111,14 @@ CompositorFontServiceConnection::~CompositorFontServiceConnection()
         (void)m_thread->join();
 }
 
-IPC::TransportHandle CompositorFontServiceConnection::take_transport_handle()
+IPC::TransportHandle RendererFontServiceConnection::take_transport_handle()
 {
     MutexLocker locker(m_mutex);
     VERIFY(m_transport_handle.has_value());
     return m_transport_handle.release_value();
 }
 
-intptr_t CompositorFontServiceConnection::thread_main()
+intptr_t RendererFontServiceConnection::thread_main()
 {
     Core::EventLoop event_loop;
     auto paired_or_error = IPC::Transport::create_paired();
@@ -134,7 +131,7 @@ intptr_t CompositorFontServiceConnection::thread_main()
     }
 
     auto paired = paired_or_error.release_value();
-    auto connection = adopt_ref(*new FontServerConnection(move(paired.local), *m_font_service));
+    auto connection = adopt_ref(*new RendererFontServerConnection(move(paired.local), *m_font_service));
 
     {
         MutexLocker locker(m_mutex);

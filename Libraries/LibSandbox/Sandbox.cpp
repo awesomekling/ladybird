@@ -534,6 +534,7 @@ ErrorOr<void> apply_macos_sandbox(SeatbeltProfile const& options)
         SYS_sysctl
         SYS_sysctlbyname
         SYS_thread_selfid
+        SYS_thread_selfusage
         SYS_umask
         SYS_unlink
         SYS_unlinkat

@@ -9,6 +9,7 @@
 #include <LibCore/StandardPaths.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontDatabase.h>
+#include <LibGfx/Font/SystemFallbackFonts.h>
 #include <LibGfx/Font/TypefaceSkia.h>
 
 #if defined(AK_OS_HAIKU)
@@ -18,6 +19,8 @@
 #ifdef USE_FONTCONFIG
 #    include <LibGfx/Font/GlobalFontConfig.h>
 #endif
+
+extern "C" void ladybird_gfx_register_rust_crate_copy();
 
 namespace Gfx {
 
@@ -61,6 +64,7 @@ FontDatabase& FontDatabase::the()
 SystemFontProvider& FontDatabase::install_system_font_provider(NonnullOwnPtr<SystemFontProvider> provider)
 {
     VERIFY(!m_system_font_provider);
+    clear_system_fallback_font_cache();
     m_system_font_provider = move(provider);
     return *m_system_font_provider;
 }
@@ -71,7 +75,12 @@ StringView FontDatabase::system_font_provider_name() const
     return m_system_font_provider->name();
 }
 
-FontDatabase::FontDatabase() = default;
+FontDatabase::FontDatabase()
+{
+    // LibGfx's copy of the graphics crate, reporting itself to the one store it keeps. See
+    // `LibGfx/RustProcessState.cpp`.
+    ladybird_gfx_register_rust_crate_copy();
+}
 
 RefPtr<Gfx::Font> FontDatabase::get(FlyString const& family, float point_size, unsigned weight, unsigned width, unsigned slope, Optional<FontVariationSettings> const& font_variation_settings, Optional<Gfx::ShapeFeatures> const& shape_features)
 {

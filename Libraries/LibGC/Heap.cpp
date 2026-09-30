@@ -29,6 +29,7 @@
 #include <LibGC/BlockAllocator.h>
 #include <LibGC/CellAllocator.h>
 #include <LibGC/Heap.h>
+#include <LibGC/HeapAccess.h>
 #include <LibGC/HeapBlock.h>
 #include <LibGC/NanBoxedValue.h>
 #include <LibGC/Root.h>
@@ -57,6 +58,33 @@ static constexpr int GC_INCREMENTAL_SWEEP_SLICE_MS = 5;
 static constexpr int GC_IDLE_GC_INTERVAL_MS = 4000;
 
 static Heap* s_the;
+static Heap::CollectionObserver s_collection_observer;
+
+void Heap::set_collection_observer(CollectionObserver observer)
+{
+    s_collection_observer = observer;
+}
+
+namespace {
+
+struct CollectionObservation {
+    explicit CollectionObservation(Heap::CollectionWork work)
+        : m_work(work)
+    {
+        if (s_collection_observer)
+            s_collection_observer(m_work, true);
+    }
+    ~CollectionObservation()
+    {
+        if (s_collection_observer)
+            s_collection_observer(m_work, false);
+    }
+
+private:
+    Heap::CollectionWork m_work;
+};
+
+}
 
 namespace {
 
@@ -320,6 +348,7 @@ Heap::~Heap()
 
 void Heap::will_allocate(size_t size)
 {
+    ASSERT(!heap_access_is_forbidden_on_this_thread());
     if (should_collect_on_every_allocation()) {
         m_allocated_bytes_since_last_gc = 0;
         collect_garbage();
@@ -629,8 +658,21 @@ void Heap::run_post_mark_phases(bool report)
     }
 }
 
+static thread_local bool s_heap_access_is_forbidden_on_this_thread = false;
+
+void forbid_heap_access_on_this_thread()
+{
+    s_heap_access_is_forbidden_on_this_thread = true;
+}
+
+bool heap_access_is_forbidden_on_this_thread()
+{
+    return s_heap_access_is_forbidden_on_this_thread;
+}
+
 NO_SANITIZE_ADDRESS void Heap::collect_garbage(CollectionType collection_type, bool print_report)
 {
+    VERIFY(!heap_access_is_forbidden_on_this_thread());
     jmp_buf registers;
     setjmp(registers);
     ReadonlySpan<FlatPtr> captured_registers { reinterpret_cast<FlatPtr const*>(registers), sizeof(jmp_buf) / (sizeof(FlatPtr)) };
@@ -639,6 +681,7 @@ NO_SANITIZE_ADDRESS void Heap::collect_garbage(CollectionType collection_type, b
 
 void Heap::run_collection(ReadonlySpan<FlatPtr> callee_saved_registers, CollectionType collection_type, bool print_report)
 {
+    CollectionObservation observation { CollectionWork::Collection };
     ConservativeScanOrigin origin {
         .stack_floor = bit_cast<FlatPtr>(__builtin_frame_address(0)),
         .callee_saved_registers = callee_saved_registers,
@@ -1295,6 +1338,8 @@ void Heap::sweep_dead_cells(bool print_report, Core::ElapsedTimer const& measure
 
 void Heap::sweep_block(HeapBlock& block)
 {
+    TemporaryChange sweeping_block_change(m_sweeping_block, true);
+
     // Remove from the allocator's pending sweep list.
     block.m_sweep_list_node.remove();
 
@@ -1464,6 +1509,7 @@ void Heap::sweep_on_timer()
     if (is_gc_deferred())
         return;
 
+    CollectionObservation observation { CollectionWork::SweepSlice };
     size_t blocks_swept = 0;
     bool finished_sweep = false;
     auto start_time = MonotonicTime::now();

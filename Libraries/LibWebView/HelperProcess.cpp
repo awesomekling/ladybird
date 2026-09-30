@@ -16,6 +16,7 @@
 #include <LibWebView/CompositorClient.h>
 #include <LibWebView/FontService.h>
 #include <LibWebView/HelperProcess.h>
+#include <LibWebView/RendererFontServiceConnection.h>
 #include <LibWebView/Utilities.h>
 
 #if defined(AK_OS_MACOS)
@@ -347,6 +348,13 @@ ErrorOr<NonnullRefPtr<WebView::WebContentClient>> launch_web_content_process(IsP
 
     auto font_catalog = TRY(WebView::Application::font_service().clone_catalog());
     client->async_set_font_catalog(move(font_catalog.file), font_catalog.size, font_catalog.generation);
+
+    // The render side gets a font connection of its own, because a system fallback miss made from
+    // a render pass must not travel on the connection the document thread pumps.
+    auto renderer_font_service_connection = TRY(RendererFontServiceConnection::create(WebView::Application::font_service()));
+    client->async_set_renderer_font_service_transport(renderer_font_service_connection->take_transport_handle());
+    client->set_renderer_font_service_connection(move(renderer_font_service_connection));
+
     if (auto system_font_family = WebView::Application::the().system_font_family(); system_font_family.has_value())
         client->async_set_system_font_family(system_font_family.release_value());
     return client;

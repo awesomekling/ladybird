@@ -23,9 +23,9 @@
 
 namespace WebView {
 
-NonnullOwnPtr<FontService> FontService::create(Vector<String> additional_font_directories)
+NonnullRefPtr<FontService> FontService::create(Vector<String> additional_font_directories)
 {
-    return adopt_own(*new FontService(move(additional_font_directories)));
+    return adopt_ref(*new FontService(move(additional_font_directories)));
 }
 
 FontService::FontService(Vector<String> additional_font_directories)
@@ -184,6 +184,12 @@ ErrorOr<IPC::File> FontService::create_immutable_font_data(ReadonlyBytes bytes)
     }
     return IPC::File::adopt_fd(read_only_fd);
 #endif
+}
+
+u64 FontService::catalog_generation()
+{
+    MutexLocker locker(m_mutex);
+    return m_generation;
 }
 
 Gfx::BrokeredFont FontService::open_font(u64 generation, u64 face_id)

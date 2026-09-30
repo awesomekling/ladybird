@@ -8,6 +8,7 @@
 #include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/SharedFontProvider.h>
+#include <LibGfx/Font/SystemFallbackFonts.h>
 #include <LibGfx/Font/TypefaceSkia.h>
 #include <LibGfx/Font/WOFF/Loader.h>
 #include <LibIPC/Decoder.h>
@@ -17,6 +18,9 @@ namespace Gfx {
 
 RefPtr<Typeface> SharedFontProvider::get_typeface_by_local_name(String const& name)
 {
+    MutexLocker locker(m_mutex);
+    // NB: Only a @font-face src: local() reaches this, which is document-thread work; there is no
+    //     brokered form of the question because no resolution asks it.
     if (!m_callbacks.match_local_font)
         return {};
     return load_brokered_font(m_callbacks.match_local_font(name));
@@ -82,12 +86,14 @@ void SharedFontProvider::clear_typeface_cache()
 
 ErrorOr<void> SharedFontProvider::replace_catalog(NonnullOwnPtr<Core::MappedFile> mapping, u64 generation)
 {
+    MutexLocker locker(m_mutex);
     auto catalog = TRY(FontCatalog::parse(mapping->bytes(), generation));
     m_catalog = move(catalog);
     m_catalog_mapping = move(mapping);
     clear_typeface_cache();
     m_failed_face_ids.clear();
     m_code_point_cache.clear();
+    clear_system_fallback_font_cache();
     return {};
 }
 
@@ -150,8 +156,65 @@ static ShapeFeatures default_shape_features()
     };
 }
 
+// Key function for RenderSideFontBroker, to emit the vtable here.
+RenderSideFontBroker::~RenderSideFontBroker() = default;
+
+// Installed once, by whoever owns a connection a render stage may use. Read from several threads,
+// written before any of them exists.
+static RenderSideFontBroker* s_render_side_font_broker { nullptr };
+
+// Per thread: the stage carries its scope with it when it moves off the document thread.
+static thread_local u32 s_render_side_font_scope_depth { 0 };
+
+void install_render_side_font_broker(RenderSideFontBroker& broker)
+{
+    VERIFY(!s_render_side_font_broker);
+    s_render_side_font_broker = &broker;
+}
+
+bool has_render_side_font_broker()
+{
+    return s_render_side_font_broker != nullptr;
+}
+
+RenderSideFontScope::RenderSideFontScope()
+{
+    ++s_render_side_font_scope_depth;
+}
+
+RenderSideFontScope::~RenderSideFontScope()
+{
+    VERIFY(s_render_side_font_scope_depth > 0);
+    --s_render_side_font_scope_depth;
+}
+
+static void report_font_match(StringView question, StringView family, bool served_by_the_render_side)
+{
+    static bool const census = getenv("LADYBIRD_FONT_MATCH_CENSUS") != nullptr;
+    if (!census)
+        return;
+    dbgln("FONT MATCH: path={} question={} family={}",
+        served_by_the_render_side ? "render_side"sv : "document_thread"sv, question, family);
+}
+
+// The way out of the process this question has to take. Outside a render-side scope that is the
+// document thread's connection, as it always was. Inside one it is the installed broker; when
+// there is none the question goes out on the document thread's connection anyway.
+static RenderSideFontBroker* broker_for_this_question(StringView question, StringView family)
+{
+    if (s_render_side_font_scope_depth == 0)
+        return nullptr;
+    if (s_render_side_font_broker) {
+        report_font_match(question, family, true);
+        return s_render_side_font_broker;
+    }
+    report_font_match(question, family, false);
+    return nullptr;
+}
+
 RefPtr<Gfx::Font> SharedFontProvider::get_font(FlyString const& family, float point_size, unsigned weight, unsigned width, unsigned slope, Optional<FontVariationSettings> const& variation_settings, Optional<Gfx::ShapeFeatures> const& shape_features)
 {
+    MutexLocker locker(m_mutex);
     if (auto resource_font = m_resource_fonts.get_font(family, point_size, weight, width, slope, variation_settings, shape_features))
         return resource_font;
 
@@ -160,7 +223,9 @@ RefPtr<Gfx::Font> SharedFontProvider::get_font(FlyString const& family, float po
         typeface = load_catalog_face(*face);
     } else if (m_callbacks.match_font) {
         auto family_string = family.to_string();
-        typeface = load_brokered_font(m_callbacks.match_font(family_string, weight, width, slope));
+        auto* broker = broker_for_this_question("match_font"sv, family_string);
+        typeface = load_brokered_font(broker ? broker->match_font(family_string, weight, width, slope)
+                                             : m_callbacks.match_font(family_string, weight, width, slope));
     }
     if (!typeface)
         return nullptr;
@@ -170,6 +235,7 @@ RefPtr<Gfx::Font> SharedFontProvider::get_font(FlyString const& family, float po
 
 void SharedFontProvider::for_each_typeface_with_family_name(FlyString const& family, Function<void(Typeface const&)> callback)
 {
+    MutexLocker locker(m_mutex);
     m_resource_fonts.for_each_typeface_with_family_name(family, [&](Typeface const& typeface) {
         callback(typeface);
     });
@@ -187,6 +253,7 @@ void SharedFontProvider::for_each_typeface_with_family_name(FlyString const& fam
 
 RefPtr<Typeface> SharedFontProvider::get_typeface_by_id(u64 generation, u64 face_id)
 {
+    MutexLocker locker(m_mutex);
     if (generation != m_catalog->generation() || face_id == 0)
         return nullptr;
     if (auto typeface = m_typeface_cache.get(face_id); typeface.has_value())
@@ -195,11 +262,14 @@ RefPtr<Typeface> SharedFontProvider::get_typeface_by_id(u64 generation, u64 face
         return load_catalog_face(*face);
     if (!m_callbacks.open_font)
         return nullptr;
-    return load_brokered_font(m_callbacks.open_font(generation, face_id));
+    auto* broker = broker_for_this_question("open_font"sv, "<by id>"sv);
+    return load_brokered_font(broker ? broker->open_font(generation, face_id)
+                                     : m_callbacks.open_font(generation, face_id));
 }
 
 RefPtr<Gfx::Font> SharedFontProvider::get_font_for_code_point(u32 code_point, float point_size, u16 weight, u16 width, u8 slope, bool prefer_color_emoji)
 {
+    MutexLocker locker(m_mutex);
     if (!m_callbacks.match_font_for_code_point)
         return nullptr;
 
@@ -224,16 +294,23 @@ Optional<FlyString> SharedFontProvider::resolve_generic_family(StringView family
     auto family = String::from_utf8(family_name);
     if (family.is_error())
         return {};
+    auto* broker = broker_for_this_question("resolve_generic_family"sv, family.value());
+    if (broker)
+        return broker->resolve_generic_family(family.release_value(), weight, slope);
     return m_callbacks.resolve_generic_family(family.release_value(), weight, slope);
 }
 
+// NB: The caller holds m_mutex. Opening a face can leave the process, and the lock is held across
+//     that round trip so that one face is opened once even when two threads want it.
 RefPtr<Typeface> SharedFontProvider::load_catalog_face(FontCatalogFace const& face)
 {
     if (auto cached = m_typeface_cache.get(face.face_id); cached.has_value())
         return *cached;
     if (m_failed_face_ids.contains(face.face_id) || !m_callbacks.open_font)
         return nullptr;
-    auto brokered_font = m_callbacks.open_font(m_catalog->generation(), face.face_id);
+    auto* broker = broker_for_this_question("open_font"sv, face.family);
+    auto brokered_font = broker ? broker->open_font(m_catalog->generation(), face.face_id)
+                                : m_callbacks.open_font(m_catalog->generation(), face.face_id);
     auto* font_file = brokered_font.source.get_pointer<BrokeredFontFile>();
     if (!font_file) {
         m_failed_face_ids.set(face.face_id);
@@ -254,20 +331,44 @@ RefPtr<Typeface> SharedFontProvider::load_brokered_font(BrokeredFont brokered_fo
         [&](SystemFontReference const& reference) { return load_font_reference(brokered_font.face_id, reference); });
 }
 
+RefPtr<Typeface> load_typeface_from_system_font_reference(SystemFontReference const& reference)
+{
+    auto typeface_or_error = TypefaceSkia::match_family_style(reference.family, reference.weight, reference.width, reference.slope);
+    if (typeface_or_error.is_error() || !typeface_or_error.value())
+        return nullptr;
+    return typeface_or_error.release_value().release_nonnull();
+}
+
+RefPtr<Typeface> load_typeface_from_font_file(u32 ttc_index, FontFileFormat format, IPC::File file)
+{
+    auto mapped_file = Core::MappedFile::map_from_fd_and_close(file.take_fd(), "brokered font"sv);
+    if (mapped_file.is_error())
+        return nullptr;
+
+    ErrorOr<NonnullRefPtr<Typeface>> typeface_or_error = Error::from_string_literal("Unsupported font file format");
+    if (format == FontFileFormat::WOFF)
+        typeface_or_error = WOFF::try_load_from_bytes(mapped_file.value()->bytes(), ttc_index);
+    else
+        typeface_or_error = Typeface::try_load_from_mapped_file(mapped_file.release_value(), ttc_index);
+
+    if (typeface_or_error.is_error())
+        return nullptr;
+    return typeface_or_error.release_value();
+}
+
 RefPtr<Typeface> SharedFontProvider::load_font_reference(u64 face_id, SystemFontReference const& reference)
 {
     if (m_failed_face_ids.contains(face_id))
         return nullptr;
 
-    auto typeface_or_error = TypefaceSkia::match_family_style(reference.family, reference.weight, reference.width, reference.slope);
-    if (typeface_or_error.is_error() || !typeface_or_error.value()) {
+    auto typeface = load_typeface_from_system_font_reference(reference);
+    if (!typeface) {
         m_failed_face_ids.set(face_id);
         return nullptr;
     }
 
-    auto typeface = typeface_or_error.release_value().release_nonnull();
     typeface->set_system_font_identifier({ m_catalog->generation(), face_id });
-    m_typeface_cache.set(face_id, typeface);
+    m_typeface_cache.set(face_id, *typeface);
     return typeface;
 }
 
@@ -276,26 +377,14 @@ RefPtr<Typeface> SharedFontProvider::load_font_file(u64 face_id, u32 ttc_index, 
     if (m_failed_face_ids.contains(face_id))
         return nullptr;
 
-    auto mapped_file = Core::MappedFile::map_from_fd_and_close(file.take_fd(), "brokered font"sv);
-    if (mapped_file.is_error()) {
+    auto typeface = load_typeface_from_font_file(ttc_index, format, move(file));
+    if (!typeface) {
         m_failed_face_ids.set(face_id);
         return nullptr;
     }
 
-    ErrorOr<NonnullRefPtr<Typeface>> typeface_or_error = Error::from_string_literal("Unsupported font file format");
-    if (format == FontFileFormat::WOFF)
-        typeface_or_error = WOFF::try_load_from_bytes(mapped_file.value()->bytes(), ttc_index);
-    else
-        typeface_or_error = Typeface::try_load_from_mapped_file(mapped_file.release_value(), ttc_index);
-
-    if (typeface_or_error.is_error()) {
-        m_failed_face_ids.set(face_id);
-        return nullptr;
-    }
-
-    auto typeface = typeface_or_error.release_value();
     typeface->set_system_font_identifier({ m_catalog->generation(), face_id });
-    m_typeface_cache.set(face_id, typeface);
+    m_typeface_cache.set(face_id, *typeface);
     return typeface;
 }
 

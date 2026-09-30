@@ -94,6 +94,9 @@ public:
     bool should_collect_on_every_allocation() const { return m_should_collect_on_every_allocation; }
     // This is true for any CollectEverything cycle, not only heap teardown.
     bool is_collecting_everything() const { return m_collecting_garbage && m_current_collection_type == CollectionType::CollectEverything; }
+    // Whether cells are being finalized or destroyed: in a collection, or as an incremental sweep destroys a block's
+    // dead cells. Code that runs there must not run script or reach anything that does.
+    bool is_tearing_down_cells() const { return m_collecting_garbage || m_sweeping_block; }
 
     void set_incremental_sweep_enabled(bool enabled) { m_incremental_sweep_enabled = enabled; }
     void set_should_collect_on_every_allocation(bool b) { m_should_collect_on_every_allocation = b; }
@@ -124,6 +127,15 @@ public:
     void did_destroy_weak_container(Badge<WeakContainer>, WeakContainer&);
 
     void register_sweep_callback(AK::Function<void()>);
+
+    // Told when a collection, or a slice of incremental sweeping on its timer, begins and ends on the heap's thread.
+    // For an embedder's profile of where its thread's time goes.
+    enum class CollectionWork : u8 {
+        Collection,
+        SweepSlice,
+    };
+    using CollectionObserver = void (*)(CollectionWork, bool begins);
+    static void set_collection_observer(CollectionObserver);
 
     void register_cell_allocator(Badge<CellAllocator>, CellAllocator&);
     CellAllocator& cell_allocator_for(Badge<CellAllocatorDescriptorBase>, CellAllocatorDescriptorBase&);
@@ -246,6 +258,7 @@ private:
     bool m_should_gc_when_deferral_ends { false };
 
     bool m_collecting_garbage { false };
+    bool m_sweeping_block { false };
     CollectionType m_current_collection_type { CollectionType::CollectGarbage };
     StackInfo m_stack_info;
     AK::Function<void(HashMap<Cell*, GC::HeapRoot>&)> m_gather_embedder_roots;

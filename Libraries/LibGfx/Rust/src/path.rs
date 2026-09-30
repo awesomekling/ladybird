@@ -9,6 +9,7 @@ use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 
 unsafe extern "C" {
+    fn ladybird_gfx_process_next_path_identity() -> u64;
     fn ladybird_gfx_path_destroy(path: *mut c_void);
     fn ladybird_gfx_path_equals(a: *const c_void, b: *const c_void) -> bool;
     fn ladybird_gfx_path_append_svg_string(
@@ -17,6 +18,7 @@ unsafe extern "C" {
         context: *mut c_void,
     );
     fn ladybird_gfx_path_bounding_box(path: *const c_void, out_x_y_width_height: *mut f32);
+    fn ladybird_gfx_path_set_fill_type(path: *mut c_void, winding_rule: i32);
     fn ladybird_gfx_path_serialize(
         path: *const c_void,
         append: unsafe extern "C" fn(*mut c_void, *const u8, usize),
@@ -27,6 +29,36 @@ unsafe extern "C" {
     fn ladybird_gfx_path_create_from_ops(kinds: *const u8, values: *const f32, count: usize) -> *mut c_void;
     fn ladybird_gfx_path_create_from_serialized_bytes(bytes: *const u8, count: usize) -> *mut c_void;
     fn ladybird_gfx_path_copy_transformed(path: *const c_void, affine_values: *const f32) -> *mut c_void;
+    fn ladybird_gfx_path_create_from_glyph_runs(runs: *const FfiGlyphRun, run_count: usize) -> *mut c_void;
+    fn ladybird_gfx_path_place_glyph_runs_along(
+        path: *const c_void,
+        runs: *const FfiGlyphRun,
+        run_count: usize,
+        offset: f32,
+    ) -> *mut c_void;
+}
+
+/// A shaped run of glyphs in one font, as the path operations below take one.
+pub struct GlyphRun {
+    pub font: crate::font::FontHandle,
+    pub glyphs: Vec<crate::text_layout::DrawGlyph>,
+}
+
+#[repr(C)]
+struct FfiGlyphRun {
+    font: *const c_void,
+    glyphs: *const crate::text_layout::DrawGlyph,
+    glyph_count: usize,
+}
+
+fn to_ffi_glyph_runs(runs: &[GlyphRun]) -> Vec<FfiGlyphRun> {
+    runs.iter()
+        .map(|run| FfiGlyphRun {
+            font: run.font.as_raw(),
+            glyphs: run.glyphs.as_ptr(),
+            glyph_count: run.glyphs.len(),
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -164,6 +196,13 @@ pub struct OwnedPath {
     identity: u64,
 }
 
+// SAFETY: OwnedPath has unique ownership of an immutable Gfx::Path. Its mutating operation
+// requires exclusive Rust access, while shared operations perform only const queries, which
+// are safe to run concurrently (PathImplSkia publishes its lazy SkPath with an atomic).
+unsafe impl Send for OwnedPath {}
+// SAFETY: See the Send implementation above.
+unsafe impl Sync for OwnedPath {}
+
 impl std::fmt::Debug for OwnedPath {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -182,10 +221,13 @@ impl OwnedPath {
     /// `Gfx::Path` is owned or destroyed.
     #[inline]
     pub unsafe fn adopt(raw: *mut c_void) -> Self {
-        static NEXT_IDENTITY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Self {
             raw: NonNull::new(raw).expect("Gfx::Path pointer must not be null"),
-            identity: NEXT_IDENTITY.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            // The counter is LibGfx's: this crate is compiled into two libraries, and a counter
+            // here would let each of them hand out the same identities. See
+            // `LibGfx/RustProcessState.cpp`.
+            // SAFETY: The counter is an atomic on the other side of the boundary.
+            identity: unsafe { ladybird_gfx_process_next_path_identity() },
         }
     }
 
@@ -210,6 +252,11 @@ impl OwnedPath {
         self.identity
     }
 
+    pub fn set_fill_type(&mut self, winding_rule: i32) {
+        // SAFETY: The path is live and owned by this handle.
+        unsafe { ladybird_gfx_path_set_fill_type(self.as_raw(), winding_rule) };
+    }
+
     pub fn bounding_box(&self) -> [f32; 4] {
         let mut out = [0.0f32; 4];
         // SAFETY: The path is live for the duration of the call; the out-array holds four floats.
@@ -228,6 +275,34 @@ impl OwnedPath {
             OwnedPath::adopt(ladybird_gfx_path_copy_transformed(
                 self.raw.as_ptr(),
                 affine_values.as_ptr(),
+            ))
+        }
+    }
+
+    /// The outlines of the given glyphs, as one path.
+    pub fn from_glyph_runs(runs: &[GlyphRun]) -> OwnedPath {
+        let ffi_runs = to_ffi_glyph_runs(runs);
+        // SAFETY: Each handle keeps its font live and each glyph slice stays valid for the
+        // synchronous call, which returns a fresh heap-allocated Gfx::Path.
+        unsafe {
+            OwnedPath::adopt(ladybird_gfx_path_create_from_glyph_runs(
+                ffi_runs.as_ptr(),
+                ffi_runs.len(),
+            ))
+        }
+    }
+
+    /// The outlines of the given glyphs, laid along this path from `offset`.
+    pub fn place_glyph_runs_along(&self, runs: &[GlyphRun], offset: f32) -> OwnedPath {
+        let ffi_runs = to_ffi_glyph_runs(runs);
+        // SAFETY: This path and every run's font stay live for the synchronous call, which
+        // returns a fresh heap-allocated Gfx::Path.
+        unsafe {
+            OwnedPath::adopt(ladybird_gfx_path_place_glyph_runs_along(
+                self.raw.as_ptr(),
+                ffi_runs.as_ptr(),
+                ffi_runs.len(),
+                offset,
             ))
         }
     }
