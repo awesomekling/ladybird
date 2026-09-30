@@ -13,8 +13,8 @@
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/ShadowRoot.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/SVG/AttributeParsing.h>
 #include <LibWeb/SVG/SVGAnimatedLength.h>
@@ -40,9 +40,9 @@ SVGElement::SVGElement(DOM::Document& document, DOM::QualifiedName qualified_nam
 {
 }
 
-Layout::Node* SVGElement::create_layout_node(CSS::LayoutStyle)
+CSS::ElementBoxKind SVGElement::box_kind() const
 {
-    return nullptr;
+    return CSS::ElementBoxKind::NoBox;
 }
 
 struct NamedPropertyID {
@@ -499,7 +499,7 @@ void SVGElement::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor,
         document().set_needs_repaint(Badge<SVGElement> {}, InvalidateDisplayList::PaintCommands);
 }
 
-void SVGElement::register_resource_box_referencing_element(Badge<Layout::LayoutTreeBuilderAccess>, DOM::Element& referencing_element)
+void SVGElement::register_resource_box_referencing_element(Badge<DOM::CommitMessages>, DOM::Element& referencing_element)
 {
     m_resource_box_referencing_elements.remove_all_matching([&](auto& weak_element) {
         return !weak_element || weak_element == &referencing_element;
@@ -557,6 +557,14 @@ GC::Ref<SVGAnimatedString> SVGElement::class_name()
     return *m_class_name_animated_string;
 }
 
+void SVGElement::publish_svg_attribute_facts()
+{
+    // An element that has not been named by the style tree yet publishes when it is: its style
+    // node is what the publication is keyed by.
+    if (style_node_id() != 0)
+        document().render_inputs_for_write().note_svg_attribute_facts(DOM::NodeIdentity::of(*this));
+}
+
 // https://svgwg.org/svg2-draft/types.html#__svg__SVGElement__ownerSVGElement
 GC::Ptr<SVGSVGElement> SVGElement::owner_svg_element()
 {
@@ -612,9 +620,9 @@ Gfx::Size<double> SVGElement::viewport_size_for_percentage_resolution()
         if (!viewport_element.is_connected())
             return {};
 
-        auto const* layout_node = viewport_element.layout_node();
-        if (layout_node && Painting::has_committed_box(*layout_node) && Painting::is_svg_svg_paintable(*layout_node))
-            return Painting::svg_viewport_size(*layout_node).to_type<double>();
+        auto box = Painting::BoxSlot::bound_to(viewport_element);
+        if (Painting::has_committed_box(box) && Painting::is_svg_svg_paintable(box))
+            return Painting::svg_viewport_size(box).to_type<double>();
 
         return {};
     };

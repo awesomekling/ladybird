@@ -6,7 +6,7 @@
 
 #include <LibGC/Heap.h>
 #include <LibURL/URL.h>
-#include <LibWeb/Layout/Box.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/SVGTextPathElement.h>
 
@@ -27,20 +27,11 @@ void SVGTextPathElement::attribute_changed(Utf16FlyString const& name, Optional<
         m_start_offset = parse_number_percentage(value.value_or({}));
 }
 
-GC::Ptr<SVGGeometryElement const> SVGTextPathElement::path_or_shape() const
+Optional<Utf16String> SVGTextPathElement::href_attribute_value() const
 {
-    auto href = has_attribute(AttributeNames::href) ? get_attribute(AttributeNames::href) : get_attribute(AttributeNames::xlink_href);
-    if (!href.has_value())
-        return {};
-    return try_resolve_url_to<SVGGeometryElement const>(*href);
-}
-
-// https://svgwg.org/svg2-draft/text.html#TextPathElementStartOffsetAttribute
-float SVGTextPathElement::start_offset_for_path_length(float path_length) const
-{
-    if (!m_start_offset.has_value())
-        return 0;
-    return m_start_offset->resolve_relative_to(path_length);
+    if (has_attribute(AttributeNames::href))
+        return get_attribute(AttributeNames::href);
+    return get_attribute(AttributeNames::xlink_href);
 }
 
 void SVGTextPathElement::visit_edges(Cell::Visitor& visitor)
@@ -49,9 +40,9 @@ void SVGTextPathElement::visit_edges(Cell::Visitor& visitor)
     SVGURIReferenceMixin::visit_edges(visitor);
 }
 
-Layout::Node* SVGTextPathElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind SVGTextPathElement::box_kind() const
 {
-    return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::SVGTextPathBox);
+    return CSS::ElementBoxKind::SvgTextPath;
 }
 
 };

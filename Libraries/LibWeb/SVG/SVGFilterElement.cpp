@@ -12,7 +12,6 @@
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/DecodedImageData.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/SVG/SVGComponentTransferFunctionElement.h>
 #include <LibWeb/SVG/SVGFEBlendElement.h>

@@ -5,10 +5,9 @@
  */
 
 #include <LibGfx/Matrix4x4.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/Document.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/AttributeParsing.h>
@@ -61,12 +60,82 @@ void SVGPatternElement::attribute_changed(Utf16FlyString const& name, Optional<U
     } else if (name == AttributeNames::height) {
         m_height = parse_number_percentage(value.value_or({}));
     }
+
+    // A pattern that names this one inherits the attributes it does not carry, so a change here is
+    // a change to every pattern whose chain passes through this one.
+    document().republish_inheriting_svg_pattern_attribute_facts();
+}
+
+// Only a pattern in the document's node tree takes part: a pattern's `href` resolves in the
+// document scope, so a pattern inside a shadow tree can neither be named by one nor name one.
+void SVGPatternElement::inserted()
+{
+    Base::inserted();
+
+    if (root().is_document())
+        register_in_document_pattern_list();
+}
+
+void SVGPatternElement::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor, Node& old_root)
+{
+    Base::removed_from(is_subtree_root, old_ancestor, old_root);
+
+    if (old_root.is_document())
+        unregister_from_document_pattern_list();
+}
+
+void SVGPatternElement::moved_from(IsSubtreeRoot is_subtree_root, GC::Ptr<Node> old_ancestor)
+{
+    Base::moved_from(is_subtree_root, old_ancestor);
+
+    if (!old_ancestor)
+        return;
+
+    auto was_in_document_tree = old_ancestor->root().is_document();
+    auto is_in_document_tree = root().is_document();
+    if (was_in_document_tree == is_in_document_tree)
+        return;
+
+    if (was_in_document_tree)
+        unregister_from_document_pattern_list();
+    else
+        register_in_document_pattern_list();
+}
+
+void SVGPatternElement::finalize()
+{
+    Base::finalize();
+
+    // A GC'ed pattern may never run its removal steps, so unlink it here rather than leave the
+    // document's list holding a destroyed node.
+    unregister_from_document_pattern_list();
+}
+
+void SVGPatternElement::register_in_document_pattern_list()
+{
+    if (m_list_node.is_in_list())
+        return;
+    document().register_svg_pattern_element({}, *this);
+}
+
+void SVGPatternElement::unregister_from_document_pattern_list()
+{
+    if (!m_list_node.is_in_list())
+        return;
+    document().unregister_svg_pattern_element({}, *this);
+}
+
+Optional<Utf16String> SVGPatternElement::href_attribute_value() const
+{
+    if (has_attribute(AttributeNames::href))
+        return get_attribute(AttributeNames::href);
+    return get_attribute(AttributeNames::xlink_href);
 }
 
 GC::Ptr<SVGPatternElement const> SVGPatternElement::linked_pattern(GC::RootHashTable<SVGPatternElement const*>& seen_patterns) const
 {
     // FIXME: This can only resolve same-document references. The spec allows cross-document references.
-    auto link = has_attribute(AttributeNames::href) ? get_attribute(AttributeNames::href) : get_attribute(AttributeNames::xlink_href);
+    auto link = href_attribute_value();
     if (!link.has_value() || link->is_empty())
         return {};
 
@@ -224,39 +293,11 @@ NumberPercentage SVGPatternElement::pattern_height_impl(GC::RootHashTable<SVGPat
     return NumberPercentage::create_number(0);
 }
 
-void SVGPatternElement::push_paint_server_description(void* sink, Layout::Node const& target_layout_node) const
-{
-    auto content_element = pattern_content_element();
-    if (!content_element)
-        return;
-
-    Layout::Box const* pattern_box = nullptr;
-    target_layout_node.for_each_child_of_type<Layout::Box>([&](auto const& candidate) {
-        if (candidate.is_svg_pattern_box() && candidate.dom_node() == content_element.ptr()) {
-            pattern_box = &candidate;
-            return IterationDecision::Break;
-        }
-        return IterationDecision::Continue;
-    });
-    if (!pattern_box)
-        return;
-
-    Layout::RustFFI::FfiSvgPatternDescription description {};
-    description.pattern_box = Layout::Node::slot_id(pattern_box);
-    description.units_are_object_bounding_box = pattern_units() == SVGUnits::ObjectBoundingBox;
-    description.content_units_are_object_bounding_box = pattern_content_units() == SVGUnits::ObjectBoundingBox;
-    description.has_view_box = view_box().has_value();
-    description.x = Layout::to_ffi_number_percentage(pattern_x());
-    description.y = Layout::to_ffi_number_percentage(pattern_y());
-    description.width = Layout::to_ffi_number_percentage(pattern_width());
-    description.height = Layout::to_ffi_number_percentage(pattern_height());
-    description.pattern_transform_attribute = pattern_transform();
-    auto const* transform_values = style_group<CSS::ComputedValues::TransformValues>();
-    auto const* css_transform_entries = transform_values ? transform_values->resolved_transforms.pointer : nullptr;
-    auto css_transform_count = transform_values ? transform_values->resolved_transforms.length : 0;
-    Layout::RustFFI::layout_arena_svg_paint_resources_push_pattern(sink, &description, css_transform_entries, css_transform_count);
-}
-
 // Reflected length accessors are generated by SVGElement's reflection macro.
+
+CSS::ElementBoxKind SVGPatternElement::box_kind() const
+{
+    return CSS::ElementBoxKind::NoBox;
+}
 
 }

@@ -17,6 +17,12 @@
 #include <LibWebCommon/Page/PageId.h>
 #include <LibWebCommon/Page/QueuedInputEvent.h>
 
+namespace Web::CSS {
+
+class RecordedNonAuthorSheets;
+
+}
+
 namespace Web::SVG {
 
 class SVGDecodedImageData final : public HTML::DecodedImageData {
@@ -35,6 +41,10 @@ public:
     virtual Optional<CSSPixels> intrinsic_height() const override;
     virtual Optional<CSSPixelFraction> intrinsic_aspect_ratio() const override;
     u64 vector_content_identity() const { return m_vector_content_identity; }
+    // Names this image for as long as it lives, unlike the content identity, which changes with
+    // the content it holds. A recording publishes it and the publish resolves the image from it.
+    u64 vector_image_identity() const { return m_vector_image_identity; }
+    static SVGDecodedImageData* with_vector_image_identity(u64);
 
     virtual Optional<Compositing::DisplayListResource> record_display_list(Gfx::IntSize, CSS::PreferredColorScheme, Compositing::DisplayListResourceStorage&) const override;
     // Lays the inner document out at the CSS size and records at css × raster_scale resolution.
@@ -55,7 +65,7 @@ public:
     CSS::PreferredColorScheme color_scheme() const { return m_color_scheme; }
 
 private:
-    SVGDecodedImageData(GC::Ref<Page>, GC::Ref<SVGPageClient>, GC::Ref<DOM::Document>, GC::Ref<SVG::SVGSVGElement>);
+    SVGDecodedImageData(GC::Ref<Page>, GC::Ref<SVGPageClient>, GC::Ref<DOM::Document>, GC::Ref<SVG::SVGSVGElement>, CSS::RecordedNonAuthorSheets);
 
     CSS::SizeWithAspectRatio const& natural_size() const;
     RefPtr<Gfx::PaintingSurface> render_to_surface(Gfx::IntSize) const;
@@ -65,6 +75,7 @@ private:
     void did_request_frame();
     void invalidate_cached_rendering();
     static u64 next_vector_content_identity();
+    static u64 next_vector_image_identity();
 
     // FIXME: Remove this once everything is using surfaces instead.
     mutable HashMap<Gfx::IntSize, Gfx::DecodedImageFrame> m_cached_rendered_frames;
@@ -104,6 +115,7 @@ private:
     GC::Ref<DOM::Document> m_document;
     GC::Ref<SVG::SVGSVGElement> m_root_element;
     u64 m_vector_content_identity { 0 };
+    u64 const m_vector_image_identity { 0 };
 
     mutable bool m_is_recording_display_list { false };
     bool m_has_pending_client_notification { false };

@@ -25,7 +25,7 @@ class SVGSVGElement final : public SVGGraphicsElement
     GC_DECLARE_ALLOCATOR(SVGSVGElement);
 
 public:
-    virtual Layout::Node* create_layout_node(CSS::LayoutStyle) override;
+    virtual CSS::ElementBoxKind box_kind() const override;
 
     virtual bool requires_svg_container() const override { return false; }
     virtual bool is_svg_container() const override { return true; }
@@ -33,7 +33,7 @@ public:
     virtual Optional<ViewBox> active_view_box() const override;
     virtual SVGFitToViewBox const* fit_to_view_box() const override { return this; }
 
-    void set_active_view_element(GC::Ptr<SVGViewElement> view_element) { m_active_view_element = view_element; }
+    void set_active_view_element(GC::Ptr<SVGViewElement> view_element);
 
     void set_fallback_view_box_for_svg_as_image(Optional<ViewBox>);
 
@@ -92,6 +92,9 @@ public:
     [[nodiscard]] Optional<CSS::Length> height_attribute_length() const;
 
     static CSS::SizeWithAspectRatio negotiate_natural_metrics(SVGSVGElement const&, CSS::Length::ResolutionContext const&);
+    // The natural aspect ratio the root's active SVG view or viewBox gives it, which negotiation falls back to where
+    // its width and height do not both give it one.
+    static Optional<CSSPixelFraction> view_box_natural_aspect_ratio(SVGSVGElement const&);
 
 private:
     SVGSVGElement(DOM::Document&, DOM::QualifiedName);

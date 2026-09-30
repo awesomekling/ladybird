@@ -6,10 +6,10 @@
 
 #pragma once
 
+#include <AK/IntrusiveList.h>
 #include <LibGC/RootHashTable.h>
 #include <LibGfx/Matrix4x4.h>
 #include <LibWeb/Forward.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/SVG/AttributeParsing.h>
 #include <LibWeb/SVG/SVGAnimatedLength.h>
 #include <LibWeb/SVG/SVGElement.h>
@@ -32,6 +32,10 @@ public:
     virtual SVGFitToViewBox const* fit_to_view_box() const override { return this; }
 
     virtual void attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_) override;
+    virtual void inserted() override;
+    virtual void removed_from(IsSubtreeRoot, Node* old_ancestor, Node& old_root) override;
+    virtual void moved_from(IsSubtreeRoot, GC::Ptr<Node> old_ancestor) override;
+    virtual void finalize() override;
 
     SVGUnits pattern_units() const;
     SVGUnits pattern_content_units() const;
@@ -55,9 +59,9 @@ public:
 
     GC::Ptr<SVGPatternElement const> pattern_content_element() const;
 
-    void push_paint_server_description(void* sink, Layout::Node const& target_layout_node) const;
+    Optional<Utf16String> href_attribute_value() const;
 
-    virtual Layout::Node* create_layout_node(CSS::LayoutStyle) override { return nullptr; }
+    virtual CSS::ElementBoxKind box_kind() const override;
 
 protected:
     SVGPatternElement(DOM::Document&, DOM::QualifiedName);
@@ -67,6 +71,11 @@ protected:
 
 private:
     virtual bool is_svg_pattern_element() const final { return true; }
+
+    void register_in_document_pattern_list();
+    void unregister_from_document_pattern_list();
+
+    IntrusiveListNode<SVGPatternElement> m_list_node;
 
     GC::Ptr<SVGPatternElement const> linked_pattern(GC::RootHashTable<SVGPatternElement const*>& seen_patterns) const;
     GC::Ptr<SVGPatternElement const> pattern_content_element_impl(GC::RootHashTable<SVGPatternElement const*>& seen_patterns) const;
@@ -86,6 +95,9 @@ private:
     Optional<NumberPercentage> m_y;
     Optional<NumberPercentage> m_width;
     Optional<NumberPercentage> m_height;
+
+public:
+    using DocumentPatternElementList = IntrusiveList<&SVGPatternElement::m_list_node>;
 };
 
 }

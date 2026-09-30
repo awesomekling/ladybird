@@ -43,8 +43,6 @@ public:
     // https://w3c.github.io/svgwg/svg2-draft/embedded.html#__svg__SVGImageElement__height
     REFLECT_ANIMATED_LENGTH_ATTRIBUTE(height, Vertical, SVGLengthValue::number(0));
 
-    Gfx::FloatRect bounding_box(CSSPixelSize viewport_size) const;
-
     // ^Layout::ImageProvider
     virtual GC::Ptr<HTML::DecodedImageData> decoded_image_data() const override;
 
@@ -61,9 +59,9 @@ private:
 
     virtual bool is_svg_image_element() const override { return true; }
 
-    virtual Layout::Node* create_layout_node(CSS::LayoutStyle) override;
+    virtual CSS::ElementBoxKind box_kind() const override;
     virtual void decoded_image_data_did_update() override { image_provider_contents_changed(); }
-    virtual Layout::Node const* image_provider_layout_node() const override;
+    virtual Painting::BoxSlot image_provider_box() const override;
 
     Optional<URL::URL> m_href;
 

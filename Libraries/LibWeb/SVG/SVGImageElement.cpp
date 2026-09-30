@@ -8,8 +8,7 @@
 #include <LibGC/Heap.h>
 #include <LibGfx/DecodedImageFrame.h>
 #include <LibWeb/Bindings/SVGImageElement.h>
-#include <LibWeb/CSS/Sizing.h>
-#include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/DocumentObserver.h>
 #include <LibWeb/DOM/Event.h>
@@ -18,17 +17,17 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/SharedResourceRequest.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Namespace.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/SVG/SVGDecodedImageData.h>
 
 namespace Web::SVG {
 
 GC_DEFINE_ALLOCATOR(SVGImageElement);
 
-Layout::Node const* SVGImageElement::image_provider_layout_node() const
+Painting::BoxSlot SVGImageElement::image_provider_box() const
 {
-    return unsafe_layout_node();
+    return Painting::BoxSlot::bound_to(*this);
 }
 
 SVGImageElement::SVGImageElement(DOM::Document& document, DOM::QualifiedName qualified_name)
@@ -80,35 +79,6 @@ void SVGImageElement::attribute_changed(Utf16FlyString const& name, Optional<Utf
     }
 }
 
-Gfx::FloatRect SVGImageElement::bounding_box(CSSPixelSize viewport_size) const
-{
-    auto computed_values = this->computed_style();
-    VERIFY(computed_values);
-
-    // https://w3c.github.io/svgwg/svg2-draft/embedded.html#Placement
-    // Computation of automatically-sized values follows the Default Sizing Algorithm defined for replaced elements in
-    // CSS layout [css-images-3]. In particular, when the referenced resource does not have an intrinsic size (such as
-    // image types with no defined dimensions), it is assumed to have a width of 300px and a height of 150px.
-    auto specified_width = computed_values->width().is_length_percentage() ? computed_values->width().to_px(viewport_size.width()) : Optional<CSSPixels> {};
-    auto specified_height = computed_values->height().is_length_percentage() ? computed_values->height().to_px(viewport_size.height()) : Optional<CSSPixels> {};
-
-    CSS::SizeWithAspectRatio intrinsic_size_with_aspect_ratio { this->intrinsic_width(), this->intrinsic_height(), this->intrinsic_aspect_ratio() };
-
-    CSSPixelSize default_size {};
-
-    if (decoded_image_data())
-        default_size = CSSPixelSize { 300, 150 };
-
-    auto sizing = CSS::run_default_sizing_algorithm(specified_width, specified_height, intrinsic_size_with_aspect_ratio, default_size);
-
-    return {
-        computed_values->x().to_px(viewport_size.width()).to_float(),
-        computed_values->y().to_px(viewport_size.height()).to_float(),
-        sizing.width().to_float(),
-        sizing.height().to_float()
-    };
-}
-
 // https://www.w3.org/TR/SVG2/linking.html#processingURL
 void SVGImageElement::process_the_url(Optional<Utf16String> const& href)
 {
@@ -130,12 +100,13 @@ void SVGImageElement::fetch_the_document(URL::URL const& url)
     m_load_event_delayer.emplace(document());
     unregister_with_decoded_image_data_if_needed();
     m_resource_request = HTML::SharedResourceRequest::get_or_create(document(), url);
+    CSS::record_element_replaced_content_input(*this);
     m_resource_request->add_callbacks(
         [this, resource_request = GC::Root { m_resource_request }] {
             m_load_event_delayer.clear();
             register_with_decoded_image_data_if_needed();
+            CSS::record_element_replaced_content_input(*this);
             image_provider_contents_changed();
-            document().style_computer().style_engine().record_element_style_input_change(style_node_id());
             set_needs_layout_update(DOM::SetNeedsLayoutReason::SVGImageElementFetchTheDocument);
 
             dispatch_event(DOM::Event::create(HTML::EventNames::load,
@@ -155,9 +126,9 @@ void SVGImageElement::fetch_the_document(URL::URL const& url)
     }
 }
 
-Layout::Node* SVGImageElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind SVGImageElement::box_kind() const
 {
-    return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::SVGImageBox);
+    return CSS::ElementBoxKind::SvgImage;
 }
 
 GC::Ptr<HTML::DecodedImageData> SVGImageElement::decoded_image_data() const
