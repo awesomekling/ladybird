@@ -6,8 +6,73 @@
 
 use crate::css_pixels::CssPixelPoint;
 use crate::display_list::commands::{SpatialNodeIndex, VISUAL_VIEWPORT_NODE_INDEX};
+use crate::fast_hash::FastMap;
 use crate::node_slot_id::NodeSlotId;
 use libgfx_rust::FloatPoint;
+use std::cell::RefCell;
+use std::sync::Arc;
+
+// Where a box's scroll offset is, as the render side sees it.
+//
+// The offset itself is still stored on the DOM - on the element, on the synthetic pseudo-element,
+// or on the navigable for the viewport - and this column is the copy the render side can read
+// without asking for it. It is kept in step at the three moments the stored offset can change:
+// a box becoming the box of something that holds an offset, a write of that stored offset, and a
+// move of the viewport's offset. A box whose offset is zero has no entry, which is the common
+// case by a long way.
+//
+// Keyed by the paintable row rather than by the DOM node, because that is the key the render side
+// has. A row's id carries the generation of the slot it came from, so an entry left behind by a
+// freed row names nothing a live row can ask for; a row built in a recycled slot publishes its own
+// offset as it is built.
+//
+// The entries are shared with the snapshots the paintable rows publish, and copied the next time
+// one changes while a snapshot holds them. They are few, so a copy is small.
+#[derive(Default)]
+pub struct ScrollOffsetColumn {
+    offsets: RefCell<Arc<ScrollOffsets>>,
+}
+
+/// The scroll offsets of a [`ScrollOffsetColumn`] as they were when taken.
+#[derive(Clone, Default)]
+pub struct ScrollOffsets(FastMap<NodeSlotId, CssPixelPoint>);
+
+impl ScrollOffsets {
+    pub fn offset(&self, slot: NodeSlotId) -> CssPixelPoint {
+        self.0.get(&slot).copied().unwrap_or_default()
+    }
+}
+
+impl ScrollOffsetColumn {
+    pub fn offset(&self, slot: NodeSlotId) -> CssPixelPoint {
+        self.offsets.borrow().offset(slot)
+    }
+
+    pub fn publish(&self, slot: NodeSlotId, offset: CssPixelPoint) {
+        if slot.is_invalid() || self.offset(slot) == offset {
+            return;
+        }
+        let mut offsets = self.offsets.borrow_mut();
+        let offsets = &mut Arc::make_mut(&mut offsets).0;
+        if offset == CssPixelPoint::default() {
+            offsets.remove(&slot);
+        } else {
+            offsets.insert(slot, offset);
+        }
+    }
+
+    pub fn forget(&self, slot: NodeSlotId) {
+        if !self.offsets.borrow().0.contains_key(&slot) {
+            return;
+        }
+        Arc::make_mut(&mut self.offsets.borrow_mut()).0.remove(&slot);
+    }
+
+    /// The offsets as they are now. They do not see later changes to the column.
+    pub fn snapshot(&self) -> Arc<ScrollOffsets> {
+        self.offsets.borrow().clone()
+    }
+}
 
 pub type ScrollStateSlot = usize;
 // Position of a scroll or sticky node's entry in the ScrollState store. Slot 0 is the viewport's

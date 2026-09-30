@@ -6,8 +6,6 @@
 
 //! The compositor animations a visual context tree carries, and the trees derived by sampling them.
 
-use std::rc::Rc;
-
 use super::{EffectNodeData, EffectNodeIndex, EffectsData, SpatialData, SpatialNodeIndex, VisualContextTree};
 use crate::host::{FfiVisualAnimationSummary, FfiVisualAnimationTargetKind, FfiVisualAnimationTransformOperationKind};
 use crate::visual_animation::{VisualAnimation, VisualAnimationSample, VisualAnimationValue};
@@ -35,13 +33,38 @@ impl VisualContextTree {
     }
 
     pub fn set_visual_animations(&mut self, animations: Vec<VisualAnimation>) {
-        self.visual_animations = Rc::from(animations);
+        self.visual_animations = std::sync::Arc::from(animations);
     }
 
     pub fn clear_visual_animations(&mut self) {
         if self.has_visual_animations() {
-            self.visual_animations = Rc::from(Vec::new());
+            self.visual_animations = std::sync::Arc::from(Vec::new());
         }
+    }
+
+    pub fn shared_visual_animations(&self) -> std::sync::Arc<[VisualAnimation]> {
+        self.visual_animations.clone()
+    }
+
+    /// Gives the tree those of `animations`, published for an earlier structure of it, whose nodes
+    /// it still holds as nodes they can drive. An incremental update keeps a live node in its slot,
+    /// and tombstones the nodes it retires: an animation whose node went away is left out. Returns
+    /// whether the tree took every animation.
+    pub fn carry_visual_animations_over(&mut self, animations: std::sync::Arc<[VisualAnimation]>) -> bool {
+        if animations
+            .iter()
+            .all(|animation| self.visual_animation_targets_are_valid(animation.target_kind, &animation.node_indices))
+        {
+            self.visual_animations = animations;
+            return true;
+        }
+        let carried = animations
+            .iter()
+            .filter(|animation| self.visual_animation_targets_are_valid(animation.target_kind, &animation.node_indices))
+            .cloned()
+            .collect::<Vec<_>>();
+        self.set_visual_animations(carried);
+        false
     }
 
     fn effects_mut(&mut self, node_index: u32) -> Option<&mut EffectsData> {

@@ -132,7 +132,12 @@ public:
     void set_font(FontResourceId, NonnullRefPtr<Gfx::Font const>);
     void set_image_frame(ImageFrameResourceId, Gfx::DecodedImageFrame);
     void apply_transaction(DisplayListResourceTransaction&&);
-    DisplayListResourceTransaction create_transaction(DisplayListResourceSet const& previous, DisplayListResourceSet const& current) const;
+    // Adds what the transaction adds, and keeps what it would remove.
+    void add_resources(DisplayListResourceTransaction const&);
+    // Nothing where `current` names a font, an image frame or a display list the storage does not hold.
+    Optional<DisplayListResourceTransaction> create_transaction(DisplayListResourceSet const& previous, DisplayListResourceSet const& current) const;
+    // A display list the storage holds with every resource it references, as a transaction that adds them.
+    Optional<DisplayListResourceTransaction> transaction_adding_display_list(DisplayListResourceId) const;
     DisplayListResourceSet collect_referenced_resources(DisplayList const&) const;
     DisplayListResourceSet collect_referenced_resources(AccumulatedVisualContextTree const&) const;
     void retain_only(DisplayListResourceSet const&);

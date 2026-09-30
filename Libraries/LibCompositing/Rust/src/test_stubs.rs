@@ -60,3 +60,9 @@ extern "C" fn ladybird_gfx_path_append_svg_string(
     _context: *mut c_void,
 ) {
 }
+
+#[unsafe(no_mangle)]
+extern "C" fn ladybird_gfx_process_next_path_identity() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
