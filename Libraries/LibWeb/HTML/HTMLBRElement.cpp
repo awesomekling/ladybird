@@ -5,13 +5,15 @@
  */
 
 #include <LibGC/Heap.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
-#include <LibWeb/Layout/Box.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/VisualLines.h>
 
 namespace Web::HTML {
@@ -25,9 +27,9 @@ HTMLBRElement::HTMLBRElement(DOM::Document& document, DOM::QualifiedName qualifi
 
 HTMLBRElement::~HTMLBRElement() = default;
 
-Layout::Node* HTMLBRElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind HTMLBRElement::box_kind() const
 {
-    return &Layout::allocate_layout_node<Layout::NodeWithStyle>(document(), *this, style, Layout::RustFFI::NodeKind::BreakNode);
+    return CSS::ElementBoxKind::Break;
 }
 
 bool HTMLBRElement::is_presentational_hint(Utf16FlyString const& name) const
@@ -65,12 +67,13 @@ static bool is_rendered_inline_content(DOM::Node const& node)
         return false;
     }
     if (auto const* element = as_if<DOM::Element>(node)) {
-        auto const* layout_node = element->layout_node();
-        if (!layout_node)
+        auto box = Painting::BoxSlot::bound_to(*element);
+        if (!box)
             return false;
-        if (layout_node->is_replaced_box())
+        if (Layout::RustFFI::layout_node_kind_is_replaced_box(box.kind()))
             return true;
-        if (layout_node->display().is_inline_outside() && !layout_node->display().is_flow_inside())
+        auto display = CSS::display_from_ffi_display(box.style_group<CSS::ComputedValues::BoxValues>()->display);
+        if (display.is_inline_outside() && !display.is_flow_inside())
             return true;
     }
     return false;
@@ -80,17 +83,11 @@ static bool is_rendered_inline_content(DOM::Node const& node)
 //     previous <br>, whichever comes first.
 bool HTMLBRElement::represents_empty_line() const
 {
-    if (!layout_node())
-        return false;
-
-    auto const* containing_block = layout_node()->containing_block();
-    if (!containing_block)
-        return false;
-    auto const* containing_block_dom_node = containing_block->dom_node();
+    auto containing_block_dom_node = Painting::BoxSlot::bound_to(*this).containing_block().dom_node();
     if (!containing_block_dom_node)
         return false;
 
-    for (auto const* previous = previous_in_pre_order(); previous && previous != containing_block_dom_node; previous = previous->previous_in_pre_order()) {
+    for (auto const* previous = previous_in_pre_order(); previous && previous != containing_block_dom_node.ptr(); previous = previous->previous_in_pre_order()) {
         if (!containing_block_dom_node->is_inclusive_ancestor_of(*previous))
             break;
         if (is<HTMLBRElement>(*previous))

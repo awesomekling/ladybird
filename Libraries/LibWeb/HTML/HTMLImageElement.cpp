@@ -14,6 +14,7 @@
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
@@ -28,6 +29,7 @@
 #include <LibWeb/Fetch/Response.h>
 #include <LibWeb/HTML/BitmapDecodedImageData.h>
 #include <LibWeb/HTML/CORSSettingAttribute.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLLinkElement.h>
@@ -44,10 +46,10 @@
 #include <LibWeb/HTML/SharedResourceRequest.h>
 #include <LibWeb/HTML/SupportedImageTypes.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/PaintFacts.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/Platform/ImageCodecPlugin.h>
 #include <LibWeb/SVG/SVGDecodedImageData.h>
@@ -93,7 +95,7 @@ static BatchingDispatcher& batching_dispatcher()
     return *dispatcher;
 }
 
-static bool image_element_dimensions_may_depend_on_intrinsic_size(Layout::Box const& image_box)
+static bool image_element_dimensions_may_depend_on_intrinsic_size(Painting::BoxSlot const& image_box)
 {
     auto size_is_definite = [](CSS::Size const& size) {
         return size.is_length() || (size.is_calculated() && !size.contains_percentage());
@@ -102,62 +104,61 @@ static bool image_element_dimensions_may_depend_on_intrinsic_size(Layout::Box co
         return size.is_none() || size_is_definite(size);
     };
 
-    auto const& width = image_box.width();
-    auto const& height = image_box.height();
-    if (!size_is_definite(width) || !size_is_definite(height))
+    auto const& sizing = *image_box.style_group<CSS::ComputedValues::SizingValues>();
+    if (!size_is_definite(CSS::Size::view(sizing.width)) || !size_is_definite(CSS::Size::view(sizing.height)))
         return true;
-
-    auto const& min_width = image_box.min_width();
-    auto const& min_height = image_box.min_height();
-    if (!size_is_definite(min_width) || !size_is_definite(min_height))
+    if (!size_is_definite(CSS::Size::view(sizing.min_width)) || !size_is_definite(CSS::Size::view(sizing.min_height)))
         return true;
-
-    auto const& max_width = image_box.max_width();
-    auto const& max_height = image_box.max_height();
-    if (!size_constraint_is_definite_or_none(max_width) || !size_constraint_is_definite_or_none(max_height))
+    if (!size_constraint_is_definite_or_none(CSS::Size::view(sizing.max_width)) || !size_constraint_is_definite_or_none(CSS::Size::view(sizing.max_height)))
         return true;
 
     return false;
 }
 
-static void reset_intrinsic_size_caches_after_image_data_change(Layout::Box& image_box)
-{
-    image_box.bump_fragment_cache_epoch_of_self_and_ancestors();
-    Layout::RustFFI::layout_arena_reset_cached_intrinsic_sizes_of_self_and_ancestors(
-        image_box.arena_handle(), Layout::Node::slot_id(&image_box));
-}
-
 void HTMLImageElement::set_needs_layout_update_or_repaint_after_image_data_change(DOM::SetNeedsLayoutReason reason)
 {
+    CSS::record_element_replaced_content_input(*this);
     update_alt_text_shadow_tree();
 
-    auto layout_node = unsafe_layout_node();
-    auto* image_box = layout_node && layout_node->kind() == Layout::RustFFI::NodeKind::ImageBox ? static_cast<Layout::Box*>(layout_node) : nullptr;
+    // Beside a frame that owns the arena, the box is looked up once the frame has been taken in.
+    if (FrameScheduler::arena_changes_wait_for_frame(document())) {
+        main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(heap(), [element = GC::Ref { *this }, reason] {
+            element->update_layout_after_image_data_change(reason);
+        }));
+        return;
+    }
+    update_layout_after_image_data_change(reason);
+}
 
-    // The request state change may have flipped which kind of layout node create_layout_node()
-    // produces (ImageBox vs. non-replaced alt text container); if the existing node no longer
-    // matches, it has to be rebuilt, not just laid out again. (An img whose box comes from
-    // `content: url(...)` reads as a mismatch here and takes a wasted rebuild — harmless.)
-    if (layout_node && (image_box != nullptr) == (renders_as_alt_text() && !alt().is_empty())) {
+void HTMLImageElement::update_layout_after_image_data_change(DOM::SetNeedsLayoutReason reason)
+{
+    auto box = Painting::BoxSlot::bound_to(*this);
+    bool const is_image_box = box.kind() == Layout::RustFFI::NodeKind::ImageBox;
+
+    // The request state change may have flipped which kind of box the layout tree build makes
+    // (ImageBox vs. non-replaced alt text container); if the existing box no longer matches, it
+    // has to be rebuilt, not just laid out again. (An img whose box comes from `content: url(...)`
+    // reads as a mismatch here and takes a wasted rebuild — harmless.)
+    if (box && is_image_box == (renders_as_alt_text() && !alt().is_empty())) {
         set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::HTMLImageElementUpdateTheImageData);
         return;
     }
 
-    if (!image_box || image_element_dimensions_may_depend_on_intrinsic_size(*image_box)) {
+    if (!is_image_box || image_element_dimensions_may_depend_on_intrinsic_size(box)) {
         image_provider_contents_changed();
         set_needs_layout_update(reason);
         return;
     }
 
-    reset_intrinsic_size_caches_after_image_data_change(*image_box);
+    document().render_inputs_for_write().reset_intrinsic_size_caches_of_self_and_ancestors(box.slot());
     image_provider_contents_changed();
 }
 
 GC_DEFINE_ALLOCATOR(HTMLImageElement);
 
-Layout::Node const* HTMLImageElement::image_provider_layout_node() const
+Painting::BoxSlot HTMLImageElement::image_provider_box() const
 {
-    return unsafe_layout_node();
+    return Painting::BoxSlot::bound_to(*this);
 }
 
 static GC::Ref<DOM::Event> create_event_for_element(HTMLElement& element, Utf16FlyString const& event_name)
@@ -237,7 +238,7 @@ void HTMLImageElement::set_dimension_attribute_source(DOM::Element const* source
 {
     if (m_dimension_attribute_source.ptr() != source) {
         m_dimension_attribute_source = source;
-        document().style_computer().style_engine().record_element_style_input_change(style_node_id());
+        CSS::republish_presentational_hints(*this);
     }
 }
 
@@ -310,17 +311,15 @@ void HTMLImageElement::form_associated_element_attribute_changed(Utf16FlyString 
     if (name == HTML::AttributeNames::usemap) {
         m_cached_associated_map_element = nullptr;
         m_cached_associated_map_element_dom_tree_version.clear();
+        Painting::push_image_map_area_facts(*this);
     }
 }
 
-Layout::Node* HTMLImageElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind HTMLImageElement::box_kind() const
 {
-    if (renders_as_alt_text() && !alt().is_empty()) {
-        auto computed_style = this->computed_style();
-        VERIFY(computed_style);
-        return Element::create_layout_node_for_display_type(document(), computed_style->display(), style, this);
-    }
-    return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::ImageBox);
+    if (renders_as_alt_text() && !alt().is_empty())
+        return CSS::ElementBoxKind::FromDisplay;
+    return CSS::ElementBoxKind::Image;
 }
 
 void HTMLImageElement::create_alt_text_shadow_tree()
@@ -352,6 +351,9 @@ void HTMLImageElement::remove_alt_text_shadow_tree()
 void HTMLImageElement::update_alt_text_shadow_tree()
 {
     auto alt_text = alt();
+    // Whether the element renders as alt text decides which box it asks for, and the build reads
+    // that from the mirror.
+    CSS::record_element_construction_facts(*this);
     if (!renders_as_alt_text() || alt_text.is_empty()) {
         remove_alt_text_shadow_tree();
         return;
@@ -371,8 +373,8 @@ WebIDL::UnsignedLong HTMLImageElement::width() const
     const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLImageElementWidth);
 
     // Return the rendered width of the image, in CSS pixels, if the image is being rendered.
-    if (auto const* layout_node = this->layout_node(); layout_node && Painting::has_committed_box(*layout_node))
-        return Painting::content_width(*layout_node).to_int();
+    if (auto box = Painting::BoxSlot::bound_to(*this); Painting::has_committed_box(box))
+        return Painting::content_width(box).to_int();
 
     // On setting [the width or height IDL attribute], they must act as if they reflected the respective content attributes of the same name.
     if (auto width_attr = get_attribute(HTML::AttributeNames::width); width_attr.has_value()) {
@@ -402,8 +404,8 @@ WebIDL::UnsignedLong HTMLImageElement::height() const
     const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLImageElementHeight);
 
     // Return the rendered height of the image, in CSS pixels, if the image is being rendered.
-    if (auto const* layout_node = this->layout_node(); layout_node && Painting::has_committed_box(*layout_node))
-        return Painting::content_height(*layout_node).to_int();
+    if (auto box = Painting::BoxSlot::bound_to(*this); Painting::has_committed_box(box))
+        return Painting::content_height(box).to_int();
 
     // On setting [the width or height IDL attribute], they must act as if they reflected the respective content attributes of the same name.
     if (auto height_attr = get_attribute(HTML::AttributeNames::height); height_attr.has_value()) {
@@ -477,15 +479,15 @@ int HTMLImageElement::x() const
     // to the element and its ancestors, or zero if there is no box.
     const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLImageElementX);
 
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
+    auto box = Painting::BoxSlot::bound_to(*this);
+    if (!Painting::has_committed_box(box))
         return 0;
 
     // Scroll frames are created together with the visual context tree at the lazy resolution point,
     // so resolve it before reading the enclosing scroll node below.
     const_cast<DOM::Document&>(document()).update_paint_and_hit_testing_properties_if_needed();
 
-    return (Painting::absolute_border_box_rect(*layout_node).x() - Painting::cumulative_scroll_compensation(*layout_node).x()).to_int();
+    return (Painting::absolute_border_box_rect(box).x() - Painting::cumulative_scroll_compensation(box).x()).to_int();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-htmlimageelement-y
@@ -496,15 +498,15 @@ int HTMLImageElement::y() const
     // to the element and its ancestors, or zero if there is no box.
     const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLImageElementY);
 
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
+    auto box = Painting::BoxSlot::bound_to(*this);
+    if (!Painting::has_committed_box(box))
         return 0;
 
     // Scroll frames are created together with the visual context tree at the lazy resolution point,
     // so resolve it before reading the enclosing scroll node below.
     const_cast<DOM::Document&>(document()).update_paint_and_hit_testing_properties_if_needed();
 
-    return (Painting::absolute_border_box_rect(*layout_node).y() - Painting::cumulative_scroll_compensation(*layout_node).y()).to_int();
+    return (Painting::absolute_border_box_rect(box).y() - Painting::cumulative_scroll_compensation(box).y()).to_int();
 }
 
 // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-img-complete
@@ -1068,6 +1070,7 @@ after_step_7:
             unregister_with_decoded_image_data_if_needed();
             m_current_request = image_request;
             register_with_decoded_image_data_if_needed();
+            CSS::record_element_replaced_content_input(*this);
         } else {
             m_pending_request = image_request;
         }
@@ -1423,6 +1426,7 @@ void HTMLImageElement::upgrade_pending_request_to_current_request()
     unregister_with_decoded_image_data_if_needed();
     m_current_request = m_pending_request;
     register_with_decoded_image_data_if_needed();
+    CSS::record_element_replaced_content_input(*this);
 
     // 2. Set the img element's pending request to null.
     m_pending_request = nullptr;

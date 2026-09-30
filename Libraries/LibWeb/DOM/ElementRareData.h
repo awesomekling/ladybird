@@ -6,10 +6,8 @@
 
 #pragma once
 
-#include <LibWeb/CSS/CountersSet.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/StylePropertyMap.h>
-#include <LibWeb/CSS/StyleValues/RandomValueSharingStyleValue.h>
 #include <LibWeb/DOM/DOMTokenList.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/HTML/CustomElements/CustomStateSet.h>
@@ -63,10 +61,6 @@ struct Element::RareData
     // Every Element has a [[computedStyleMapCache]] internal slot, initially set to null, which caches the result of
     // the computedStyleMap() method when it is first called.
     GC::Ptr<CSS::StylePropertyMapReadOnly> computed_style_map_cache;
-    OwnPtr<CSS::CountersSet> counters_set;
-
-    // https://drafts.csswg.org/css-values-5/#random-caching
-    HashMap<CSS::RandomCachingKey, double> element_specific_css_random_base_value_cache;
 
     // https://dom.spec.whatwg.org/#concept-element-custom-element-definition
     GC::Ptr<HTML::CustomElementDefinition> custom_element_definition;
@@ -83,6 +77,13 @@ struct Element::RareData
     Optional<Utf16FlyString> name;
     Optional<Dir> dir;
     CSSPixelPoint scroll_offset;
+    // What each of the element's synthetic pseudo-elements has scrolled to. The render side keeps it by the element's
+    // identity too, for the boxes it builds, and forgets it with that identity.
+    struct PseudoElementScrollOffset {
+        CSS::PseudoElement type;
+        CSSPixelPoint offset;
+    };
+    Vector<PseudoElementScrollOffset> pseudo_element_scroll_offsets;
     // https://drafts.csswg.org/css-conditional-5/#scrolled
     // The edges the most recent relative scroll of this element's scrolling box went toward, as scroll-state(scrolled)
     // reads them.

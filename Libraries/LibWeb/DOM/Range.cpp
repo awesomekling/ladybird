@@ -15,6 +15,7 @@
 #include <LibWeb/DOM/DocumentType.h>
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Event.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ProcessingInstruction.h>
 #include <LibWeb/DOM/Range.h>
@@ -27,8 +28,6 @@
 #include <LibWeb/HTML/HTMLScriptElement.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/TextNode.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
@@ -106,8 +105,8 @@ void Range::set_associated_selection(Badge<Selection::Selection>, GC::Ptr<Select
         // The range this selection painted through is no longer its range; take the highlight back.
         auto& document = m_start_container->document();
         if (document.has_committed_viewport_box()) {
-            document.paint_state().reset_selection_states(document);
-            Painting::set_needs_repaint(*document.unsafe_layout_node(), InvalidateDisplayList::PaintCommands);
+            document.invalidation_journal().note_selection_states();
+            Painting::set_needs_repaint(Painting::BoxSlot::viewport_of(document), InvalidateDisplayList::PaintCommands);
         }
 
         // https://w3c.github.io/selection-api/#selectionchange-event
@@ -128,8 +127,8 @@ void Range::update_associated_selection()
 
     // NB: Called during selection update after range change.
     if (document.has_committed_viewport_box()) {
-        document.paint_state().recompute_selection_states(document, *this);
-        Painting::set_needs_repaint(*document.unsafe_layout_node(), InvalidateDisplayList::PaintCommands);
+        document.invalidation_journal().note_selection_states();
+        Painting::set_needs_repaint(Painting::BoxSlot::viewport_of(document), InvalidateDisplayList::PaintCommands);
     }
 
     document.reset_cursor_blink_cycle();
@@ -1296,13 +1295,13 @@ GC::Ref<Geometry::DOMRectList> Range::get_client_rects()
             if (selection_state == Painting::SelectionState::None)
                 continue;
 
-            auto const* layout_node = text.layout_node();
-            if (!layout_node) {
+            auto text_box = Painting::BoxSlot::bound_to(text);
+            if (!text_box) {
                 dbgln("FIXME: Failed to get client rects for node {}", node->debug_description());
                 continue;
             }
 
-            if (!visual_context_tree.has_value() && !document.can_compute_client_rects_without_accumulated_visual_contexts_update(*layout_node)) {
+            if (!visual_context_tree.has_value() && !document.can_compute_client_rects_without_accumulated_visual_contexts_update(text_box)) {
                 document.update_paint_and_hit_testing_properties_if_needed();
                 visual_context_tree = document.visual_context_tree();
                 rect_to_viewport_transform = Painting::rect_to_viewport_transform(document, *visual_context_tree);
@@ -1328,7 +1327,7 @@ GC::Ref<Geometry::DOMRectList> Range::get_client_rects()
             }
 
             Layout::RustFFI::layout_arena_text_range_rects(
-                layout_node->arena_handle(), Layout::Node::slot_id(layout_node),
+                text_box.arena(), text_box.slot(),
                 to_underlying(selection_state), start_offset(), end_offset(), filter_dom_start, filter_dom_end,
                 rect_to_viewport_transform, &rects, [](void* context, CSSPixelRect rect) {
                     static_cast<Vector<GC::Root<Geometry::DOMRect>>*>(context)->append(Geometry::DOMRect::create(rect.to_type<float>()));

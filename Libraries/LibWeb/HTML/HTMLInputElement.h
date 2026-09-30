@@ -72,7 +72,7 @@ class WEB_API HTMLInputElement final
 public:
     virtual ~HTMLInputElement() override;
 
-    virtual Layout::Node* create_layout_node(CSS::LayoutStyle) override;
+    virtual CSS::ElementBoxKind box_kind() const override;
     virtual void set_being_activated(bool) override;
 
     enum class TypeAttributeState {
@@ -314,7 +314,7 @@ private:
     // ^Layout::ImageProvider
     virtual bool is_image_pending() const override;
     virtual GC::Ptr<HTML::DecodedImageData> decoded_image_data() const override { return image_data(); }
-    virtual Layout::Node const* image_provider_layout_node() const override;
+    virtual Painting::BoxSlot image_provider_box() const override;
     virtual void visit_edges(Cell::Visitor&) override;
     virtual void adopted_from(DOM::Document&) override;
 

@@ -21,8 +21,11 @@
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/PseudoElement.h>
 #include <LibWeb/CSS/SerializationMode.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/VisualViewport.h>
+#include <LibWeb/Compositor/CompositorFrame.h>
 #include <LibWeb/Compositor/CompositorHost.h>
+#include <LibWeb/Compositor/NavigablePresenter.h>
 #include <LibWeb/ContentSecurityPolicy/BlockingAlgorithms.h>
 #include <LibWeb/ContentSecurityPolicy/Directives/DirectiveOperations.h>
 #include <LibWeb/ContentSecurityPolicy/PolicyList.h>
@@ -33,6 +36,7 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/ElementFactory.h>
 #include <LibWeb/DOM/Event.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/Position.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/DOM/Text.h>
@@ -48,10 +52,12 @@
 #include <LibWeb/HTML/DocumentState.h>
 #include <LibWeb/HTML/DragDataStore.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
 #include <LibWeb/HTML/HTMLIFrameElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLObjectElement.h>
 #include <LibWeb/HTML/HTMLParagraphElement.h>
 #include <LibWeb/HTML/History.h>
 #include <LibWeb/HTML/HistoryExecutor.h>
@@ -74,14 +80,14 @@
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/HTML/XMLSerializer.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Loader/GeneratedPagesLoader.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/ChromeWidget.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/PaintableTypes.h>
+#include <LibWeb/Painting/PaintingRustBridge.h>
 #include <LibWeb/Painting/ScrollSnap.h>
 #include <LibWeb/Painting/Scrollbar.h>
 #include <LibWeb/Platform/Timer.h>
@@ -672,6 +678,7 @@ LocalNavigable::LocalNavigable(
     : Navigable(page)
     , m_event_handler({}, *this)
     , m_is_svg_page(is_svg_page)
+    , m_presenter(Compositor::NavigablePresenter::create())
 {
     all_local_navigables().set(*this);
 
@@ -758,6 +765,8 @@ void LocalNavigable::visit_edges(Cell::Visitor& visitor)
         visitor.visit(smooth_scroll.promises);
     for (auto& entry : m_pending_user_scrollend_targets)
         visitor.visit(entry.target);
+    if (m_last_painted_frame_for_render_clock.has_value())
+        visitor.visit(m_last_painted_frame_for_render_clock->recording->document);
 }
 
 // https://html.spec.whatwg.org/multipage/nav-history-apis.html#script-closable
@@ -812,6 +821,17 @@ void LocalNavigable::set_delaying_load_events(bool value)
         VERIFY(parent() && !is<LocalNavigable>(*parent()));
     }
     report_state_to_remote_container();
+}
+
+// AD-HOC: A navigation that finds it is no longer the ongoing navigation stops delaying the container's load event,
+//         unless the navigation that superseded it is under way: that one set the flag again when it began, and clears
+//         it when it ends. A superseded navigation that cleared it anyway would let the container's document finish
+//         loading while its successor is still loading.
+void LocalNavigable::stop_delaying_load_events_for_superseded_navigation()
+{
+    if (ongoing_navigation().has<Utf16String>())
+        return;
+    set_delaying_load_events(false);
 }
 
 void LocalNavigable::set_navigation_load_event_guard(DOM::Document& parent_doc)
@@ -3302,7 +3322,7 @@ void LocalNavigable::continue_navigation_after_population_dispatch(PreparedNavig
         return;
     }
     if (ongoing_navigation() != navigation_id) {
-        set_delaying_load_events(false);
+        stop_delaying_load_events_for_superseded_navigation();
         return;
     }
 
@@ -3794,7 +3814,7 @@ void LocalNavigable::run_navigation_unload_check(Utf16String const& navigation_i
             }
 
             if (ongoing_navigation() != navigation_id) {
-                set_delaying_load_events(false);
+                stop_delaying_load_events_for_superseded_navigation();
                 completion_steps->function()(false);
                 return;
             }
@@ -3810,7 +3830,10 @@ bool LocalNavigable::resume_navigation_params_creation(Utf16String const& naviga
         return false;
 
     if (!request.has_value()) {
-        set_delaying_load_events(false);
+        if (ongoing_navigation() != navigation_id)
+            stop_delaying_load_events_for_superseded_navigation();
+        else
+            set_delaying_load_events(false);
         return true;
     }
 
@@ -4219,7 +4242,7 @@ static bool prepare_to_finalize_a_cross_document_navigation(GC::Ref<LocalNavigab
 
     // AD-HOC: This check is not in the spec but we should not continue navigation if ongoing navigation id has changed.
     if (expected_ongoing_navigation_id.has_value() && navigable->ongoing_navigation() != *expected_ongoing_navigation_id) {
-        navigable->set_delaying_load_events(false);
+        navigable->stop_delaying_load_events_for_superseded_navigation();
         return false;
     }
 
@@ -4524,8 +4547,11 @@ void finalize_a_cross_document_navigation(GC::Ref<LocalNavigable> navigable, His
             }),
             .on_complete = GC::create_function(navigable->heap(), [navigable, on_complete](HistoryStepResult result) {
                 // AD-HOC: Trigger a relayout in the container document for size negotiation with SVG documents.
-                if (auto container = navigable->container())
+                if (auto container = navigable->container()) {
+                    if (auto* object = as_if<HTMLObjectElement>(*container))
+                        CSS::record_element_replaced_content_input(*object);
                     container->set_needs_layout_update(DOM::SetNeedsLayoutReason::FinalizeACrossDocumentNavigation);
+                }
                 on_complete->function()(result);
             }),
         });
@@ -4737,13 +4763,13 @@ CSSPixelPoint LocalNavigable::to_page_position(CSSPixelPoint a_position)
             break;
         if (!ancestor->container())
             return {};
-        auto const* layout_node = ancestor->container()->layout_node();
-        if (!layout_node || !Painting::has_committed_box(*layout_node))
+        auto container_box = Painting::BoxSlot::bound_to(*ancestor->container());
+        if (!Painting::has_committed_box(container_box))
             return {};
 
-        auto point = Painting::absolute_position(*layout_node);
+        auto point = Painting::absolute_position(container_box);
         point.translate_by(position);
-        position = Painting::transform_rect_to_viewport(*layout_node, { point, { 0, 0 } }).location();
+        position = Painting::transform_rect_to_viewport(container_box, { point, { 0, 0 } }).location();
 
         auto parent = ancestor->parent();
         ancestor = parent ? &as<LocalNavigable>(*parent) : nullptr;
@@ -4789,13 +4815,13 @@ void LocalNavigable::clamp_viewport_scroll_offset()
     auto document = active_document();
     if (!document || !document->layout_is_up_to_date())
         return;
-    auto* layout_node = document->layout_node();
-    if (!layout_node)
+    auto viewport_box = Painting::BoxSlot::viewport_of(*document);
+    if (!viewport_box)
         return;
-    if (!Painting::scrollable_overflow_rect(*layout_node).has_value())
+    if (!Painting::scrollable_overflow_rect(viewport_box).has_value())
         return;
-    auto minimum_scroll_offset = Painting::minimum_scroll_offset(*layout_node);
-    auto maximum_scroll_offset = Painting::maximum_scroll_offset(*layout_node);
+    auto minimum_scroll_offset = Painting::minimum_scroll_offset(viewport_box);
+    auto maximum_scroll_offset = Painting::maximum_scroll_offset(viewport_box);
     CSSPixelPoint clamped = {
         clamp(m_viewport_scroll_offset.x(), minimum_scroll_offset.x(), maximum_scroll_offset.x()),
         clamp(m_viewport_scroll_offset.y(), minimum_scroll_offset.y(), maximum_scroll_offset.y()),
@@ -4834,8 +4860,10 @@ void LocalNavigable::perform_scroll_of_viewport_scrolling_box(CSSPixelPoint new_
         scroll_offset_did_change();
 
         if (auto document = active_document()) {
+            // The viewport's box publishes the offset the render side reads, journalled next to the
+            // store it mirrors rather than at each caller.
+            document->render_inputs_for_write().note_scroll_offset(DOM::NodeIdentity::of_document(), true);
             document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::No);
-            document->invalidate_scroll_state();
             document->inform_all_viewport_clients_about_the_current_viewport_rect();
         }
     }
@@ -5025,34 +5053,6 @@ Optional<CSSPixelPoint> LocalNavigable::scroll_offset_for(Compositing::AsyncScro
     return element->scroll_offset(pseudo_element_from_async_scroll_node_stable_id(stable_node_id));
 }
 
-static Layout::Node* layout_node_for_async_scroll_node(DOM::Document& document, Compositing::AsyncScrollNodeStableID stable_node_id)
-{
-    if (stable_node_id.kind == Compositing::AsyncScrollNodeKind::Viewport) {
-        if (stable_node_id.node_id != document.unique_id())
-            return nullptr;
-        return document.unsafe_layout_node();
-    }
-
-    auto* element = element_for_async_scroll_node_stable_id(document, stable_node_id);
-    if (!element)
-        return nullptr;
-    if (auto pseudo_element = pseudo_element_from_async_scroll_node_stable_id(stable_node_id); pseudo_element.has_value()) {
-        auto synthetic_pseudo_element = element->get_synthetic_pseudo_element(*pseudo_element);
-        if (!synthetic_pseudo_element.has_value())
-            return nullptr;
-        return synthetic_pseudo_element->layout_node();
-    }
-    return element->layout_node();
-}
-
-Layout::Node* LocalNavigable::layout_node_for_async_scroll_node_stable_id(Compositing::AsyncScrollNodeStableID stable_node_id)
-{
-    auto document = active_document();
-    if (!document)
-        return nullptr;
-    return layout_node_for_async_scroll_node(*document, stable_node_id);
-}
-
 bool LocalNavigable::set_scroll_offset_for(Compositing::AsyncScrollNodeStableID stable_node_id, CSSPixelPoint scroll_offset)
 {
     auto document = active_document();
@@ -5070,10 +5070,10 @@ bool LocalNavigable::set_scroll_offset_for(Compositing::AsyncScrollNodeStableID 
     if (!element_for_async_scroll_node_stable_id(*document, stable_node_id))
         return false;
     document->update_layout(DOM::UpdateLayoutReason::ElementScroll);
-    auto* layout_node = layout_node_for_async_scroll_node(*document, stable_node_id);
-    if (!layout_node)
+    auto scrolling_box = Painting::scrolling_box_for_async_scroll_node_stable_id(*document, stable_node_id);
+    if (!scrolling_box)
         return false;
-    return Painting::set_scroll_offset(*layout_node, scroll_offset) == Painting::ScrollHandled::Yes;
+    return Painting::set_scroll_offset(scrolling_box, scroll_offset) == Painting::ScrollHandled::Yes;
 }
 
 RefPtr<Painting::Scrollbar> LocalNavigable::scrollbar_dragged_by_compositor(Compositing::ScrollbarDraggedByCompositor const& scrollbar)
@@ -5081,26 +5081,21 @@ RefPtr<Painting::Scrollbar> LocalNavigable::scrollbar_dragged_by_compositor(Comp
     auto document = active_document();
     if (!document)
         return nullptr;
-    auto* scrolling_box = layout_node_for_async_scroll_node(*document, scrollbar.scroller_stable_node_id);
-    if (!scrolling_box || !Painting::has_committed_box(*scrolling_box))
+    auto scrolling_box = Painting::scrolling_box_for_async_scroll_node_stable_id(*document, scrollbar.scroller_stable_node_id);
+    if (!Painting::has_committed_box(scrolling_box))
         return nullptr;
     auto direction = scrollbar.vertical ? Painting::ScrollDirection::Vertical : Painting::ScrollDirection::Horizontal;
-    return document->chrome_widget_registry().get_or_create_scrollbar(document->layout_node_arena(), Painting::committed_row_slot(*scrolling_box), direction);
+    return document->chrome_widget_registry().get_or_create_scrollbar(*document, scrolling_box.slot(), direction);
 }
 
 // NB: A scroll the compositor reports can arrive while layout is out of date, so this reads the committed layout.
-static Layout::Node* committed_scrolling_box_for_async_scroll_node(DOM::Document& document, Compositing::AsyncScrollNodeStableID stable_node_id)
+static Painting::BoxSlot committed_scrolling_box_for_async_scroll_node(DOM::Document& document, Compositing::AsyncScrollNodeStableID stable_node_id)
 {
-    Layout::Node* scrolling_box = nullptr;
-    if (stable_node_id.kind == Compositing::AsyncScrollNodeKind::Viewport) {
-        if (stable_node_id.node_id == document.unique_id())
-            scrolling_box = document.unsafe_layout_node();
-    } else if (stable_node_id.kind == Compositing::AsyncScrollNodeKind::Element) {
-        if (auto* element = element_for_async_scroll_node_stable_id(document, stable_node_id))
-            scrolling_box = element->unsafe_layout_node();
-    }
-    if (!scrolling_box || !Painting::has_committed_box(*scrolling_box))
-        return nullptr;
+    if (stable_node_id.kind == Compositing::AsyncScrollNodeKind::PseudoElement)
+        return {};
+    auto scrolling_box = Painting::scrolling_box_for_async_scroll_node_stable_id(document, stable_node_id);
+    if (!Painting::has_committed_box(scrolling_box))
+        return {};
     return scrolling_box;
 }
 
@@ -5111,8 +5106,8 @@ static void record_relative_scroll(DOM::Document& document, Compositing::AsyncSc
 {
     if (delta.is_zero())
         return;
-    if (auto* scrolling_box = committed_scrolling_box_for_async_scroll_node(document, stable_node_id))
-        document.scroll_state_query_containers().did_scroll_relatively(*scrolling_box, delta);
+    if (auto scrolling_box = committed_scrolling_box_for_async_scroll_node(document, stable_node_id))
+        document.scroll_state_query_containers().did_scroll_relatively(scrolling_box, delta);
 }
 
 static void record_relative_scroll(DOM::Document& document, Compositing::AsyncScrollNodeStableID stable_node_id, Optional<CSSPixelPoint> old_offset, Optional<CSSPixelPoint> new_offset)
@@ -5323,8 +5318,7 @@ void LocalNavigable::re_snap_scroll_containers_after_layout_change()
     if (!document->layout_is_up_to_date() || document->is_running_update_layout())
         return;
 
-    auto const* viewport_layout_node = document->layout_node();
-    if (!viewport_layout_node || !Painting::has_committed_box(*viewport_layout_node))
+    if (!Painting::has_committed_box(Painting::BoxSlot::viewport_of(*document)))
         return;
 
     if (m_user_scroll_gesture_hold_count > 0)
@@ -5336,11 +5330,11 @@ void LocalNavigable::re_snap_scroll_containers_after_layout_change()
     auto snap_containers = document->collect_scroll_snap_containers();
 
     bool any_snap_container_deferred = false;
-    for (auto const& registered_snap_container : snap_containers) {
-        auto const* snap_container = registered_snap_container.ptr();
+    for (auto snap_container_slot : snap_containers) {
+        auto snap_container = Painting::BoxSlot::of(*document, snap_container_slot);
         if (!snap_container)
             continue;
-        auto stable_node_id = Painting::async_scroll_node_stable_id(*snap_container);
+        auto stable_node_id = Painting::async_scroll_node_stable_id(snap_container);
         if (!stable_node_id.has_value())
             continue;
 
@@ -5363,7 +5357,7 @@ void LocalNavigable::re_snap_scroll_containers_after_layout_change()
             .focused_node = document->focused_area(),
             .targeted_element = document->target_element(),
         };
-        auto snap_destination = Painting::select_resnap_destination(*snap_container, *current_scroll_offset, resnap_selection);
+        auto snap_destination = Painting::select_resnap_destination(snap_container, *current_scroll_offset, resnap_selection);
 
         // Scrolling behavior for re-snapping to the same box as before however, is UA-defined. The UA may, for
         // example, when snapped to the start of a section, choose not to animate the scroll to the section's new
@@ -5545,7 +5539,7 @@ void LocalNavigable::user_scroll_did_settle(UserScrollSettlement settlement)
         }
 
         if (snaps_at_this_settlement && can_snap) {
-            auto const* snap_container = layout_node_for_async_scroll_node(*document, *stable_node_id);
+            auto snap_container = Painting::scrolling_box_for_async_scroll_node_stable_id(*document, *stable_node_id);
             auto current_scroll_offset = scroll_offset_for(*stable_node_id);
             if (snap_container && current_scroll_offset.has_value()) {
                 Compositing::SnapSelectionStrategy strategy;
@@ -5557,7 +5551,7 @@ void LocalNavigable::user_scroll_did_settle(UserScrollSettlement settlement)
                             strategy.start_offset = *entry.scroll_offset_at_gesture_start;
                     }
                 }
-                auto snap_destination = Painting::adjust_scroll_destination_for_snapping(*snap_container, *current_scroll_offset, strategy);
+                auto snap_destination = Painting::adjust_scroll_destination_for_snapping(snap_container, *current_scroll_offset, strategy);
                 record_snapped_areas_of_scroll_container(*document, *stable_node_id, snap_destination);
                 if (snap_destination.position != *current_scroll_offset) {
                     // The snap animation queues this target's scrollend event once it completes.
@@ -6529,12 +6523,16 @@ void LocalNavigable::clear_parent_compositor_context()
 
 void LocalNavigable::destroy_compositor_context()
 {
-    clear_parent_compositor_context();
-    m_compositor_context.clear();
+    (void)take_compositor_context();
 }
 
 OwnPtr<Compositor::CompositorContextHandle> LocalNavigable::take_compositor_context()
 {
+    // A frame in flight may hand a frame to the context once it is taken in, so the context is retired first.
+    if (has_compositor_context())
+        Layout::RustFFI::rust_retire_compositor_context(compositor_context().id().value());
+    // The retirement took in a frame in flight that presents to the context.
+    VERIFY(!m_presenter->is_lent_to_frame_in_flight());
     clear_parent_compositor_context();
     return move(m_compositor_context);
 }
@@ -6547,6 +6545,10 @@ void LocalNavigable::repaint_after_compositor_process_reconnect()
     m_adopted_async_scroll_sequence = 0;
 
     if (has_compositor_context()) {
+        // What a frame in flight hands the context goes to the compositor process that went away, and the retained
+        // display list below is forgotten, so the frame is taken in first.
+        Layout::RustFFI::rust_retire_compositor_context(compositor_context().id().value());
+        VERIFY(!m_presenter->is_lent_to_frame_in_flight());
         if (auto parent = this->parent()) {
             if (auto* local_parent = as_if<LocalNavigable>(*parent)) {
                 if (local_parent->has_compositor_context())
@@ -6561,10 +6563,7 @@ void LocalNavigable::repaint_after_compositor_process_reconnect()
 
         m_needs_repaint = true;
         m_needs_to_record_display_list = true;
-        m_compositor_display_list_paint_config.clear();
-        m_compositor_display_list = nullptr;
-        m_compositor_display_list_resources = {};
-        m_compositor_display_list_command_resources = {};
+        presenter().forget_compositor_display_list();
     }
 
     for (auto const& child_navigable : child_navigables())
@@ -6625,23 +6624,6 @@ void LocalNavigable::set_should_show_caret_hit_test_debug_overlay(bool value)
         child_navigable->set_should_show_caret_hit_test_debug_overlay(value);
 }
 
-static Compositing::DisplayListResourceSet command_resources_of_display_list(Compositing::DisplayListResourceStorage const& resource_storage, Painting::DocumentPaintState const& document_paint_state, Compositing::DisplayList const& display_list)
-{
-    if (document_paint_state.display_list_used_as_paint_command_cache_source() == &display_list)
-        return document_paint_state.paint_command_cache_source_referenced_resources();
-    return resource_storage.collect_referenced_resources(display_list);
-}
-
-static Compositing::DisplayListResourceSet compositor_display_list_resources(Compositing::DisplayListResourceStorage const& resource_storage, Painting::DocumentPaintState const& document_paint_state, Compositing::DisplayListResourceSet const& display_list_command_resources, Compositing::AccumulatedVisualContextTree const& visual_context_tree)
-{
-    auto resources = display_list_command_resources;
-    // A recording downgraded to cache-read-only leaves the retained source and the cached ranges
-    // into it live, so the resources they reference must survive the pruning that follows.
-    document_paint_state.append_paint_command_cache_source_resources(resources);
-    resources.include(resource_storage.collect_referenced_resources(visual_context_tree));
-    return resources;
-}
-
 // A page listing 'dark' already offers a dark theme of its own; a page saying 'only' wants its colors kept as
 // written either way — CSS Color Adjust puts UA overrides like force-dark behind exactly that keyword.
 static bool lists_a_dark_scheme(ReadonlySpan<Utf16FlyString> schemes)
@@ -6662,13 +6644,14 @@ bool LocalNavigable::active_document_opts_out_of_force_dark() const
     if (!document)
         return false;
 
-    if (auto* html_element = document->html_element(); html_element && html_element->layout_node()) {
-        auto const& layout_node = *html_element->layout_node();
-        if (layout_node.color_scheme_only())
-            return true;
-        auto schemes = layout_node.color_schemes();
-        if (!schemes.is_empty())
-            return lists_a_dark_scheme(schemes);
+    if (auto* html_element = document->html_element()) {
+        if (auto const* ui_values = Painting::BoxSlot::bound_to(*html_element).style_group<CSS::ComputedValues::InheritedUIValues>()) {
+            if (ui_values->color_scheme_only)
+                return true;
+            auto schemes = ui_values->color_schemes_span();
+            if (!schemes.is_empty())
+                return lists_a_dark_scheme(schemes);
+        }
     }
 
     if (document->supported_color_schemes_are_only())
@@ -6689,6 +6672,25 @@ bool LocalNavigable::force_dark_applies_to_active_document() const
 
 bool LocalNavigable::record_display_list_and_scroll_state(PaintConfig paint_config)
 {
+    auto frame = record_compositor_frame(paint_config);
+    if (!frame.has_value())
+        return false;
+    submit_compositor_frame(frame.release_value());
+    return true;
+}
+
+// Records the active document's display list if it is out of date, and returns the frame that brings the compositor
+// context up to date with it.
+Optional<Compositor::CompositorFrame> LocalNavigable::record_compositor_frame(PaintConfig paint_config)
+{
+    auto pending_frame = begin_compositor_frame(paint_config, Painting::RecordingRun::Now);
+    if (!pending_frame.has_value())
+        return {};
+    return finish_compositor_frame(*pending_frame);
+}
+
+Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_compositor_frame(PaintConfig paint_config, Painting::RecordingRun run)
+{
     // Per-navigable state is stamped here rather than where PaintConfig is built, so no call site (the headless
     // screenshot path above all) can leave it behind; kept in the config so a change compares unequal below.
     paint_config.force_dark_enabled = force_dark_applies_to_active_document();
@@ -6697,11 +6699,11 @@ bool LocalNavigable::record_display_list_and_scroll_state(PaintConfig paint_conf
     paint_config.should_show_line_box_borders = m_should_show_line_box_borders;
 
     if (!has_compositor_context())
-        return false;
+        return {};
 
     auto document = active_document();
     if (!document)
-        return false;
+        return {};
 
     adopt_pending_async_scroll_offsets();
     document->update_paint_and_hit_testing_properties_if_needed();
@@ -6714,88 +6716,195 @@ bool LocalNavigable::record_display_list_and_scroll_state(PaintConfig paint_conf
         paint_config.canvas_fill_rect = Gfx::IntRect { {}, viewport_size };
     }
 
+    auto const& compositor_display_list_paint_config = presenter().compositor_display_list_paint_config();
     auto should_record_display_list = m_needs_to_record_display_list
-        || !m_compositor_display_list_paint_config.has_value()
-        || !(m_compositor_display_list_paint_config.value() == paint_config);
+        || !compositor_display_list_paint_config.has_value()
+        || !(compositor_display_list_paint_config.value() == paint_config);
 
-    RefPtr<Compositing::DisplayList> display_list;
-    Compositing::DisplayListResourceSet display_list_command_resources;
-    Compositing::DisplayListResourceSet display_list_resources;
-    Compositing::DisplayListResourceTransaction resource_transaction;
-    Optional<Compositing::AccumulatedVisualContextTree> visual_context_tree;
-    auto& document_paint_state = document->paint_state();
-    bool compositor_display_list_is_unchanged = false;
+    // Keyboard eligibility reads the DOM and the layout tree as this frame paints them, so it is taken before the
+    // recording starts: with an overlapping render stage, tasks can change both while the recording runs. The epoch of
+    // the display list it goes with is only known after the recording, so a placeholder marks where it goes.
+    auto keyboard_scroll_state = is_top_level_traversable()
+        ? page().take_keyboard_scroll_state_for_compositor(Compositor::keyboard_scroll_epoch_placeholder)
+        : Compositing::KeyboardScrollState {};
+
+    PendingCompositorFrame pending_frame {
+        .document = *document,
+        .paint_config = paint_config,
+        .keyboard_scroll_state = move(keyboard_scroll_state),
+        .recording = {},
+        .presentation = {},
+    };
     if (should_record_display_list) {
-        display_list = document->record_display_list(paint_config, m_display_list_resource_storage, Painting::PaintCommandCacheMode::ReadWrite);
-        if (!display_list)
-            return false;
-        VERIFY(document->has_committed_viewport_box());
-        compositor_display_list_is_unchanged = m_compositor_display_list == display_list;
-        if (!compositor_display_list_is_unchanged) {
-            visual_context_tree = document_paint_state.visual_context_tree(*document);
-            display_list_command_resources = command_resources_of_display_list(m_display_list_resource_storage, document_paint_state, *display_list);
-            display_list_resources = compositor_display_list_resources(m_display_list_resource_storage, document_paint_state, display_list_command_resources, *visual_context_tree);
-            resource_transaction = m_display_list_resource_storage.create_transaction(
-                m_compositor_display_list_resources,
-                display_list_resources);
-        }
+        auto recording = document->begin_display_list_recording(paint_config, presenter().resource_storage(), Painting::PaintCommandCacheMode::ReadWrite, run);
+        if (!recording.has_value())
+            return {};
+        pending_frame.recording = make<Painting::PendingDisplayListRecording>(recording.release_value());
+        // NB: What asks for another recording once this one is prepared asks for the next one.
+        m_needs_to_record_display_list = false;
     }
+    pending_frame.presentation = seal_presentation(pending_frame);
+    return pending_frame;
+}
 
-    VERIFY(document->has_committed_viewport_box());
+// Seals what the frame is presented from as the document stands now, where its recording is cut from it: what changes
+// beside the frame in flight goes to the next frame.
+RefPtr<Compositor::Presentation> LocalNavigable::seal_presentation(PendingCompositorFrame& pending_frame)
+{
+    auto& document = *pending_frame.document;
+    if (!document.has_paint_state())
+        return {};
+    auto& document_paint_state = document.paint_state();
     auto visual_context_tree_needs_compositor_update = document_paint_state.visual_context_tree_needs_compositor_update();
+    // NB: A recording's publication adds the filter images its tree references to the storage. The tree a frame that
+    //     records nothing sends has its filter images added now, as reading it live would. (With a recording in flight,
+    //     reaching the arena for them would take the recording in before this frame is in the ticket.)
+    Optional<Compositing::AccumulatedVisualContextTree> visual_context_tree;
+    if (pending_frame.recording) {
+        visual_context_tree = pending_frame.recording->visual_context_tree;
+    } else if (visual_context_tree_needs_compositor_update) {
+        visual_context_tree = document_paint_state.visual_context_tree(document);
+        Painting::add_published_svg_filter_image_frames(document, presenter().resource_storage());
+    }
+    // An update the frame takes to the compositor is taken now; what changes the tree after this is the next frame's.
+    if (visual_context_tree_needs_compositor_update)
+        document_paint_state.did_update_visual_context_tree_in_compositor();
 
     Compositing::ScrollStateSnapshot scroll_state_snapshot { document_paint_state.scroll_state_snapshot() };
     scroll_state_snapshot.set_adopted_async_scroll_sequence(m_adopted_async_scroll_sequence);
+    Optional<Compositor::AsyncScrollingStamp> async_scrolling_stamp = Compositor::AsyncScrollingStamp {
+        .wheel_event_listener_state_generation = page().wheel_event_listener_state_generation(),
+        .device_pixels_per_css_pixel = page().client().device_pixels_per_css_pixel(),
+    };
 
-    // Keyboard eligibility belongs to this publication, not to the cached paint commands. Refresh it even if
-    // recording was skipped or returned the same display list, and send it with the corresponding scroll state.
-    auto& published_display_list = display_list ? *display_list : *m_compositor_display_list;
-    auto keyboard_scroll_state = is_top_level_traversable()
-        ? page().take_keyboard_scroll_state_for_compositor(published_display_list.compatible_visual_context_tree_structural_epoch())
-        : Compositing::KeyboardScrollState {};
-    auto async_scrolling_metadata = published_display_list.async_scrolling_metadata().value_or({});
-    async_scrolling_metadata.keyboard_scroll_state = keyboard_scroll_state;
-    published_display_list.set_async_scrolling_metadata(move(async_scrolling_metadata));
+    return adopt_ref(*new Compositor::Presentation(
+        Compositor::SealedPresentationSource { move(visual_context_tree), async_scrolling_stamp, visual_context_tree_needs_compositor_update, move(scroll_state_snapshot) },
+        Compositor::PresentationInputs {
+            .context_id = compositor_context().id(),
+            .paint_config = pending_frame.paint_config,
+            .keyboard_scroll_state = pending_frame.keyboard_scroll_state,
+            .paint_command_cache_source_resources = document_paint_state.paint_command_cache_source_referenced_resources(),
+            .present_viewport_rect = {},
+        },
+        document_paint_state.display_list_used_as_paint_command_cache_source()));
+}
 
-    if (should_record_display_list && !compositor_display_list_is_unchanged) {
-        m_compositor_display_list_visual_context_tree_structural_epoch = display_list->compatible_visual_context_tree_structural_epoch();
-        compositor_context().update_display_list(*display_list, visual_context_tree.release_value(), move(resource_transaction), move(scroll_state_snapshot));
-        document_paint_state.did_update_visual_context_tree_in_compositor();
-        m_display_list_resource_storage.retain_only(display_list_resources);
-        m_compositor_display_list = display_list;
-        m_compositor_display_list_command_resources = move(display_list_command_resources);
-        m_compositor_display_list_resources = move(display_list_resources);
-        m_needs_to_record_display_list = false;
-        m_compositor_display_list_paint_config = paint_config;
-    } else {
-        if (compositor_display_list_is_unchanged) {
-            m_needs_to_record_display_list = false;
-            m_compositor_display_list_paint_config = paint_config;
-            if (m_display_list_resource_storage.has_resources_added_since_last_retain())
-                m_display_list_resource_storage.retain_only(m_compositor_display_list_resources);
-        }
-        if (visual_context_tree_needs_compositor_update) {
-            auto updated_visual_context_tree = document_paint_state.visual_context_tree(*document);
-            VERIFY(updated_visual_context_tree.structural_epoch() == m_compositor_display_list_visual_context_tree_structural_epoch);
-            auto updated_display_list_resources = compositor_display_list_resources(m_display_list_resource_storage, document_paint_state, m_compositor_display_list_command_resources, updated_visual_context_tree);
-            auto updated_resource_transaction = m_display_list_resource_storage.create_transaction(m_compositor_display_list_resources, updated_display_list_resources);
-            compositor_context().update_visual_context_tree(updated_visual_context_tree, move(updated_resource_transaction));
-            document_paint_state.did_update_visual_context_tree_in_compositor();
-            m_display_list_resource_storage.retain_only(updated_display_list_resources);
-            m_compositor_display_list_resources = move(updated_display_list_resources);
-        }
-        compositor_context().update_scroll_state(move(scroll_state_snapshot), move(keyboard_scroll_state));
+Compositor::NavigablePresenter& LocalNavigable::presenter(SourceLocation location)
+{
+    // The frame in flight presents from the presenter until it is taken in.
+    if (m_presenter->is_lent_to_frame_in_flight())
+        Layout::RustFFI::rust_stage_thread_join_frame_in_flight(reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+    VERIFY(!m_presenter->is_lent_to_frame_in_flight());
+    // The render clock's ticks present from the presenter until the main thread takes it back, with what they presented:
+    // the frame in flight may have handed it on to them.
+    if (m_presenter->take_back_from_render_clock())
+        HTML::main_thread_event_loop().frame_scheduler().adopt_render_clock_frames_of(*this);
+    return *m_presenter;
+}
+
+Compositing::DisplayListResourceStorage& LocalNavigable::display_list_resource_storage()
+{
+    return presenter().resource_storage();
+}
+
+Optional<Compositor::CompositorFrame> LocalNavigable::finish_compositor_frame(PendingCompositorFrame& pending_frame)
+{
+    auto document = pending_frame.document;
+    bool const should_record_display_list = pending_frame.recording != nullptr;
+    auto* sealed = pending_frame.presentation.ptr();
+    // The seal took the tree update the frame would have sent; a frame that sends nothing leaves it to the next one.
+    auto leave_sealed_tree_update_to_next_frame = [&] {
+        if (sealed && sealed->source.visual_context_tree_needs_compositor_update() && document->has_paint_state())
+            document->paint_state().did_update_visual_context_values();
+    };
+    // A task beside the frame in flight retired the document's render state, and what was recorded for it is gone.
+    if (should_record_display_list && Painting::discard_retired_rust_display_list_recording(*pending_frame.recording)) {
+        leave_sealed_tree_update_to_next_frame();
+        return {};
     }
-    return true;
+    // A task beside the frame in flight tore the document's layout tree down (it stopped being active, say), and a
+    // frame that recorded nothing has no render state left to be built from.
+    if (!document->has_paint_state())
+        return {};
+
+    auto& document_paint_state = document->paint_state();
+    Optional<Painting::DocumentPresentationSource> document_source;
+    Compositor::PresentationSource* source = sealed ? &sealed->source : nullptr;
+    if (!source) {
+        document_source.emplace(*document, m_adopted_async_scroll_sequence);
+        source = &*document_source;
+    }
+    auto inputs = sealed
+        ? sealed->inputs
+        : Compositor::PresentationInputs {
+              .context_id = compositor_context().id(),
+              .paint_config = pending_frame.paint_config,
+              .keyboard_scroll_state = pending_frame.keyboard_scroll_state,
+              .paint_command_cache_source_resources = document_paint_state.paint_command_cache_source_referenced_resources(),
+              .present_viewport_rect = {},
+          };
+
+    Optional<Compositor::PublishedDisplayList> published;
+    if (should_record_display_list) {
+        auto* paint_command_cache_source = sealed ? sealed->paint_command_cache_source.ptr() : document_paint_state.display_list_used_as_paint_command_cache_source();
+        published = Painting::publish_rust_display_list_recording(*pending_frame.recording, paint_command_cache_source, inputs.paint_command_cache_source_resources, *source);
+        // NB: A sealed source reaches no document when the recording is published, so the trace is taken here.
+        if (sealed)
+            Painting::take_recording_trace_if_pending(document);
+        document->adopt_published_recording(*pending_frame.recording, *published);
+        VERIFY(document->has_committed_viewport_box());
+        if (published->becomes_paint_command_cache_source)
+            inputs.paint_command_cache_source_resources = published->command_resources;
+    }
+
+    VERIFY(document->has_committed_viewport_box());
+    auto frame = presenter().build_frame(inputs, *source, move(published));
+    // The recording painted an SVG-as-image the main thread had not rendered yet as an empty image. It renders the
+    // image before the next recording, which paints it. A frame that could not be built presents nothing, and the next
+    // one records again.
+    if (!frame.has_value() || (should_record_display_list && Painting::last_recording_missed_vector_images(*document)))
+        document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::PaintCommands);
+    return frame;
+}
+
+void LocalNavigable::submit_compositor_frame(Compositor::CompositorFrame&& frame)
+{
+    auto frame_sink = compositor_context().prepare_to_submit_frame(frame);
+    if (!frame_sink)
+        return;
+    bool const carries_scene = frame.display_list_update.has_value() || frame.visual_context_tree_update.has_value();
+    // The main thread takes in the scene of a frame it presents as it presents it.
+    ScopeGuard adopt_scene = [&] {
+        if (carries_scene)
+            m_presenter->did_adopt_scene(m_presenter->did_present_scene());
+    };
+    // The frame owns what it sends, and the sink may be used from any thread, so the handoff runs as a render stage.
+    struct Handoff {
+        Compositor::CompositorFrameSink& frame_sink;
+        Compositor::CompositorFrame frame;
+    } handoff { *frame_sink, move(frame) };
+    Layout::RustFFI::rust_run_compositor_frame_handoff_stage(
+        [](void* context) {
+            auto& handoff = *static_cast<Handoff*>(context);
+            handoff.frame_sink.submit(move(handoff.frame));
+        },
+        &handoff);
 }
 
 void LocalNavigable::paint_next_frame()
 {
+    auto pending_frame = begin_painting_next_frame(Painting::RecordingRun::Now);
+    if (pending_frame.has_value())
+        finish_painting_next_frame(*pending_frame);
+}
+
+Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_painting_next_frame(Painting::RecordingRun run)
+{
     if (has_been_destroyed())
-        return;
+        return {};
     if (!has_compositor_context()) {
         m_needs_repaint = false;
-        return;
+        return {};
     }
 
     PaintConfig paint_config { .paint_overlay = true, .should_show_caret_hit_test_debug_overlay = m_should_show_caret_hit_test_debug_overlay };
@@ -6803,15 +6912,568 @@ void LocalNavigable::paint_next_frame()
         // Nested navigables paint transparent bitmaps for their parent compositor context.
         auto parent = this->parent();
         if (!parent || !as<LocalNavigable>(*parent).has_compositor_context())
-            return;
+            return {};
     }
 
     m_needs_repaint = false;
 
-    if (!record_display_list_and_scroll_state(paint_config))
+    auto pending_frame = begin_compositor_frame(paint_config, run);
+    if (pending_frame.has_value() && pending_frame->presentation)
+        pending_frame->presentation->inputs.present_viewport_rect = page().css_to_device_rect(this->viewport_rect()).to_type<int>();
+    return pending_frame;
+}
+
+// The presentation stage of the frame in flight: publishes the navigable's recording, builds its compositor frame from
+// the presenter lent to it and hands the frame to the compositor. Reaches no document: the presentation was sealed
+// where the rendering update began the frame. Returns whether it handed the frame over.
+static bool present_from_frame_in_flight(Compositor::Presentation& presentation)
+{
+    // The recording panicked: the frame shows nothing, and the panic continues where the main thread takes it back.
+    if (presentation.recording_ticket && Layout::RustFFI::layout_recording_ticket_was_abandoned(presentation.recording_ticket))
+        return false;
+    Optional<Compositor::PublishedDisplayList> published;
+    if (presentation.recording) {
+        published = Painting::publish_rust_display_list_recording_in_frame(*presentation.recording, presentation.recording_ticket, presentation.paint_command_cache_source.ptr(), presentation.inputs.paint_command_cache_source_resources, presentation.source);
+        if (!published.has_value())
+            return false;
+        if (published->becomes_paint_command_cache_source)
+            presentation.inputs.paint_command_cache_source_resources = published->command_resources;
+        presentation.published = published;
+    }
+    auto frame = presentation.presenter->build_frame(presentation.inputs, presentation.source, move(published));
+    if (!frame.has_value())
+        return false;
+    bool const carries_scene = frame->display_list_update.has_value() || frame->visual_context_tree_update.has_value();
+    presentation.frame_sink->submit(frame.release_value());
+    if (carries_scene)
+        presentation.presented_scene_epoch = presentation.presenter->did_present_scene();
+    return true;
+}
+
+// Presents the frame in flight, after which the render clock's ticks present after it, where its document has them.
+static void present_frame_in_flight(void* context)
+{
+    auto& presentation = *static_cast<Compositor::Presentation*>(context);
+    if (present_from_frame_in_flight(presentation))
+        FrameScheduler::did_present_frame_in_flight(presentation);
+}
+
+bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
+{
+    auto presentation = pending_frame.presentation;
+    if (!presentation || !Layout::RustFFI::rust_stage_thread_submits() || !has_compositor_context())
+        return false;
+    // The frame in flight presents what it records, from the recording's ticket. A recording the main thread waited
+    // for, or one it took in already, is finished by consume-commit, and so is every frame of the ticket after it.
+    auto* recording = pending_frame.recording.ptr();
+    if (recording && (recording->run != Painting::RecordingRun::InSubmittedFrame || !recording->submitted_ticket.is_in_flight()))
+        return false;
+    auto frame_sink = compositor_context().prepare_to_submit_frame_from_render_side();
+    if (!frame_sink)
+        return false;
+    presentation->presenter = presenter();
+    presentation->recording = recording;
+    if (recording) {
+        presentation->render_state_generation = Layout::RustFFI::layout_arena_render_state_generation(recording->arena);
+        presentation->recording_ticket = recording->submitted_ticket.retain_for_presentation();
+    }
+    presentation->frame_sink = move(frame_sink);
+    presentation->is_presented_by_frame_in_flight = true;
+    m_presenter->lend_to_frame_in_flight();
+    // The presentation publishes the recording from its ticket and reaches no arena.
+    Layout::RustFFI::rust_stage_thread_submit_presentation(recording ? recording->arena : nullptr, present_frame_in_flight, presentation.ptr());
+    return true;
+}
+
+// Takes in what the frame in flight presented: what its publication made, as finish_compositor_frame() does for a frame
+// finished here.
+void LocalNavigable::adopt_presented_frame(PendingCompositorFrame& pending_frame)
+{
+    auto& presentation = *pending_frame.presentation;
+    m_presenter->take_back_from_frame_in_flight();
+    // The frame could not be built, and the compositor lacks what the main thread paints for: it paints again.
+    if (!m_presenter->compositor_display_list_paint_config().has_value())
+        pending_frame.document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::PaintCommands);
+    if (presentation.presented_scene_epoch.has_value())
+        m_presenter->did_adopt_scene(*presentation.presented_scene_epoch);
+    if (!presentation.published.has_value())
         return;
-    auto viewport_rect = page().css_to_device_rect(this->viewport_rect()).to_type<int>();
-    compositor_context().present_frame(viewport_rect);
+    auto document = pending_frame.document;
+    auto& recording = *pending_frame.recording;
+    // The presentation published the recording from its ticket; the document takes it in.
+    if (presentation.recording_ticket)
+        Layout::RustFFI::layout_arena_take_in_recording(recording.arena);
+    // A task beside the frame in flight retired the render state the recording was made for. The compositor has the
+    // frame already; the document takes nothing of it in, and what was marked beside it is what the next drain writes.
+    if (Layout::RustFFI::layout_arena_presented_frame_was_retired(recording.arena, presentation.render_state_generation) || !document->has_paint_state()) {
+        document->release_held_invalidation_marks();
+        return;
+    }
+    Painting::take_recording_trace_if_pending(document);
+    // The frame handed the presenter on to the render clock, and the main thread took in what the ticks presented after
+    // it already.
+    if (presentation.presented_scene_epoch.has_value() && *presentation.presented_scene_epoch < m_presenter->adopted_scene_epoch())
+        return;
+    document->adopt_published_recording(recording, *presentation.published);
+    // The recording painted an SVG-as-image the main thread had not rendered yet as an empty image. It renders the
+    // image before the next recording, which paints it.
+    if (Painting::last_recording_missed_vector_images(*document))
+        document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::PaintCommands);
+}
+
+Optional<LocalNavigable::RenderClockFrameKit> LocalNavigable::seal_render_clock_frame_kit()
+{
+    if (!is_local_root() || !has_compositor_context())
+        return {};
+    auto document = active_document();
+    if (!document || !document->has_paint_state() || !document->has_committed_viewport_box())
+        return {};
+    RefPtr<Compositor::Presentation> presentation;
+    OwnPtr<Painting::PendingDisplayListRecording> recording;
+    if (m_presenter->is_lent_to_frame_in_flight()) {
+        // Beside a frame in flight, the ticks present after that frame, as it was presented, and nothing before: the kit
+        // takes all it presents with from the frame (see follow_presented_frame()).
+        presentation = adopt_ref(*new Compositor::Presentation({ {}, {}, false, {} },
+            Compositor::PresentationInputs {
+                .context_id = compositor_context().id(),
+                .paint_config = {},
+                .keyboard_scroll_state = {},
+                .paint_command_cache_source_resources = {},
+                .present_viewport_rect = {},
+            },
+            nullptr));
+    } else {
+        if (!m_last_painted_frame_for_render_clock.has_value())
+            return {};
+        auto& last = *m_last_painted_frame_for_render_clock;
+        if (last.recording->document.ptr() != document.ptr())
+            return {};
+        // A tree update the compositor has not had yet goes with the next frame the main thread paints.
+        if (document->paint_state().visual_context_tree_needs_compositor_update())
+            return {};
+        PendingCompositorFrame frame {
+            .document = *document,
+            .paint_config = last.paint_config,
+            .keyboard_scroll_state = last.keyboard_scroll_state,
+            .recording = make<Painting::PendingDisplayListRecording>(*last.recording),
+            .presentation = {},
+        };
+        frame.recording->run = Painting::RecordingRun::InSubmittedFrame;
+        presentation = seal_presentation(frame);
+        if (!presentation)
+            return {};
+        recording = move(frame.recording);
+    }
+    auto frame_sink = compositor_context().prepare_to_submit_frame_from_render_side();
+    if (!frame_sink)
+        return {};
+    presentation->inputs.present_viewport_rect = page().css_to_device_rect(viewport_rect()).to_type<int>();
+    presentation->presenter = m_presenter;
+    presentation->frame_sink = move(frame_sink);
+    presentation->is_presented_by_frame_in_flight = true;
+    return RenderClockFrameKit { .presentation = presentation.release_nonnull(), .recording = move(recording), .presented = false };
+}
+
+bool LocalNavigable::present_render_clock_frame(RenderClockFrameKit& kit)
+{
+    auto& presentation = *kit.presentation;
+    // What the tick's layout moved of the visual contexts, a clip or a transform, goes to the compositor with the tree:
+    // with the display list the tick recorded, or on its own where the recording is the same.
+    if (auto const* tree = Layout::RustFFI::layout_arena_clock_tick_visual_context_tree_retain(kit.recording->arena)) {
+        auto visual_context_tree = Compositing::AccumulatedVisualContextTree::adopt_rust_handle(tree);
+        bool const changed = visual_context_tree.rust_handle() != kit.recording->visual_context_tree.rust_handle();
+        // A tree of another structure (a scroll container that went away, say) goes only with a display list recorded
+        // for it, and with the scroll offsets of its nodes.
+        if (changed && visual_context_tree.structural_epoch() != kit.recording->visual_context_tree.structural_epoch()) {
+            auto scroll_state_snapshot = presentation.source.scroll_state_snapshot();
+            Layout::RustFFI::layout_arena_clock_tick_scroll_state_snapshot(kit.recording->arena, &scroll_state_snapshot, [](void* sink, Gfx::FloatPoint const* offsets, size_t count) {
+                static_cast<Compositing::ScrollStateSnapshot*>(sink)->assign_device_offsets({ offsets, count });
+            });
+            presentation.source.replace_scroll_state_snapshot(move(scroll_state_snapshot));
+            presentation.paint_command_cache_source = nullptr;
+            presentation.inputs.keyboard_scroll_state.visual_context_tree_structural_epoch = Compositor::keyboard_scroll_epoch_placeholder;
+        }
+        if (changed)
+            kit.recording->visual_context_tree = visual_context_tree;
+        presentation.source.replace_visual_context_tree(move(visual_context_tree), changed);
+    }
+    presentation.recording = kit.recording.ptr();
+    presentation.published.clear();
+    presentation.presented_scene_epoch.clear();
+    kit.recording->timer.start();
+    bool const presented = present_from_frame_in_flight(presentation);
+    // The next tick's recording is identical to what this one published where it changes nothing.
+    if (presentation.published.has_value() && presentation.published->becomes_paint_command_cache_source)
+        presentation.paint_command_cache_source = presentation.published->display_list;
+    kit.presented = true;
+    return presented;
+}
+
+bool LocalNavigable::follow_presented_frame(RenderClockFrameKit& kit, Compositor::Presentation& presented)
+{
+    // A frame that recorded nothing leaves the ticks nothing to present after.
+    if (!presented.recording)
+        return false;
+    auto& presentation = *kit.presentation;
+    auto& source = presented.source;
+    // The frame took its tree to the compositor.
+    presentation.source = Compositor::SealedPresentationSource { source.published_display_list_visual_context_tree(), source.async_scrolling_stamp(), false, source.scroll_state_snapshot() };
+    presentation.inputs = presented.inputs;
+    if (presented.published.has_value() && presented.published->becomes_paint_command_cache_source)
+        presentation.paint_command_cache_source = presented.published->display_list;
+    else
+        presentation.paint_command_cache_source = presented.paint_command_cache_source;
+    kit.recording = make<Painting::PendingDisplayListRecording>(*presented.recording);
+    kit.recording->run = Painting::RecordingRun::InSubmittedFrame;
+    kit.recording->submitted_ticket = {};
+    return true;
+}
+
+void LocalNavigable::adopt_render_clock_frame_kit(RenderClockFrameKit& kit)
+{
+    if (!exchange(kit.presented, false))
+        return;
+    auto& presentation = *kit.presentation;
+    // The main thread presented a later scene of its own beside the ticks (a hit test's), which stays what it hit tests.
+    if (presentation.presented_scene_epoch.has_value() && *presentation.presented_scene_epoch < m_presenter->adopted_scene_epoch())
+        return;
+    if (presentation.presented_scene_epoch.has_value())
+        m_presenter->did_adopt_scene(*presentation.presented_scene_epoch);
+    auto document = kit.recording->document;
+    if (!presentation.published.has_value() || !document->has_paint_state() || active_document() != document)
+        return;
+    document->adopt_published_recording(*kit.recording, *presentation.published);
+}
+
+namespace {
+
+// The presentation of what a document's flight records, sealed where the flight was submitted but for what the flight
+// prepares: the visual context tree and scroll state the recording was made against.
+struct FlightPresentation {
+    AK_ALLOC_WITH_KMALLOC;
+
+    NonnullRefPtr<Compositor::Presentation> presentation;
+    Optional<Compositor::AsyncScrollingStamp> async_scrolling_stamp;
+    Compositing::ScrollStateSnapshot scroll_state_snapshot;
+    // What the recording the flight presents is published with, but for the visual context tree the flight made it
+    // against. The present stage makes the recording.
+    GC::Ref<DOM::Document> document;
+    void* arena { nullptr };
+    Compositing::DisplayListResourceStorage& resource_storage;
+    Optional<Color> surface_clear_color;
+    DevicePixelRect device_viewport_rect;
+    Painting::BlockingWheelEventRegionState wheel_event_region_state;
+    u64 hit_test_display_list_invalidations { 0 };
+    OwnPtr<Painting::PendingDisplayListRecording> recording;
+};
+
+}
+
+// The present stage of a flight, on the render side: presents what the flight recorded as the presentation stage of a
+// frame in flight does, from what the flight prepared.
+static void present_from_flight(void* context, void const* visual_context_tree, Gfx::FloatPoint const* scroll_offsets, size_t scroll_offset_count, bool scroll_state_refreshed)
+{
+    auto& flight = *static_cast<FlightPresentation*>(context);
+    auto tree = Compositing::AccumulatedVisualContextTree::adopt_rust_handle(visual_context_tree);
+    flight.recording = make<Painting::PendingDisplayListRecording>(Painting::PendingDisplayListRecording {
+        .document = flight.document,
+        .arena = flight.arena,
+        .resource_storage = flight.resource_storage,
+        .visual_context_tree = tree,
+        .cache_mode = Painting::PaintCommandCacheMode::ReadWrite,
+        .run = Painting::RecordingRun::InSubmittedFrame,
+        .submitted_ticket = {},
+        .surface_clear_color = flight.surface_clear_color,
+        .device_viewport_rect = flight.device_viewport_rect,
+        .wheel_event_region_state = flight.wheel_event_region_state,
+        .hit_test_display_list_invalidations = flight.hit_test_display_list_invalidations,
+        .timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise),
+    });
+    flight.presentation->recording = flight.recording.ptr();
+    auto scroll_state_snapshot = flight.scroll_state_snapshot;
+    if (scroll_state_refreshed) {
+        auto adopted_async_scroll_sequence = scroll_state_snapshot.adopted_async_scroll_sequence();
+        scroll_state_snapshot.assign_device_offsets({ scroll_offsets, scroll_offset_count });
+        scroll_state_snapshot.set_adopted_async_scroll_sequence(adopted_async_scroll_sequence);
+    }
+    // NB: The flight updated the visual contexts, which the frame takes to the compositor.
+    flight.presentation->source = Compositor::SealedPresentationSource { move(tree), flight.async_scrolling_stamp, true, move(scroll_state_snapshot) };
+    present_frame_in_flight(flight.presentation.ptr());
+}
+
+// What the recording that a document's flight makes after its layout reads of the navigable, sealed where the flight
+// was submitted.
+struct LocalNavigable::FlightPaintSeal {
+    AK_ALLOC_WITH_KMALLOC;
+
+    PaintConfig paint_config;
+    Painting::FlightRecordingSeal recording;
+    u64 hit_test_display_list_invalidations { 0 };
+    bool handed_accumulated_visual_contexts_update { false };
+    // Where the render side presents, how the flight presents what it records. The presenter is lent to the flight,
+    // and retiring the compositor context it presents to waits for the flight and takes it in.
+    OwnPtr<FlightPresentation> presentation;
+    Optional<u64> held_compositor_context;
+};
+
+bool LocalNavigable::seal_flight_paint(DOM::Document& document, bool may_present)
+{
+    auto decline = flight_paint_decline(document);
+    HTML::main_thread_event_loop().did_seal_flight_paint(decline);
+    if (decline.has_value())
+        return false;
+    return seal_flight_paint_now(document, may_present);
+}
+
+// Why the flight cannot paint the navigable, if it cannot.
+Optional<Painting::FlightPaintDecline> LocalNavigable::flight_paint_decline(DOM::Document& document) const
+{
+    using Painting::FlightPaintDecline;
+    // The flight paints the navigable as step 22 of the rendering update would, and only where nothing painted beside
+    // the main thread's own steps would differ.
+    if (has_been_destroyed() || !has_compositor_context() || active_document().ptr() != &document)
+        return FlightPaintDecline::Inactive;
+    if (!is_local_root()) {
+        // Nested navigables paint transparent bitmaps for their parent compositor context.
+        auto parent = this->parent();
+        if (!parent || !as<LocalNavigable>(*parent).has_compositor_context())
+            return FlightPaintDecline::Inactive;
+    }
+    // NB: Whether the document opts out of force-dark depends on its root's box, which the flight has yet to lay out.
+    if (has_inclusive_ancestor_with_visibility_hidden() || is_svg_page() || m_should_show_line_box_borders || m_should_show_caret_hit_test_debug_overlay || m_force_dark_enabled)
+        return FlightPaintDecline::NotPaintedThatWay;
+    if (m_presenter->is_lent_to_frame_in_flight())
+        return FlightPaintDecline::PresenterLent;
+    if (document.font_computer().should_defer_initial_paint() || !document.has_paint_state() || !document.has_committed_viewport_box())
+        return FlightPaintDecline::NothingToPaintYet;
+    return document.flight_paint_blocker();
+}
+
+bool LocalNavigable::seal_flight_paint_now(DOM::Document& document, bool may_present)
+{
+    VERIFY(!m_flight_paint_seal);
+
+    PaintConfig paint_config { .paint_overlay = true, .should_show_caret_hit_test_debug_overlay = m_should_show_caret_hit_test_debug_overlay };
+    paint_config.force_dark_enabled = false;
+    paint_config.force_dark_foreground_threshold = m_force_dark_foreground_threshold;
+    paint_config.force_dark_background_threshold = m_force_dark_background_threshold;
+    paint_config.should_show_line_box_borders = m_should_show_line_box_borders;
+    if (is_local_root()) {
+        auto viewport_size = page().css_to_device_rect(viewport_rect()).size().to_type<int>();
+        paint_config.canvas_fill_rect = Gfx::IntRect { {}, viewport_size };
+    }
+
+    Painting::InspectorOverlayInputs overlay_inputs;
+    auto const& palette = page().palette();
+    overlay_inputs.tooltip_color = palette.color(Gfx::ColorRole::Tooltip);
+    overlay_inputs.tooltip_text_color = palette.color(Gfx::ColorRole::TooltipText);
+    overlay_inputs.tooltip_border_color = palette.threed_shadow1();
+
+    // The canvases the rendering update drew so far show in the recording, as step 22 flushes them before it paints.
+    page().prepare_canvas_contexts_for_compositing();
+    auto hit_test_display_list_invalidations = document.hit_test_display_list_invalidations();
+
+    // The flight presents what it records too, unless what its layout leaves the document to do could ask for another
+    // layout first. What is known to ask for one already keeps the flight from presenting.
+    // The flight presents the keyboard scroll state of the last frame, which it cannot take again before its layout:
+    // once that state is invalidated, the frame is presented from the main thread, which takes the state anew.
+    auto keyboard_scroll_state_of_last_frame_is_current = [&] {
+        return m_keyboard_scroll_state_of_last_frame.has_value()
+            && (!is_top_level_traversable() || page().keyboard_scroll_state_is_current(m_keyboard_scroll_state_of_last_frame->generation));
+    };
+    OwnPtr<FlightPresentation> flight_presentation;
+    if (may_present && Layout::RustFFI::rust_stage_thread_submits() && keyboard_scroll_state_of_last_frame_is_current()) {
+        if (auto frame_sink = compositor_context().prepare_to_submit_frame_from_render_side()) {
+            auto& document_paint_state = document.paint_state();
+            Compositing::ScrollStateSnapshot scroll_state_snapshot { document_paint_state.scroll_state_snapshot() };
+            scroll_state_snapshot.set_adopted_async_scroll_sequence(m_adopted_async_scroll_sequence);
+            Optional<Compositor::AsyncScrollingStamp> async_scrolling_stamp = Compositor::AsyncScrollingStamp {
+                .wheel_event_listener_state_generation = page().wheel_event_listener_state_generation(),
+                .device_pixels_per_css_pixel = page().client().device_pixels_per_css_pixel(),
+            };
+            auto presentation = adopt_ref(*new Compositor::Presentation(
+                Compositor::SealedPresentationSource { {}, async_scrolling_stamp, true, scroll_state_snapshot },
+                Compositor::PresentationInputs {
+                    .context_id = compositor_context().id(),
+                    .paint_config = paint_config,
+                    .keyboard_scroll_state = *m_keyboard_scroll_state_of_last_frame,
+                    .paint_command_cache_source_resources = document_paint_state.paint_command_cache_source_referenced_resources(),
+                    .present_viewport_rect = page().css_to_device_rect(viewport_rect()).to_type<int>(),
+                },
+                document_paint_state.display_list_used_as_paint_command_cache_source()));
+            auto* arena = Layout::document_layout_arena(document);
+            presentation->presenter = presenter();
+            presentation->render_state_generation = Layout::RustFFI::layout_arena_render_state_generation(arena);
+            presentation->frame_sink = move(frame_sink);
+            presentation->is_presented_by_frame_in_flight = true;
+            // The recording's viewport and wheel regions are filled in once they are sealed below.
+            flight_presentation = make<FlightPresentation>(FlightPresentation {
+                .presentation = move(presentation),
+                .async_scrolling_stamp = async_scrolling_stamp,
+                .scroll_state_snapshot = move(scroll_state_snapshot),
+                .document = document,
+                .arena = arena,
+                .resource_storage = presenter().resource_storage(),
+                .surface_clear_color = is_top_level_traversable() ? Optional<Color> { document.canvas_background_color_as_last_laid_out() } : Optional<Color> {},
+                .device_viewport_rect = {},
+                .wheel_event_region_state = {},
+                .hit_test_display_list_invalidations = hit_test_display_list_invalidations,
+                .recording = {},
+            });
+        }
+    }
+
+    auto recording = Painting::seal_rust_display_list_recording_for_flight(document, presenter().resource_storage(), paint_config, overlay_inputs,
+        flight_presentation ? present_from_flight : nullptr, flight_presentation.ptr());
+    Optional<u64> held_compositor_context;
+    if (flight_presentation) {
+        flight_presentation->device_viewport_rect = recording.device_viewport_rect;
+        flight_presentation->wheel_event_region_state = recording.wheel_event_region_state;
+        m_presenter->lend_to_frame_in_flight();
+        held_compositor_context = compositor_context().id().value();
+        Layout::RustFFI::rust_frame_hold_compositor_context(*held_compositor_context);
+    }
+    m_flight_paint_seal = make<FlightPaintSeal>(FlightPaintSeal {
+        .paint_config = paint_config,
+        .recording = recording,
+        .hit_test_display_list_invalidations = hit_test_display_list_invalidations,
+        .handed_accumulated_visual_contexts_update = document.hand_accumulated_visual_contexts_update_to_flight(),
+        .presentation = move(flight_presentation),
+        .held_compositor_context = held_compositor_context,
+    });
+    // What asks for another paint beside the flight asks for the next one.
+    m_needs_repaint = false;
+    m_needs_to_record_display_list = false;
+    return true;
+}
+
+LocalNavigable::FinishedFlightPaint LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd end)
+{
+    auto seal = move(m_flight_paint_seal);
+    VERIFY(seal);
+    if (seal->held_compositor_context.has_value())
+        Layout::RustFFI::rust_frame_release_compositor_context(*seal->held_compositor_context);
+    if (document.has_paint_state())
+        document.take_in_flight_paint(seal->handed_accumulated_visual_contexts_update);
+
+    // A flight that presented handed its frame to the compositor already: the navigable takes in what it presented, as
+    // it does a frame the frame in flight presented. A flight sealed to present that did not gives the presenter back.
+    if (auto presentation = move(seal->presentation)) {
+        if (end == FlightPaintEnd::Presented || end == FlightPaintEnd::PresentedAheadOfMoreWork) {
+            VERIFY(presentation->recording);
+            if (document.has_paint_state())
+                document.paint_state().did_update_visual_context_tree_in_compositor();
+            PendingCompositorFrame presented_frame {
+                .document = document,
+                .paint_config = seal->paint_config,
+                .keyboard_scroll_state = presentation->presentation->inputs.keyboard_scroll_state,
+                .recording = move(presentation->recording),
+                .presentation = presentation->presentation,
+            };
+            finish_painting_next_frame(presented_frame);
+            ++m_frames_presented_by_flights;
+            // The frame shows what the flight laid out. Should the layout's host halves have left more work, or a task
+            // beside the flight have changed what it laid out, the rendering update paints again.
+            if (end == FlightPaintEnd::PresentedAheadOfMoreWork || !document.has_paint_state() || !document.layout_is_up_to_date()) {
+                m_needs_repaint = m_needs_to_record_display_list = true;
+                return { .handed_off = true, .paints_again_after_recording = true };
+            }
+            return { .handed_off = true };
+        }
+        m_presenter->take_back_from_frame_in_flight();
+    }
+    auto paint_again = [&] {
+        m_needs_repaint = true;
+        m_needs_to_record_display_list = true;
+    };
+    if (end == FlightPaintEnd::NotRecorded || !document.has_paint_state()) {
+        paint_again();
+        return { .paints_again_after_recording = end != FlightPaintEnd::NotRecorded };
+    }
+
+    // https://drafts.csswg.org/css-color-adjust-1/#color-scheme-effect
+    // On the root element, the used color scheme additionally must affect the surface color of the canvas, and the viewport’s scrollbars.
+    Optional<Color> canvas_background_color;
+    if (is_top_level_traversable())
+        canvas_background_color = document.canvas_background_color_as_last_laid_out();
+
+    // NB: The flight recorded against the visual context tree it updated, which nothing has changed since: the frame
+    //     in flight owned the arena until now.
+    auto recording = make<Painting::PendingDisplayListRecording>(Painting::PendingDisplayListRecording {
+        .document = document,
+        .arena = Layout::document_layout_arena(document),
+        .resource_storage = presenter().resource_storage(),
+        .visual_context_tree = document.paint_state().visual_context_tree_without_update(document),
+        .cache_mode = Painting::PaintCommandCacheMode::ReadWrite,
+        .run = Painting::RecordingRun::InSubmittedFrame,
+        .submitted_ticket = {},
+        .surface_clear_color = canvas_background_color,
+        .device_viewport_rect = seal->recording.device_viewport_rect,
+        .wheel_event_region_state = seal->recording.wheel_event_region_state,
+        .hit_test_display_list_invalidations = seal->hit_test_display_list_invalidations,
+        .timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise),
+    });
+    if (Painting::discard_retired_rust_display_list_recording(*recording)) {
+        paint_again();
+        return { .paints_again_after_recording = true };
+    }
+
+    // The recording does not stand if paying the layout's host halves left more work, if a task beside the flight tore
+    // down what it recorded for or changed what it laid out, or if the layout gave the root a box showing another canvas
+    // than the one the flight read ahead of it. It is published all the same, for the paint caches it filled to stay in
+    // step with the display list they point into, and shows nowhere: the rendering update paints what is there now.
+    auto shows_sealed_canvas = [&] {
+        return CSS::SystemColor::canvas(document.canvas_color_scheme_as_last_laid_out()) == seal->recording.canvas_color && document.background_color() == seal->recording.background_color;
+    };
+    bool const stands = end == FlightPaintEnd::Recorded && !has_been_destroyed() && has_compositor_context() && active_document().ptr() == &document
+        && document.layout_is_up_to_date() && shows_sealed_canvas();
+    if (!stands) {
+        (void)document.finish_display_list_recording(*recording);
+        paint_again();
+        return { .paints_again_after_recording = true };
+    }
+    if (canvas_background_color.has_value())
+        page().client().page_did_change_background_color(*canvas_background_color);
+
+    // Keyboard eligibility reads the DOM and the layout tree as this frame paints them, which they are again now.
+    auto keyboard_scroll_state = is_top_level_traversable()
+        ? page().take_keyboard_scroll_state_for_compositor(Compositor::keyboard_scroll_epoch_placeholder)
+        : Compositing::KeyboardScrollState {};
+    PendingCompositorFrame pending_frame {
+        .document = document,
+        .paint_config = seal->paint_config,
+        .keyboard_scroll_state = move(keyboard_scroll_state),
+        .recording = move(recording),
+        .presentation = {},
+    };
+    pending_frame.presentation = seal_presentation(pending_frame);
+    if (pending_frame.presentation)
+        pending_frame.presentation->inputs.present_viewport_rect = page().css_to_device_rect(viewport_rect()).to_type<int>();
+    finish_painting_next_frame(pending_frame);
+    return { .handed_off = true };
+}
+
+void LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_frame)
+{
+    // A render clock kit is sealed as this frame was.
+    m_keyboard_scroll_state_of_last_frame = pending_frame.keyboard_scroll_state;
+    if (pending_frame.recording) {
+        m_last_painted_frame_for_render_clock = LastPaintedFrame {
+            .paint_config = pending_frame.paint_config,
+            .keyboard_scroll_state = pending_frame.keyboard_scroll_state,
+            .recording = make<Painting::PendingDisplayListRecording>(*pending_frame.recording),
+        };
+    }
+    if (pending_frame.presentation && pending_frame.presentation->is_presented_by_frame_in_flight) {
+        adopt_presented_frame(pending_frame);
+        return;
+    }
+    auto frame = finish_compositor_frame(pending_frame);
+    if (!frame.has_value())
+        return;
+    if (!pending_frame.presentation)
+        frame->present_viewport_rect = page().css_to_device_rect(this->viewport_rect()).to_type<int>();
+    submit_compositor_frame(frame.release_value());
 }
 
 bool LocalNavigable::paint_next_frame_if_needed(DOM::UpdateLayoutReason layout_reason)
@@ -6828,7 +7490,12 @@ bool LocalNavigable::paint_next_frame_if_needed(DOM::UpdateLayoutReason layout_r
         document->update_layout(layout_reason);
         if (document->font_computer().should_defer_initial_paint())
             return false;
+        // NB: A layout frame that runs beside this thread lets tasks run while the update above does; see
+        //     EventLoop::update_the_rendering().
+        if (active_document() != document || !document->has_committed_viewport_box() || !document->layout_is_up_to_date())
+            return false;
     }
+    TemporaryChange origin { Painting::current_recording_origin(), Painting::RecordingOrigin::PaintIfNeeded };
     paint_next_frame();
     return true;
 }
@@ -6849,6 +7516,7 @@ void LocalNavigable::render_screenshot(Gfx::PaintingSurface& painting_surface, P
             navigable->paint_next_frame_if_needed(DOM::UpdateLayoutReason::ProcessScreenshot);
     }
 
+    TemporaryChange origin { Painting::current_recording_origin(), Painting::RecordingOrigin::Screenshot };
     if (!record_display_list_and_scroll_state(paint_config)) {
         callback();
         return;
@@ -6907,19 +7575,19 @@ GC::Ref<WebIDL::Promise> LocalNavigable::perform_a_scroll_of_a_scrolling_box(Com
     if (trigger == ScrollTrigger::Programmatic && destination_snapping == DestinationSnapping::SelectSnapPosition) {
         abandon_snapping_of_user_scroll_gesture(stable_node_id);
         document->update_layout(DOM::UpdateLayoutReason::ElementScroll);
-        if (auto const* snap_container = layout_node_for_async_scroll_node(*document, stable_node_id)) {
+        if (auto snap_container = Painting::scrolling_box_for_async_scroll_node_stable_id(*document, stable_node_id)) {
             Compositing::SnapSelectionStrategy strategy;
             if (relative_displacement.has_value() && !relative_displacement->is_zero())
                 strategy = { Compositing::SnapSelectionStrategy::Type::EndPositionAndDirection, *initial_scroll_offset, *relative_displacement };
-            auto snap_destination = Painting::adjust_scroll_destination_for_snapping(*snap_container, position, strategy);
+            auto snap_destination = Painting::adjust_scroll_destination_for_snapping(snap_container, position, strategy);
             position = snap_destination.position;
             record_snapped_areas_of_scroll_container(*document, stable_node_id, snap_destination);
         }
     }
 
     if (scroll_kind == Painting::ScrollKind::Relative || relative_displacement.has_value()) {
-        if (auto* scrolling_box = committed_scrolling_box_for_async_scroll_node(*document, stable_node_id))
-            record_relative_scroll(*document, stable_node_id, initial_scroll_offset, Painting::clamp_scroll_offset(*scrolling_box, position));
+        if (auto scrolling_box = committed_scrolling_box_for_async_scroll_node(*document, stable_node_id))
+            record_relative_scroll(*document, stable_node_id, initial_scroll_offset, Painting::clamp_scroll_offset(scrolling_box, position));
     }
 
     auto should_scroll_smoothly = behavior == Bindings::ScrollBehavior::Smooth;
@@ -7028,7 +7696,7 @@ GC::Ref<WebIDL::Promise> LocalNavigable::perform_a_scroll_of_an_element(DOM::Ele
         position, behavior, element, ScrollTrigger::Programmatic, relative_displacement);
 }
 
-bool LocalNavigable::perform_a_scroll_step_for_key_input(Layout::Node& scroll_container, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type strategy_type)
+bool LocalNavigable::perform_a_scroll_step_for_key_input(Painting::BoxSlot const& scroll_container, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type strategy_type)
 {
     if (perform_a_snapped_relative_user_scroll(scroll_container, delta, strategy_type, SnapStepAccumulation::UntilScrollFinishes))
         return true;
@@ -7067,7 +7735,7 @@ bool LocalNavigable::perform_a_scroll_step_for_key_input(Layout::Node& scroll_co
     return true;
 }
 
-bool LocalNavigable::perform_a_snapped_relative_user_scroll(Layout::Node& scroll_container, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type strategy_type, SnapStepAccumulation step_accumulation, Compositing::ScrollAnimationKind animation_kind)
+bool LocalNavigable::perform_a_snapped_relative_user_scroll(Painting::BoxSlot const& scroll_container, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type strategy_type, SnapStepAccumulation step_accumulation, Compositing::ScrollAnimationKind animation_kind)
 {
     auto document = active_document();
     if (!document)
@@ -7140,7 +7808,7 @@ bool LocalNavigable::perform_a_snapped_relative_user_scroll(Layout::Node& scroll
 }
 
 // https://drafts.csswg.org/css-scroll-snap-1/#choosing
-bool LocalNavigable::perform_a_snapped_momentum_scroll(Layout::Node& scroll_container, CSSPixelPoint momentum_delta)
+bool LocalNavigable::perform_a_snapped_momentum_scroll(Painting::BoxSlot const& scroll_container, CSSPixelPoint momentum_delta)
 {
     if (m_momentum_snap_position_selection == MomentumSnapPositionSelection::ScrollingToSelectedPosition)
         return true;
@@ -7237,8 +7905,9 @@ GC::Ref<WebIDL::Promise> LocalNavigable::perform_a_scroll_of_the_viewport(CSSPix
     // NB: Must update layout before accessing paintables.
     doc->update_layout(DOM::UpdateLayoutReason::NavigableViewportScroll);
 
-    auto minimum_scroll_offset = Painting::minimum_scroll_offset(*doc->layout_node()).to_type<double>();
-    auto maximum_scroll_offset = Painting::maximum_scroll_offset(*doc->layout_node()).to_type<double>();
+    auto viewport_box = Painting::BoxSlot::viewport_of(*doc);
+    auto minimum_scroll_offset = Painting::minimum_scroll_offset(viewport_box).to_type<double>();
+    auto maximum_scroll_offset = Painting::maximum_scroll_offset(viewport_box).to_type<double>();
     auto new_viewport_scroll_offset = m_viewport_scroll_offset.to_type<double>() + Gfx::Point(layout_dx, layout_dy);
     // NOTE: Clamp to the scrolling area.
     new_viewport_scroll_offset.set_x(clamp(new_viewport_scroll_offset.x(), minimum_scroll_offset.x(), maximum_scroll_offset.x()));

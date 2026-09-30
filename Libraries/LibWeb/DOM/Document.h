@@ -18,6 +18,7 @@
 #include <AK/Optional.h>
 #include <AK/OwnPtr.h>
 #include <AK/RefPtr.h>
+#include <AK/SourceLocation.h>
 #include <AK/Utf16FlyString.h>
 #include <AK/Utf16String.h>
 #include <AK/Utf16View.h>
@@ -36,10 +37,11 @@
 #include <LibWeb/CSS/CustomPropertyRegistration.h>
 #include <LibWeb/CSS/ScrollStateContainerQuery.h>
 #include <LibWeb/CSS/StyleScope.h>
-#include <LibWeb/DOM/AnchorNameMap.h>
 #include <LibWeb/DOM/HoverEventData.h>
+#include <LibWeb/DOM/LayoutOverlapBlocker.h>
 #include <LibWeb/DOM/ParentNode.h>
 #include <LibWeb/DOM/Range.h>
+#include <LibWeb/DOM/RenderInputs.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/ViewportClient.h>
 #include <LibWeb/Export.h>
@@ -60,6 +62,7 @@
 #include <LibWeb/Painting/HitTestResult.h>
 #include <LibWeb/Painting/ScrollSnap.h>
 #include <LibWeb/ResizeObserver/ResizeObserver.h>
+#include <LibWeb/SVG/SVGPatternElement.h>
 #include <LibWeb/SVG/SVGUseElement.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 #include <LibWeb/XPath/EvaluateResult.h>
@@ -187,6 +190,12 @@ enum class UpdateLayoutReason {
     ENUMERATE_UPDATE_LAYOUT_REASONS(ENUMERATE_UPDATE_LAYOUT_REASON)
 #undef ENUMERATE_UPDATE_LAYOUT_REASON
 };
+
+static constexpr size_t update_layout_reason_count = 0
+#define ENUMERATE_UPDATE_LAYOUT_REASON(e, reads_layout_geometry) +1
+    ENUMERATE_UPDATE_LAYOUT_REASONS(ENUMERATE_UPDATE_LAYOUT_REASON)
+#undef ENUMERATE_UPDATE_LAYOUT_REASON
+    ;
 
 [[nodiscard]] constexpr bool reason_reads_layout_geometry(UpdateLayoutReason reason)
 {
@@ -381,8 +390,6 @@ public:
 
     void for_each_active_css_style_sheet(Function<void(CSS::StyleSheetState&)> const& callback) const;
 
-    double ensure_element_shared_css_random_base_value(CSS::RandomCachingKey const&);
-
     Optional<Utf16String> get_style_sheet_source(CSS::StyleSheetIdentifier const&) const;
 
     virtual Utf16FlyString node_name() const override { return "#document"_utf16_fly_string; }
@@ -396,8 +403,8 @@ public:
 
     void set_highlighted_node(GC::Ptr<Node>, Optional<CSS::PseudoElement>);
     GC::Ptr<Node const> highlighted_node() const { return m_highlighted_node; }
-    Layout::Node* highlighted_layout_node();
-    Layout::Node const* highlighted_layout_node() const { return const_cast<Document*>(this)->highlighted_layout_node(); }
+    // The box of the highlighted node, or of its highlighted pseudo-element.
+    Painting::BoxSlot highlighted_box() const;
     void set_flexbox_highlighted_node(GC::Ptr<Node>, Painting::FlexboxInspectorOverlayOptions);
     void clear_flexbox_highlighted_node(GC::Ptr<Node>);
     void set_grid_highlighted_node(GC::Ptr<Node>, Painting::GridInspectorOverlayOptions);
@@ -451,13 +458,32 @@ public:
     bool style_engine_tracks_tree() const { return m_style_engine_tracks_tree; }
     void ensure_style_engine_tracks_tree();
 
+    [[nodiscard]] CSS::StyleNodeID style_node_id() const { return m_style_node_id; }
+    void set_style_node_id(CSS::StyleNodeID style_node_id) { m_style_node_id = style_node_id; }
+
     Page& page();
     Page const& page() const;
     GC::Ref<EventTarget> relevant_global_event_target() const { return m_relevant_global_event_target; }
 
     Color background_color() const;
     Color canvas_background_color() const;
+    Color canvas_background_color_as_last_laid_out() const;
+    u64 hit_test_display_list_invalidations() const { return m_hit_test_display_list_invalidations; }
+    // Whether something the document shows keeps its flight from recording it after its layout: what only the main
+    // thread paints (inspector overlays, a caret, a focused text control or area) or what the rendering update's steps
+    // after its layout can change before its paint (resize observers, animations, view transitions, scroll-state
+    // queries, nested navigables).
+    Optional<Painting::FlightPaintDecline> flight_paint_blocker() const;
+    // Hands the pending accumulated visual contexts update to the flight about to be submitted, which runs it.
+    bool hand_accumulated_visual_contexts_update_to_flight() { return exchange(m_needs_accumulated_visual_contexts_update, false); }
+    [[nodiscard]] bool accumulated_visual_contexts_are_up_to_date() const { return !m_needs_accumulated_visual_contexts_update; }
+    // Takes in what the document's flight prepared of its paint state. A flight that prepared nothing hands back the
+    // accumulated visual contexts update it was handed.
+    void take_in_flight_paint(bool handed_accumulated_visual_contexts_update);
     CSS::PreferredColorScheme canvas_color_scheme() const;
+    // The canvas color scheme as the root's box last laid out shows it, which a flight's seal reads ahead of the layout
+    // the flight runs.
+    CSS::PreferredColorScheme canvas_color_scheme_as_last_laid_out() const;
     CSS::ImageRendering background_image_rendering() const;
 
     Optional<Color> normal_link_color() const;
@@ -480,7 +506,7 @@ public:
     void obtain_theme_color();
 
     void update_style();
-    void note_throttled_animation_style_update() { m_has_throttled_animation_style_update = true; }
+    void note_throttled_animation_style_update() { render_inputs_for_write().set_has_throttled_animation_style_update(true); }
     void flush_throttled_animation_style_update();
     void flush_throttled_animation_style_update_for_node(Node const&);
     void schedule_compositor_animation_wakeup(double delay_ms);
@@ -510,24 +536,58 @@ public:
     };
     void update_layout(UpdateLayoutReason);
     void update_layout(UpdateLayoutReason, ThrottledAnimationSamplingScope);
-    void update_style_and_layout_once(UpdateLayoutReason, ThrottledAnimationSamplingScope);
-    void note_content_visibility_auto_style() { m_may_have_content_visibility_auto_style = true; }
+    enum class LayoutPassSubmission : u8 {
+        Wait,
+        MaySubmit,
+    };
+    // Returns true if the update's full layout pass was submitted to run beside the main thread. The update then ends
+    // once the frame in flight is taken back.
+    bool update_style_and_layout_once(UpdateLayoutReason, ThrottledAnimationSamplingScope, LayoutPassSubmission = LayoutPassSubmission::Wait);
+    // The rendering update's layout update, whose full layout pass runs beside the main thread. Returns true if it does;
+    // the rendering update goes on once the frame is taken back.
+    [[nodiscard]] bool submit_layout_for_rendering_update();
+    // Hands the clock lease's ticks a fresh layout frame to lay out in, with the document as it stands now.
+    void renew_clock_layout_frame();
+    // The rendering update's style update, whose first pass runs beside the main thread. Returns true if it does; the
+    // rendering update goes on once the frame is taken back.
+    [[nodiscard]] bool submit_style_for_rendering_update();
+    // Runs the rest of the style update submit_style_for_rendering_update() submitted, once its frame is taken back.
+    void finish_submitted_style_update();
+    [[nodiscard]] bool has_submitted_style_update() const;
     void update_layout_if_needed_for_node(Node const&, UpdateLayoutReason);
+    // Updates the layout for a geometry read about `element`, and answers the read from the update that ran for it on the
+    // Rendering thread, if one did and could.
+    Optional<Layout::RustFFI::FfiGeometryReadAnswer> update_layout_answering_geometry_read(Element const&, UpdateLayoutReason, Layout::RustFFI::FfiGeometryReadKind);
     [[nodiscard]] u64 partial_layout_count() const;
     [[nodiscard]] u64 full_layout_count() const;
     [[nodiscard]] bool layout_is_up_to_date() const;
+    // The marks the DOM side has made on this document's render state but not written there yet.
+    // Marks made beside the layout frame in flight are held apart until the frame is over.
+    [[nodiscard]] InvalidationJournal& invalidation_journal();
+    void drain_invalidation_journal() const;
+    // Hands the journal what was marked beside the frame in flight, once the frame is over and the
+    // document holds its render state again. Whoever ends a frame calls it.
+    void release_held_invalidation_marks();
+    // Waits for this document's layout frame if it runs beside the document thread. A read of what
+    // the frame writes, or a write to what it reads, joins it first. The call site names itself in
+    // the forced-join log.
+    void join_frame_in_flight(SourceLocation = SourceLocation::current()) const;
+    // Like join_frame_in_flight(), for a change of what the style drain reads on the main thread (the animations an
+    // element holds, the fonts it resolves against): a style pass in flight is drained first. What the change sends
+    // the engine goes behind any frame.
+    void join_frame_before_style_drain_reads(SourceLocation = SourceLocation::current()) const;
+    // What the render side has told this document and the document has not acted on yet.
+    [[nodiscard]] CommitMessages& commit_messages() { return *m_commit_messages; }
+    void apply_commit_messages();
     void clear_devtools_layout_inspection_data();
     void prepare_for_rendering();
     void update_paint_and_hit_testing_properties_if_needed();
     void sample_animation_effects_needing_style_update();
     void update_style_computer_viewport_rect();
-    bool needs_animated_style_update() const { return m_needs_animated_style_update; }
-    void clear_needs_animated_style_update()
-    {
-        m_needs_animated_style_update = false;
-        m_effects_needing_animated_style_update.clear();
-        m_effects_needing_animated_style_update_after_current_update.clear();
-    }
+    bool needs_animated_style_update() const { return render_inputs().needs_animated_style_update(); }
+    void clear_needs_animated_style_update();
+    // Whether the document thread runs as part of this document's layout frame, in one of its joins
+    // or running the frame itself. Beside a frame in flight, it does not.
     [[nodiscard]] bool is_running_update_layout() const;
 
     void invalidate_layout_tree(InvalidateLayoutTreeReason);
@@ -536,15 +596,17 @@ public:
 
     virtual bool is_child_allowed(Node const&) const override;
 
-    Layout::Viewport const* layout_node() const;
-    Layout::Viewport* layout_node();
-
-    Layout::Viewport const* unsafe_layout_node() const;
-    Layout::Viewport* unsafe_layout_node();
+    // The row the document's layout tree is rooted at. The tree build records it in the arena, so
+    // the document keeps no copy of its own.
+    [[nodiscard]] Compositing::RustFFI::NodeSlotId layout_root_slot() const;
+    [[nodiscard]] bool has_layout_root() const { return layout_root_slot().index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX; }
     bool has_committed_viewport_box() const;
 
     Painting::DocumentPaintState& paint_state();
     Painting::DocumentPaintState const& paint_state() const;
+    [[nodiscard]] bool has_paint_state() const { return m_paint_state; }
+    // Gives the layout tree a tree build placed in place of the one before a new paint state.
+    void renew_paint_state();
     Compositing::AccumulatedVisualContextTree visual_context_tree() const;
     u64 visual_context_tree_structural_epoch() const;
     Compositing::ScrollStateSnapshot const& scroll_state_snapshot() const;
@@ -790,12 +852,12 @@ public:
     void run_the_scroll_steps();
 
     void evaluate_media_queries_and_report_changes();
-    bool needs_media_rule_evaluation() const { return m_needs_media_rule_evaluation; }
+    bool needs_media_rule_evaluation() const { return render_inputs().needs_media_rule_evaluation(); }
     void evaluate_media_rules_for_style_update() { evaluate_media_rules(); }
     void set_needs_media_query_evaluation()
     {
         m_needs_media_query_list_evaluation = true;
-        m_needs_media_rule_evaluation = true;
+        render_inputs_for_write().set_needs_media_rule_evaluation(true);
     }
     void add_media_query_list(GC::Ref<CSS::MediaQueryList>);
 
@@ -860,13 +922,25 @@ public:
     }
     void set_needs_registered_properties_cache_update() { m_needs_registered_properties_cache_update = true; }
     void set_needs_container_query_evaluation_after_layout(Element const& query_container);
+    [[nodiscard]] bool has_size_containers_needing_evaluation_after_layout() const;
 
     [[nodiscard]] bool needs_full_layout_tree_update() const;
     void set_needs_full_layout_tree_update(bool);
+    // The document's style a layout round hands its tree build, which the render owner reads while the document waits
+    // for the round's job.
+    void keep_style_for_layout_tree_build(NonnullRefPtr<CSS::ComputedValues const>);
 
     CSS::ScrollStateQueryContainers& scroll_state_query_containers() { return m_scroll_state_query_containers; }
 
-    [[nodiscard]] Layout::NodeArena& layout_node_arena();
+    // The arena of the document's render state, which the document's style engine is born linked to.
+    [[nodiscard]] void* render_state_arena(Badge<CSS::StyleComputer>) const { return m_render_document.handle.arena; }
+    // The handle the render side's entries name the document's layout arena by. The layout host hooks into the render
+    // state on the first ask.
+    void* layout_arena();
+    // The same, or null before the first ask.
+    [[nodiscard]] void* layout_arena_handle() const { return m_render_document.hosts_layout ? m_render_document.handle.arena : nullptr; }
+    // The name the render owner knows the document's render state by, which is invalid (0) before the first ask.
+    [[nodiscard]] Layout::RustFFI::DocumentId render_document_id() const { return m_render_document.hosts_layout ? m_render_document.handle.document : 0; }
     Painting::ChromeWidgetRegistry& chrome_widget_registry() { return *m_chrome_widget_registry; }
     Painting::ChromeWidgetRegistry const& chrome_widget_registry() const { return *m_chrome_widget_registry; }
 
@@ -1004,6 +1078,8 @@ public:
 
     void register_intersection_observer(Badge<IntersectionObserver::IntersectionObserver>, IntersectionObserver::IntersectionObserver&);
     void unregister_intersection_observer(Badge<IntersectionObserver::IntersectionObserver>, IntersectionObserver::IntersectionObserver&);
+    // Whether an intersection observer of the document observes anything, which the rendering update observes.
+    [[nodiscard]] bool has_intersection_observations() const;
 
     void register_resize_observer(Badge<ResizeObserver::ResizeObserver>, ResizeObserver::ResizeObserver&);
     void unregister_resize_observer(Badge<ResizeObserver::ResizeObserver>, ResizeObserver::ResizeObserver&);
@@ -1035,6 +1111,15 @@ public:
 
     GC::Ref<Animations::DocumentTimeline> timeline();
     auto const& last_animation_frame_timestamp() const { return m_last_animation_frame_timestamp; }
+
+    u32 allocate_animation_timeline_identity() { return ++m_next_animation_timeline_identity; }
+    // Publish what the style stage needs to know about animation timing: the current time of every
+    // timeline, and the timing rows of every element whose animations moved since it last published.
+    void publish_animation_environment_for_style_update();
+    // The elements whose timing rows moved since they were last published. Taking them publishes each
+    // and leaves none, so a publication costs what moved, never every animated element.
+    void publish_dirty_animation_timing_rows();
+    void note_dirty_animation_timing_rows(Badge<Animations::Animatable>, Element& element) { m_elements_with_dirty_animation_timing_rows.append(element); }
 
     void associate_with_timeline(GC::Ref<Animations::AnimationTimeline>);
     void disassociate_with_timeline(GC::Ref<Animations::AnimationTimeline>);
@@ -1073,10 +1158,6 @@ public:
     void element_with_name_was_added(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
     void element_with_name_was_removed(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
 
-    // https://drafts.csswg.org/css-anchor-position-1/#determining
-    AnchorNameMap& anchor_name_map() { return m_anchor_name_map; }
-    GC::Ptr<Element> element_by_anchor_name(Utf16FlyString const& name, Node const& querying_node, Function<bool(Element&)> const& is_acceptable) const;
-
     void add_form_associated_element_with_form_attribute(HTML::FormAssociatedElement&);
     void remove_form_associated_element_with_form_attribute(HTML::FormAssociatedElement&);
 
@@ -1104,7 +1185,6 @@ public:
         u64 style_engine_reaction_elements { 0 };
         u64 style_engine_published_reactions { 0 };
         u64 style_engine_record_deltas_applied { 0 };
-        u64 style_engine_materialized_gaps { 0 };
         u64 element_style_recomputations { 0 };
         u64 element_style_noop_recomputations { 0 };
         u64 unchanged_style_record_deltas { 0 };
@@ -1157,7 +1237,6 @@ public:
         u64 registered_properties_cache_rebuilds { 0 };
         u64 scope_rule_cache_builds { 0 };
         u64 style_query_container_scans { 0 };
-        u64 size_query_container_scan_visits { 0 };
         u64 style_engine_transaction_setups { 0 };
         u64 style_engine_transaction_setup_microseconds { 0 };
         // Exclusive intervals within style_update_microseconds. Rust phases subdivide bridge.
@@ -1183,6 +1262,95 @@ public:
     StyleInvalidationCounters& style_invalidation_counters() const { return m_style_invalidation_counters; }
     void reset_style_invalidation_counters() const;
 
+    // What one synchronous read of render state cost, kept for each reason a read names. A read is
+    // a "join": script asks for something that only style or layout can answer, and the answer has
+    // to exist before the read returns.
+    struct JoinCounters {
+        // Every entry into one of the two funnels, including the ones charged to an outer read.
+        u64 calls { 0 };
+        // Reads that found the render state dirty and had to bring it up to date.
+        u64 joins { 0 };
+        // Reads answered from render state that was already up to date.
+        u64 clean_reads { 0 };
+        // Entries that did not measure anything of their own: a read entered while another one was
+        // running, and each pass after the first of a read that ran layout more than once.
+        u64 nested { 0 };
+        u64 total_nanoseconds { 0 };
+        // The part of that spent on reads that found the render state clean. Today a clean read
+        // still walks the pipeline to decide it has nothing to do; a render thread answers it from
+        // the published state instead, so this is time the design gives back outright.
+        u64 clean_read_nanoseconds { 0 };
+        u64 max_nanoseconds { 0 };
+        // Joins that published nothing: the read found render state dirty, ran the pipeline, and
+        // came out with the same style program and the same committed layout it went in with. The
+        // dirty bits said work was owed and the versions say none of it changed anything, so this
+        // counts how conservative the bits are.
+        u64 joins_that_published_nothing { 0 };
+    };
+    using JoinCountersByReason = Array<JoinCounters, update_layout_reason_count>;
+    // Whether style and layout already describe the current DOM, so that a read of layout geometry
+    // needs nothing run before it can be answered.
+    [[nodiscard]] bool is_clean_for_layout_geometry_read() const;
+
+    JoinCountersByReason const& join_counters() const { return m_join_counters; }
+    void reset_join_counters();
+    void dump_join_counters() const;
+
+    // What the main thread writes for the render side to restyle and lay the document out from. Reading it is free;
+    // writing it goes through render_inputs_for_write() only, which takes the query snapshot away first.
+    [[nodiscard]] RenderInputs const& render_inputs() const { return m_render_inputs.inputs(); }
+    [[nodiscard]] RenderInputs& render_inputs_for_write() { return m_render_inputs.for_write(); }
+
+    // A geometry read of a document that has its query snapshot, as has every document that embeds it, reads that
+    // snapshot: no join, no journal drain, no style engine call and nothing asked of the render side. Empty if one of
+    // them has none: something was written to its render inputs since it published one, and the read brings style and
+    // layout up to date first.
+    [[nodiscard]] Optional<Painting::QueryView> query_view_for_clean_read() const;
+    // After a read brought style and layout up to date, publishes what they describe for the reads after it, here and
+    // in every document that embeds this one. UpToDate says the read just updated the accumulated visual contexts as
+    // well.
+    void publish_query_snapshot_after_read(Painting::QueryVisualContexts);
+    // The document adopted what the render clock's ticks installed, and what they laid out is its committed geometry:
+    // the reads answer from `snapshot` where nothing the main thread did since has to be laid out first.
+    void adopt_render_clock_query_snapshot(NonnullRefPtr<Painting::QuerySnapshot const> snapshot);
+    [[nodiscard]] bool may_publish_query_snapshot() const;
+    // A style change marked a layout node for a layout update, as a node's own mark does.
+    void note_style_change_needs_layout_update(Badge<CSS::StyleEffectDrain>)
+    {
+        (void)render_inputs_for_write();
+        set_needs_repaint(InvalidateDisplayList::No);
+    }
+
+    // What the published render state is, rather than what is owed on it. The layout commit
+    // generation counts the commits the arena published; the style transaction version pair names
+    // the last published style transaction. Together they say whether anything a reader could see
+    // has moved since it last looked.
+    [[nodiscard]] u64 layout_commit_generation() const;
+
+    // Measures one read of render state against the reason it named. A read entered while another
+    // one is running is charged to the outer read, so a funnel that delegates to the other funnel
+    // is counted once.
+    class JoinScope {
+        AK_MAKE_NONCOPYABLE(JoinScope);
+        AK_MAKE_NONMOVABLE(JoinScope);
+
+    public:
+        JoinScope(Document&, UpdateLayoutReason);
+        ~JoinScope();
+
+        // Notes a further pass of the same read, which the first pass already charges time for.
+        void note_extra_pass() const;
+
+    private:
+        Document& m_document;
+        UpdateLayoutReason m_reason;
+        u64 m_started_at_nanoseconds { 0 };
+        u64 m_layout_commit_generation { 0 };
+        u64 m_style_transaction_version { 0 };
+        bool m_is_nested { false };
+        bool m_render_state_was_clean { false };
+    };
+
     // Confinement report of the most recent layout tree build, for tests observing whether a
     // partial rebuild stayed inside its rebuilt subtrees.
     [[nodiscard]] Layout::RustFFI::FfiLayoutTreeBuildStats layout_tree_build_stats() const;
@@ -1193,18 +1361,23 @@ public:
     };
     void set_needs_accumulated_visual_contexts_update(bool);
     void note_svg_paint_resources_changed();
+    void register_svg_pattern_element(Badge<SVG::SVGPatternElement>, SVG::SVGPatternElement&);
+    void unregister_svg_pattern_element(Badge<SVG::SVGPatternElement>, SVG::SVGPatternElement&);
+    void republish_inheriting_svg_pattern_attribute_facts();
     bool has_enrolled_svg_paint_resources() const;
     void schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason);
-    bool can_compute_client_rects_without_accumulated_visual_contexts_update(Layout::Node const&) const;
+    bool can_compute_client_rects_without_accumulated_visual_contexts_update(Painting::BoxSlot const&) const;
+    // The document's half of can_compute_client_rects_without_accumulated_visual_contexts_update().
+    bool client_rects_need_no_accumulated_visual_contexts_update() const;
     void schedule_accumulated_visual_context_update(Element&, AccumulatedVisualContextUpdateScope);
-    void schedule_accumulated_visual_context_update(Layout::Node const&, AccumulatedVisualContextUpdateScope);
+    // The same for a box no node identity names, a pseudo-element's for one.
+    void schedule_accumulated_visual_context_update(Painting::BoxSlot const&, AccumulatedVisualContextUpdateScope);
 
     Compositing::SnappedAreas const& snapped_areas_of_scroll_container(Compositing::AsyncScrollNodeStableID const&) const;
     void set_snapped_areas_of_scroll_container(Compositing::AsyncScrollNodeStableID const&, Compositing::SnappedAreas);
-    void forget_snapped_areas_of_scroll_container(Layout::Node const&);
+    void forget_snapped_areas_of_scroll_container(Painting::BoxSlot const&);
 
     void schedule_list_item_renumber(Element& list_owner);
-    void did_render_list_item_counter_value(Element&);
 
     void schedule_scroll_container_resnap() { m_needs_scroll_container_resnap = true; }
     void cancel_scheduled_scroll_container_resnap() { m_needs_scroll_container_resnap = false; }
@@ -1212,8 +1385,19 @@ public:
     void set_may_have_scroll_snap_areas() { m_may_have_scroll_snap_areas = true; }
     [[nodiscard]] bool may_have_scroll_snap_areas() const { return m_may_have_scroll_snap_areas; }
 
-    void register_scroll_snap_container(Layout::Node const&);
-    [[nodiscard]] Vector<WeakPtr<Layout::Node const>> collect_scroll_snap_containers();
+    // Whether a node in this document has ever carried a blocking wheel event listener. It never
+    // goes back to false: a node that stopped carrying one still has descendants whose inherited
+    // state has to be derived when they move.
+    void set_may_have_blocking_wheel_event_listener() { m_may_have_blocking_wheel_event_listener = true; }
+    [[nodiscard]] bool may_have_blocking_wheel_event_listener() const { return m_may_have_blocking_wheel_event_listener; }
+
+    // Whether any node in this document has ever published a paint fact. It never goes back to
+    // false: a node that lost its last fact still has to publish that it did.
+    void set_may_have_dom_paint_facts() { m_may_have_dom_paint_facts = true; }
+    [[nodiscard]] bool may_have_dom_paint_facts() const { return m_may_have_dom_paint_facts; }
+
+    void register_scroll_snap_container(Painting::BoxSlot const&);
+    [[nodiscard]] Vector<Compositing::RustFFI::NodeSlotId> collect_scroll_snap_containers();
 
     virtual Vector<Utf16FlyString> supported_property_names() const override;
     Vector<GC::Ref<DOM::Element>> const& potentially_named_elements() const { return m_potentially_named_elements; }
@@ -1224,6 +1408,18 @@ public:
     [[nodiscard]] size_t broadcast_active_resize_observations();
     [[nodiscard]] bool has_active_resize_observations();
     [[nodiscard]] bool has_skipped_resize_observations();
+
+    // Why this document's step 16 of the rendering update cannot run beside the main thread, if it cannot: resize
+    // observations, pending view transition operations, scroll-state() containers, the first determination of a
+    // content-visibility: auto element's proximity to the viewport and scroll timelines all read the layout the pass
+    // produces and decide within the rendering update whether it lays out again, so no task may run between the pass
+    // and them.
+    [[nodiscard]] Optional<LayoutOverlapBlocker> layout_overlap_blocker();
+
+    // Moves on whenever a style sheet may have come or gone for the document or one of its shadow roots, as with a
+    // scope's rule cache or the document's shadow roots.
+    u64 style_sheet_set_generation() const { return m_style_sheet_set_generation; }
+    void note_style_sheet_set_change() { ++m_style_sheet_set_generation; }
 
     void register_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot&);
     void unregister_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot&);
@@ -1246,7 +1442,7 @@ public:
     void remove_an_element_from_the_top_layer_immediately(GC::Ref<Element>);
     void process_top_layer_removals();
 
-    void set_top_layer_needs_layout_zone_rebuild() { m_top_layer_needs_layout_zone_rebuild = true; }
+    void set_top_layer_needs_layout_zone_rebuild() { render_inputs_for_write().set_top_layer_needs_layout_zone_rebuild(); }
 
     OrderedHashTable<GC::Ref<Element>> const& top_layer_elements() const { return m_top_layer_elements; }
     bool top_layer_pending_removals_contains(GC::Ref<Element> element) const { return m_top_layer_pending_removals.contains(element); }
@@ -1308,7 +1504,14 @@ public:
         set_needs_repaint(should_invalidate_display_list);
     }
 
+    void request_frame_for_journalled_repaint(Badge<InvalidationJournal>);
+
     RefPtr<Compositing::DisplayList> record_display_list(HTML::PaintConfig, Compositing::DisplayListResourceStorage&, Painting::PaintCommandCacheMode);
+    // record_display_list() in two halves, for a recording the render side runs in a submitted frame.
+    Optional<Painting::PendingDisplayListRecording> begin_display_list_recording(HTML::PaintConfig, Compositing::DisplayListResourceStorage&, Painting::PaintCommandCacheMode, Painting::RecordingRun);
+    NonnullRefPtr<Compositing::DisplayList> finish_display_list_recording(Painting::PendingDisplayListRecording&);
+    // Takes in what publishing `recording` made: the hit-test list and the paint command cache source.
+    void adopt_published_recording(Painting::PendingDisplayListRecording const&, Compositor::PublishedDisplayList const&);
     Painting::HitTestDisplayList const* hit_test_display_list() const { return m_hit_test_display_list.ptr(); }
     Painting::HitTestDisplayList const* ensure_hit_test_display_list();
     Optional<Painting::HitTestResult> hit_test(CSSPixelPoint);
@@ -1476,7 +1679,6 @@ public:
 
     RefPtr<SelectorQuery const> selector_query_for(Utf16View) const;
     QuerySelectorResultCache& query_selector_result_cache();
-    IsolatedSelectorQueryEngineCache& isolated_selector_query_engine_cache();
 
     GC::Ptr<HTML::CustomElementRegistry> custom_element_registry() const;
     void set_custom_element_registry(GC::Ptr<HTML::CustomElementRegistry> custom_element_registry) { m_custom_element_registry = custom_element_registry; }
@@ -1499,10 +1701,6 @@ protected:
     void initialize_document();
 
 private:
-    // Whether nothing this document has pending could change layout geometry: style, layout and every input
-    // that feeds them are settled.
-    [[nodiscard]] bool is_clean_for_layout_geometry_read() const;
-
     void did_add_supported_property_name();
     friend struct AdoptedStyleSheetsAccess;
 
@@ -1512,6 +1710,7 @@ private:
     GC::Ref<WebIDL::ObservableArray> adopted_style_sheets() const;
 
     void set_needs_repaint(InvalidateDisplayList = InvalidateDisplayList::PaintCommandsAndHitTestList);
+    void request_frame_for_pending_repaint();
 
     // ^JS::Object
     virtual bool is_dom_document() const final { return true; }
@@ -1521,23 +1720,19 @@ private:
 
     virtual void finalize() override final;
 
-    void tear_down_layout_tree_for_inactive_document();
-    void set_layout_root(Compositing::RustFFI::NodeSlotId viewport_slot);
     void tear_down_layout_tree();
     void process_pending_top_layer_layout_changes();
 
     void update_active_element();
-    void collect_boxes_with_auto_content_visibility();
     bool needs_style_update_after_layout();
     Layout::RustFFI::FfiLayoutUpdateHostCallbacks layout_update_host_callbacks();
+    Layout::RustFFI::FfiLayoutUpdateDocumentFacts layout_update_document_facts();
 
     void process_pending_list_item_renumbers();
-    bool reconcile_stale_list_item_counters_after_tree_build();
-    enum class LayoutTreeChanged : u8 {
-        No,
-        Yes,
-    };
-    void after_layout_commit(LayoutTreeChanged);
+    void apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffects const&);
+    void take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffects const&);
+    void end_layout_frame_update(void* arena);
+    void retire_render_state(Layout::RustFFI::FfiRenderStateRetirement);
 
     void run_unloading_cleanup_steps();
 
@@ -1585,7 +1780,23 @@ private:
     WebIDL::ExceptionOr<RegistryAndIs> flatten_element_creation_options(ElementCreationOptions const&) const;
 
     GC::Ref<Page> m_page;
+    // The document's render state on the render owner, made before the style engine, which is born linked to it, and
+    // dropped with the document.
+    struct RenderDocument {
+        AK_MAKE_NONCOPYABLE(RenderDocument);
+        AK_MAKE_NONMOVABLE(RenderDocument);
+
+    public:
+        RenderDocument();
+        ~RenderDocument();
+
+        Layout::RustFFI::FfiRenderDocument handle;
+        // Whether the layout host has hooked into the state, which it does on the first ask for the layout arena.
+        bool hosts_layout { false };
+    };
+    RenderDocument m_render_document;
     GC::Ptr<CSS::StyleComputer> m_style_computer;
+    RefPtr<CSS::ComputedValues const> m_style_for_layout_tree_build;
     GC::Ptr<CSS::FontComputer> m_font_computer;
     GC::Ptr<CSS::StyleSheetList> m_style_sheets;
     GC::Ptr<Node> m_active_favicon;
@@ -1598,11 +1809,11 @@ private:
     GC::Ptr<HTML::Window> m_window;
     GC::Ref<DOM::EventTarget> m_relevant_global_event_target;
 
-    RefPtr<Layout::NodeArena> m_layout_node_arena;
     OwnPtr<Painting::DocumentPaintState> m_paint_state;
     NonnullRefPtr<Painting::ChromeWidgetRegistry> m_chrome_widget_registry;
-    Layout::Viewport* m_layout_root { nullptr };
-    bool m_may_have_content_visibility_auto_style { false };
+    NonnullOwnPtr<InvalidationJournal> m_invalidation_journal;
+    NonnullOwnPtr<InvalidationJournal> m_held_invalidation_journal;
+    NonnullOwnPtr<CommitMessages> m_commit_messages;
 
     GC::Ptr<Node> m_hovered_node;
     GC::Ptr<Node> m_inspected_node;
@@ -1746,25 +1957,18 @@ private:
 
     // Used by evaluate_media_queries_and_report_changes().
     bool m_needs_media_query_list_evaluation { false };
-    bool m_needs_media_rule_evaluation { false };
     Vector<GC::Weak<CSS::MediaQueryList>> m_media_query_lists;
 
     bool m_has_completed_style_update { false };
     bool m_style_engine_tracks_tree { false };
-    GC::WeakHashSet<Element> m_elements_with_dirty_style_attributes;
+    CSS::StyleNodeID m_style_node_id;
     GC::WeakHashSet<Element> m_elements_with_viewport_dependent_style;
     bool m_suppresses_attribute_style_invalidation { false };
-    HashTable<GC::Ref<Element>> m_query_containers_needing_container_query_evaluation_after_layout;
     CSS::ScrollStateQueryContainers m_scroll_state_query_containers;
 
     bool m_is_decoded_svg { false };
 
-    bool m_needs_animated_style_update { false };
-    GC::WeakHashSet<Animations::KeyframeEffect> m_effects_needing_animated_style_update;
-    GC::WeakHashSet<Animations::KeyframeEffect> m_effects_needing_animated_style_update_after_current_update;
     bool m_is_updating_animated_style { false };
-    bool m_has_throttled_animation_style_update { false };
-    bool m_force_throttled_animation_style_update { false };
     Optional<u64> m_last_forced_throttled_animation_style_update_task_generation;
 
     HashTable<GC::Ptr<NodeIterator>> m_node_iterators;
@@ -1885,8 +2089,8 @@ private:
     Optional<MonotonicTime> m_compositor_animation_wakeup_deadline;
     RefPtr<Core::Timer> m_compositor_animation_observation_timer;
     bool m_force_visual_context_tree_rebuild_on_next_compositor_animation_update_for_testing { false };
-    Vector<WeakPtr<Layout::Node>> m_layout_nodes_with_forced_compositor_effects_layer;
-    Vector<WeakPtr<Layout::Node>> m_layout_nodes_with_forced_compositor_background_color_frame;
+    Vector<Compositing::RustFFI::NodeSlotId> m_layout_nodes_with_forced_compositor_effects_layer;
+    Vector<Compositing::RustFFI::NodeSlotId> m_layout_nodes_with_forced_compositor_background_color_frame;
 
     bool m_temporary_document_for_fragment_parsing { false };
 
@@ -1898,10 +2102,12 @@ private:
 
     // https://www.w3.org/TR/web-animations-1/#timeline-associated-with-a-document
     HashTable<GC::Ref<Animations::AnimationTimeline>> m_associated_animation_timelines;
+    u32 m_next_animation_timeline_identity { 0 };
 
     // NB: Weak so the document does not unnecessarily keep animations alive. Note that this also includes animations
     //     associated with elements in shadow trees so differs from getAnimations()
     GC::WeakHashSet<Animations::Animation> m_associated_animations;
+    Vector<GC::Ref<Element>> m_elements_with_dirty_animation_timing_rows;
 
     // https://www.w3.org/TR/web-animations-1/#document-default-document-timeline
     GC::Ptr<Animations::DocumentTimeline> m_default_timeline;
@@ -1932,33 +2138,48 @@ private:
 
     Vector<GC::Ref<DOM::Element>> m_potentially_named_elements;
 
-    AnchorNameMap m_anchor_name_map;
+    // Every <pattern> in the document's node tree, which is what lets a pattern that inherits
+    // attributes from the pattern its `href` names be republished when the chain changes.
+    SVG::SVGPatternElement::DocumentPatternElementList m_svg_pattern_elements;
 
     bool m_design_mode_enabled { false };
 
     bool m_needs_accumulated_visual_contexts_update { false };
 
     HashMap<Compositing::AsyncScrollNodeStableID, Compositing::SnappedAreas> m_scroll_container_snapped_areas;
-    Vector<WeakPtr<Layout::Node const>> m_scroll_snap_containers;
+    Vector<Compositing::RustFFI::NodeSlotId> m_scroll_snap_containers;
     bool m_needs_scroll_container_resnap { false };
+    // Whether the install of a style batch a flight applied owes a repaint, and whether it invalidates the hit test list.
+    // Whether an image box handed the provider it owns after a layout frame found its image already there, so it
+    // lays out again with it.
+    bool m_owed_image_provider_arrived_with_image { false };
+    // Whether the document is retiring its render state, which takes the frame in flight back first: the rows that
+    // frame leaves effects for are going away, so the document drops them (see take_in_layout_frame_effects()).
+    bool m_retiring_render_state { false };
     bool m_may_have_scroll_snap_areas { false };
+    bool m_may_have_blocking_wheel_event_listener { false };
+    bool m_may_have_dom_paint_facts { false };
 
     HashTable<GC::Ref<Element>> m_list_owners_pending_item_renumber;
-    HashTable<GC::Ref<Element>> m_list_owners_with_stale_item_counters;
-    bool m_stale_list_item_counter_rendered { false };
     CSS::SheetSetStyleCacheRegistry m_sheet_set_style_cache_registry;
     RefPtr<Painting::HitTestDisplayList> m_hit_test_display_list;
+    u64 m_hit_test_display_list_invalidations { 0 };
     // The previous recording's list, retained so cached per-paintable item ranges can be spliced into
     // the next recording. Rotated only by cache-read-write recordings; survives display list invalidation.
     Optional<CSSPixelRect> m_caret_hit_test_debug_rect;
 
     mutable StyleInvalidationCounters m_style_invalidation_counters;
+    JoinCountersByReason m_join_counters;
+    // The render inputs, and the query snapshot the document published over them.
+    RenderInputsEntrance m_render_inputs;
+    size_t m_join_depth { 0 };
 
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
 
     // Document should not visit ShadowRoot list to avoid leaks.
     // It's responsibility of object that allocated ShadowRoot to keep it alive.
     ShadowRoot::DocumentShadowRootList m_shadow_roots;
+    u64 m_style_sheet_set_generation { 0 };
 
     Optional<Utf16String> m_content_blocker_style_sheet;
     // Class/id tokens already covered by the cached content blocker stylesheet.
@@ -1987,8 +2208,6 @@ private:
     // instead they generate boxes as if they were siblings of the root element.
     OrderedHashTable<GC::Ref<Element>> m_top_layer_elements;
     OrderedHashTable<GC::Ref<Element>> m_top_layer_pending_removals;
-    Vector<GC::Ref<Element>> m_elements_with_pending_top_layer_membership_change;
-    bool m_top_layer_needs_layout_zone_rebuild { false };
 
     Vector<GC::Ref<HTML::HTMLElement>> m_showing_auto_popover_list;
     Vector<GC::Ref<HTML::HTMLElement>> m_showing_hint_popover_list;
@@ -2077,11 +2296,9 @@ private:
     size_t m_custom_property_registration_generation { 0 };
     void* m_rust_custom_property_registry { nullptr };
     bool m_rust_custom_property_registry_synced { false };
+    bool m_rust_custom_property_registry_sync_queued { false };
 
     CSS::StyleScope m_style_scope;
-
-    // https://drafts.csswg.org/css-values-5/#random-caching
-    HashMap<CSS::RandomCachingKey, double> m_element_shared_css_random_base_value_cache;
 
     // Cache of parsed selector queries for querySelectorAll/querySelector/matches/closest.
     // A null value means the selector string failed to parse.
@@ -2091,9 +2308,6 @@ private:
 
     // Cache of querySelectorAll results, validated lazily against the query root's dom_tree_version/character_data_version.
     OwnPtr<QuerySelectorResultCache> m_query_selector_result_cache;
-
-    // Style engines for selector queries against disconnected trees, one per tree root, validated the same way.
-    OwnPtr<IsolatedSelectorQueryEngineCache> m_isolated_selector_query_engine_cache;
 
     // https://fullscreen.spec.whatwg.org/#list-of-pending-fullscreen-events
     Vector<PendingFullscreenEvent> m_pending_fullscreen_events;

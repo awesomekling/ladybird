@@ -35,6 +35,12 @@ public:
 
     Utf16String type() const { return get_attribute_value(HTML::AttributeNames::type); }
 
+    Representation representation() const { return m_representation; }
+
+    // The natural size of the SVG document the element represents as its content navigable's, if
+    // its document element is an <svg>.
+    CSS::SizeWithAspectRatio natural_size_of_content_svg_document() const;
+
     // ^FormAssociatedElement
     virtual bool is_form_associated_element() const override { return true; }
 
@@ -61,7 +67,7 @@ private:
     virtual bool is_presentational_hint(Utf16FlyString const&) const override;
     virtual void apply_presentational_hints(Vector<CSS::StyleProperty>&) const override;
 
-    virtual Layout::Node* create_layout_node(CSS::LayoutStyle) override;
+    virtual CSS::ElementBoxKind box_kind() const override;
 
     bool has_ancestor_media_element_or_object_element_not_showing_fallback_content() const;
 
@@ -81,7 +87,7 @@ private:
 
     // ^Layout::ImageProvider
     virtual GC::Ptr<DecodedImageData> decoded_image_data() const override { return image_data(); }
-    virtual Layout::Node const* image_provider_layout_node() const override;
+    virtual Painting::BoxSlot image_provider_box() const override;
 
     GC::Ptr<DecodedImageData> image_data() const;
 

@@ -10,6 +10,7 @@
 #include <AK/Assertions.h>
 #include <AK/HashTable.h>
 #include <AK/OwnPtr.h>
+#include <AK/SourceLocation.h>
 #include <AK/Tuple.h>
 #include <AK/Utf16String.h>
 #include <AK/Utf16View.h>
@@ -101,6 +102,7 @@ public:
     void stop_loading();
 
     void set_delaying_load_events(bool value);
+    void stop_delaying_load_events_for_superseded_navigation();
     bool is_delaying_load_events() const { return m_is_delaying_load_events; }
 
     void set_navigation_load_event_guard(DOM::Document& parent_doc);
@@ -292,9 +294,82 @@ public:
     bool record_display_list_and_scroll_state(PaintConfig);
     void paint_next_frame();
     bool paint_next_frame_if_needed(DOM::UpdateLayoutReason);
+
+    // A frame whose display list the render side records while the main thread goes on: paint_next_frame() in two
+    // halves. Whoever holds a pending frame keeps its navigable and document alive.
+    struct PendingCompositorFrame {
+        GC::Ref<DOM::Document> document;
+        PaintConfig paint_config;
+        Compositing::KeyboardScrollState keyboard_scroll_state;
+        OwnPtr<Painting::PendingDisplayListRecording> recording;
+        // What the frame is presented from, sealed where it was begun.
+        RefPtr<Compositor::Presentation> presentation;
+    };
+    Optional<PendingCompositorFrame> begin_painting_next_frame(Painting::RecordingRun);
+    void finish_painting_next_frame(PendingCompositorFrame&);
+    // Hands the frame's presentation to the frame in flight, which presents it once it has recorded it. Returns false if
+    // the frame is finished and presented here instead.
+    bool submit_presentation(PendingCompositorFrame&);
+    void adopt_presented_frame(PendingCompositorFrame&);
+
+    // What a clock lease's ticks present the navigable's frames with while the main thread
+    // idles: a presentation sealed as the frame the navigable last painted was, and a recording to publish, as its
+    // recording was published. Whoever holds a kit keeps the document alive.
+    struct RenderClockFrameKit {
+        AK_ALLOC_WITH_KMALLOC;
+
+        NonnullRefPtr<Compositor::Presentation> presentation;
+        // None for a kit sealed beside a frame in flight until it follows that frame (see follow_presented_frame()),
+        // which it does before a tick presents from it.
+        OwnPtr<Painting::PendingDisplayListRecording> recording;
+        // Whether a tick presented from the kit since the main thread last took it in.
+        bool presented { false };
+    };
+    Optional<RenderClockFrameKit> seal_render_clock_frame_kit();
+    // On the render side, with the main thread idle: publishes what a tick recorded, and hands the frame to the
+    // compositor. Returns whether it did.
+    static bool present_render_clock_frame(RenderClockFrameKit&);
+    // On the render side, as the frame in flight `presented` of the kit's document presented: the ticks present after
+    // it, as it was presented. Returns whether they can.
+    static bool follow_presented_frame(RenderClockFrameKit&, Compositor::Presentation& presented);
+    // Takes in what the ticks presented from the kit: the scene, and the recording they published last.
+    void adopt_render_clock_frame_kit(RenderClockFrameKit&);
+
     void render_screenshot(Gfx::PaintingSurface&, PaintConfig, Function<void()>&& callback);
-    Compositing::DisplayListResourceStorage& display_list_resource_storage() { return m_display_list_resource_storage; }
-    Compositing::DisplayListResourceStorage const& display_list_resource_storage() const { return m_display_list_resource_storage; }
+    // The presenter, once the frame in flight that presents from it has been taken in.
+    Compositor::NavigablePresenter& presenter(SourceLocation = SourceLocation::current());
+    // The presenter as it stands beside a frame in flight that may present from it, for what may be read beside it.
+    Compositor::NavigablePresenter const& presenter_beside_frame_in_flight() const { return *m_presenter; }
+    Compositing::DisplayListResourceStorage& display_list_resource_storage();
+
+    // Seals what the recording that the document's flight makes after its layout reads, if the navigable may be painted
+    // that way, and with `may_present`, how the flight presents it. Returns whether it sealed it.
+    bool seal_flight_paint(DOM::Document&, bool may_present);
+    Optional<Painting::FlightPaintDecline> flight_paint_decline(DOM::Document&) const;
+    // Takes in the paint of the document's flight once the flight has been taken back: publishes the recording the
+    // flight made, and hands off its compositor frame if the recording stands. Returns whether it painted a frame.
+    enum class FlightPaintEnd : u8 {
+        NotRecorded,
+        // The flight recorded, and the recording stands unless what ran beside the flight changed what it shows.
+        Recorded,
+        // The flight recorded, and paying its layout's host halves left more work.
+        RecordedAheadOfMoreWork,
+        // The flight recorded and presented what it recorded.
+        Presented,
+        // The flight presented what it recorded, and paying its layout's host halves left more work.
+        PresentedAheadOfMoreWork,
+    };
+    struct FinishedFlightPaint {
+        // The flight's frame was handed off: presented by the flight, or finished here.
+        bool handed_off { false };
+        // The flight recorded, and the navigable paints again in this rendering update: its recording did not stand, or
+        // the frame it presented does not show what the document is now.
+        bool paints_again_after_recording { false };
+    };
+    FinishedFlightPaint finish_flight_paint(DOM::Document&, FlightPaintEnd);
+    // For tests: how many frames of this navigable a flight presented.
+    u64 frames_presented_by_flights() const { return m_frames_presented_by_flights; }
+    bool has_sealed_flight_paint() const { return m_flight_paint_seal; }
 
     bool needs_repaint() const { return m_needs_repaint; }
     void set_needs_repaint() { m_needs_repaint = true; }
@@ -317,6 +392,12 @@ public:
     bool has_compositor_context() const { return m_compositor_context; }
     // The context, for the page to retire when the navigable stops hosting the tab's document.
     OwnPtr<Compositor::CompositorContextHandle> take_compositor_context();
+    Optional<u64> keyboard_scroll_generation_of_last_frame() const
+    {
+        if (!m_keyboard_scroll_state_of_last_frame.has_value())
+            return {};
+        return m_keyboard_scroll_state_of_last_frame->generation;
+    }
 
     void set_pending_set_browser_zoom_request(bool value) { m_pending_set_browser_zoom_request = value; }
     bool pending_set_browser_zoom_request() const { return m_pending_set_browser_zoom_request; }
@@ -369,10 +450,9 @@ public:
     GC::Ref<WebIDL::Promise> scroll_viewport_by_delta(CSSPixelPoint delta, Bindings::ScrollBehavior, Painting::ScrollKind);
     GC::Ref<WebIDL::Promise> perform_a_scroll_of_the_viewport(CSSPixelPoint position, Bindings::ScrollBehavior = Bindings::ScrollBehavior::Auto, ScrollTrigger = ScrollTrigger::Programmatic, Optional<CSSPixelPoint> relative_displacement = {}, Painting::ScrollKind = Painting::ScrollKind::Absolute);
     GC::Ref<WebIDL::Promise> perform_a_scroll_of_an_element(DOM::Element&, CSSPixelPoint position, Bindings::ScrollBehavior, Optional<CSSPixelPoint> relative_displacement = {});
-    bool perform_a_snapped_relative_user_scroll(Layout::Node&, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type, SnapStepAccumulation, Compositing::ScrollAnimationKind = Compositing::ScrollAnimationKind::SmoothScroll);
-    bool perform_a_scroll_step_for_key_input(Layout::Node&, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type);
-    bool perform_a_snapped_momentum_scroll(Layout::Node&, CSSPixelPoint momentum_delta);
-    Layout::Node* layout_node_for_async_scroll_node_stable_id(Compositing::AsyncScrollNodeStableID);
+    bool perform_a_snapped_relative_user_scroll(Painting::BoxSlot const&, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type, SnapStepAccumulation, Compositing::ScrollAnimationKind = Compositing::ScrollAnimationKind::SmoothScroll);
+    bool perform_a_scroll_step_for_key_input(Painting::BoxSlot const&, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type);
+    bool perform_a_snapped_momentum_scroll(Painting::BoxSlot const&, CSSPixelPoint momentum_delta);
     void re_snap_scroll_containers_after_layout_change();
     void abort_in_flight_smooth_scrolls(Compositing::AsyncScrollNodeStableID, SmoothScrollAbortCause);
     void abort_in_flight_smooth_scrolls_taken_over_by_user_input(Compositing::AsyncScrollNodeStableID, CSSPixelPoint scroll_offset_at_gesture_start);
@@ -401,6 +481,7 @@ protected:
     Variant<Empty, Traversal, Utf16String> m_ongoing_navigation;
 
 private:
+    bool seal_flight_paint_now(DOM::Document&, bool may_present);
     enum class PendingNavigationBehavior {
         Append,
         Replace
@@ -426,6 +507,11 @@ private:
     void scroll_offset_did_change();
     void clear_parent_compositor_context();
     void destroy_compositor_context();
+    Optional<Compositor::CompositorFrame> record_compositor_frame(PaintConfig);
+    Optional<PendingCompositorFrame> begin_compositor_frame(PaintConfig, Painting::RecordingRun);
+    RefPtr<Compositor::Presentation> seal_presentation(PendingCompositorFrame&);
+    Optional<Compositor::CompositorFrame> finish_compositor_frame(PendingCompositorFrame&);
+    void submit_compositor_frame(Compositor::CompositorFrame&&);
 
     void start_download_for_response(GC::Ref<Fetch::Infrastructure::Response>, URL::URL const& download_url, ByteString suggested_filename, GC::Ptr<Fetch::Infrastructure::FetchController>);
 
@@ -549,19 +635,21 @@ private:
 
     bool m_is_svg_page { false };
     bool m_needs_repaint { true };
+    u64 m_frames_presented_by_flights { 0 };
     bool m_needs_to_record_display_list { true };
+
+    struct FlightPaintSeal;
+    OwnPtr<FlightPaintSeal> m_flight_paint_seal;
+    // The keyboard scroll state of the last frame the navigable handed off, which a frame a flight presents before its
+    // layout is taken back goes with.
+    Optional<Compositing::KeyboardScrollState> m_keyboard_scroll_state_of_last_frame;
     bool m_pending_set_browser_zoom_request { false };
     bool m_should_show_line_box_borders { false };
     bool m_force_dark_enabled { false };
     i32 m_force_dark_foreground_threshold { default_force_dark_foreground_threshold };
     i32 m_force_dark_background_threshold { default_force_dark_background_threshold };
     bool m_should_show_caret_hit_test_debug_overlay { false };
-    Optional<PaintConfig> m_compositor_display_list_paint_config;
-    RefPtr<Compositing::DisplayList> m_compositor_display_list;
-    u64 m_compositor_display_list_visual_context_tree_structural_epoch { 0 };
-    Compositing::DisplayListResourceStorage m_display_list_resource_storage;
-    Compositing::DisplayListResourceSet m_compositor_display_list_resources;
-    Compositing::DisplayListResourceSet m_compositor_display_list_command_resources;
+    NonnullRefPtr<Compositor::NavigablePresenter> m_presenter;
     OwnPtr<Compositor::CompositorContextHandle> m_compositor_context;
     RefPtr<Core::Timer> m_async_scroll_hover_update_timer;
     Vector<PendingUserScrollendTarget> m_pending_user_scrollend_targets;
@@ -598,6 +686,13 @@ private:
     PendingAsyncScrollOperation& ensure_pending_async_scroll_operation(Compositing::AsyncScrollOperationID);
     // The latest publication of the compositor's async scroll updates this navigable adopted.
     u64 m_adopted_async_scroll_sequence { 0 };
+    // The frame the navigable last painted, which a render clock kit is sealed as.
+    struct LastPaintedFrame {
+        PaintConfig paint_config;
+        Compositing::KeyboardScrollState keyboard_scroll_state;
+        NonnullOwnPtr<Painting::PendingDisplayListRecording> recording;
+    };
+    Optional<LastPaintedFrame> m_last_painted_frame_for_render_clock;
 
     struct MainThreadSmoothScroll {
         Compositing::AsyncScrollNodeStableID stable_node_id;

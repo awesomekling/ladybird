@@ -7,8 +7,8 @@
 #include <LibWeb/HTML/HTMLAreaElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLMapElement.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/PaintFacts.h>
 
 namespace Web::HTML {
 
@@ -25,6 +25,27 @@ void HTMLMapElement::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
     visitor.visit(m_areas);
+}
+
+void HTMLMapElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
+{
+    Base::attribute_changed(name, old_value, value, namespace_);
+
+    // A map is named by its name or its id, so either can change which images are associated with it.
+    if (name.is_one_of(HTML::AttributeNames::name, HTML::AttributeNames::id))
+        Painting::refresh_image_map_area_facts(document());
+}
+
+void HTMLMapElement::inserted()
+{
+    Base::inserted();
+    Painting::refresh_image_map_area_facts(document());
+}
+
+void HTMLMapElement::removed_from(IsSubtreeRoot is_subtree_root, DOM::Node* old_ancestor, DOM::Node& old_root)
+{
+    Base::removed_from(is_subtree_root, old_ancestor, old_root);
+    Painting::refresh_image_map_area_facts(document());
 }
 
 // https://html.spec.whatwg.org/multipage/image-maps.html#image-map-processing-model
@@ -64,8 +85,7 @@ GC::Ptr<HTMLImageElement> HTMLMapElement::first_image_with_focusable_shapes() co
 GC::Ptr<HTMLImageElement> HTMLMapElement::first_painted_image_with_focusable_shapes() const
 {
     return first_associated_image_matching([](HTMLImageElement& image_element) {
-        auto const* layout_node = image_element.layout_node();
-        return layout_node && Painting::has_committed_box(*layout_node) && !image_element.is_inert();
+        return Painting::has_committed_box(Painting::BoxSlot::bound_to(image_element)) && !image_element.is_inert();
     });
 }
 

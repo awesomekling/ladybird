@@ -32,6 +32,7 @@
 #include <LibWeb/HTML/ElementInternals.h>
 #include <LibWeb/HTML/EventHandler.h>
 #include <LibWeb/HTML/HTMLAnchorElement.h>
+#include <LibWeb/HTML/HTMLAreaElement.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
 #include <LibWeb/HTML/HTMLBaseElement.h>
 #include <LibWeb/HTML/HTMLBodyElement.h>
@@ -48,12 +49,12 @@
 #include <LibWeb/HTML/ToggleEvent.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
-#include <LibWeb/Layout/Box.h>
-#include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/PaintFacts.h>
+#include <LibWeb/Painting/QueryView.h>
 #include <LibWeb/Selection/Selection.h>
 #include <LibWeb/UIEvents/EventNames.h>
 #include <LibWeb/UIEvents/PointerEvent.h>
@@ -398,21 +399,19 @@ static Vector<Variant<Utf16String, RequiredLineBreakCount>> rendered_text_collec
     //    FIXME: - select elements have an associated non-replaced inline CSS box whose child boxes include only those of optgroup and option element child nodes;
     //    FIXME: - optgroup elements have an associated non-replaced block-level CSS box whose child boxes include only those of option element child nodes; and
     //    FIXME: - option elements have an associated non-replaced block-level CSS box whose child boxes are as normal for non-replaced block-level CSS boxes.
-    auto* layout_node = node.layout_node();
-    if (!layout_node)
+    auto box = Painting::BoxSlot::bound_to(node);
+    // A text box reads the style of its parent.
+    auto style_box = box.style_source();
+    if (!style_box.has_style())
         return items;
-    if (!layout_node->has_style_or_parent_with_style())
-        return items;
-
-    auto const* layout_node_with_style = as_if<Layout::NodeWithStyle>(*layout_node);
-    auto const& style_node = layout_node_with_style ? *layout_node_with_style : *layout_node->parent();
 
     // 2. If node's computed value of 'visibility' is not 'visible', then return items.
-    if (style_node.visibility() != CSS::Visibility::Visible)
+    auto const& inherited_box_values = *style_box.style_group<CSS::ComputedValues::InheritedBoxValues>();
+    if (static_cast<CSS::Visibility>(inherited_box_values.visibility) != CSS::Visibility::Visible)
         return items;
 
     // AD-HOC: If node's computed value of 'content-visibility' is 'hidden', then return items.
-    if (style_node.content_visibility() == CSS::ContentVisibility::Hidden)
+    if (static_cast<CSS::ContentVisibility>(inherited_box_values.content_visibility) == CSS::ContentVisibility::Hidden)
         return items;
 
     // 4. If node is a Text node, then for each CSS text box produced by node, in content order, compute the text of the
@@ -423,8 +422,8 @@ static Vector<Variant<Utf16String, RequiredLineBreakCount>> rendered_text_collec
     //    always collapsed, but they are only removed if the line is the last line of the block, or it ends with a br
     //    element. Soft hyphens should be preserved. [CSSTEXT]
 
-    if (auto const* layout_text_node = as_if<Layout::TextNode>(layout_node)) {
-        items.append(layout_text_node->rendered_text_for_dom(true));
+    if (box.is_text()) {
+        items.append(Painting::rendered_text(box, true));
         return items;
     }
 
@@ -434,7 +433,7 @@ static Vector<Variant<Utf16String, RequiredLineBreakCount>> rendered_text_collec
         return items;
     }
 
-    auto display = style_node.display();
+    auto display = CSS::display_from_ffi_display(style_box.style_group<CSS::ComputedValues::BoxValues>()->display);
 
     // 6. If node's computed value of 'display' is 'table-cell', and node's CSS box is not the last 'table-cell' box of its enclosing 'table-row' box, then append a string containing a single U+0009 TAB code point to items.
     if (display.is_table_cell() && node.next_sibling())
@@ -465,8 +464,12 @@ Utf16String HTMLElement::get_the_text_steps()
 {
     // 1. If element is not being rendered or if the user agent is a non-CSS user agent, then return element's descendant text content.
     document().update_layout(DOM::UpdateLayoutReason::HTMLElementGetTheTextSteps);
-    if (!layout_node())
+    if (!has_layout_box())
         return descendant_text_content();
+
+    // The text nodes' rendered text is read from the query snapshot published here, not asked of the render owner node
+    // by node.
+    document().publish_query_snapshot_after_read(Painting::QueryVisualContexts::Stale);
 
     // 2. Let results be a new empty list.
     Vector<Variant<Utf16String, RequiredLineBreakCount>> results;
@@ -536,9 +539,14 @@ Utf16String HTMLElement::outer_text()
     return get_the_text_steps();
 }
 
-static bool any_ancestor_establishes_a_fixed_position_containing_block(Layout::NodeWithStyle const& node)
+static bool any_ancestor_establishes_a_fixed_position_containing_block(Painting::BoxSlot const& box)
 {
-    return Layout::RustFFI::layout_arena_any_ancestor_establishes_a_fixed_position_containing_block(node.arena_handle(), Layout::Node::slot_id(&node));
+    return Layout::RustFFI::layout_arena_any_ancestor_establishes_a_fixed_position_containing_block(box.arena(), box.slot());
+}
+
+static CSS::Positioning position_of(Painting::BoxSlot const& box)
+{
+    return static_cast<CSS::Positioning>(box.style_group<CSS::ComputedValues::BoxValues>()->position);
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-htmlelement-scrollparent
@@ -552,22 +560,23 @@ GC::Ptr<DOM::Element> HTMLElement::scroll_parent() const
     //    - The element is the root element.
     //    - The element is the body element.
     //    - The element’s computed value of the position property is fixed and no ancestor establishes a fixed position containing block.
-    if (!layout_node())
+    auto box = Painting::BoxSlot::bound_to(*this);
+    if (!box)
         return nullptr;
     if (is_document_element())
         return nullptr;
     if (is_html_body_element())
         return nullptr;
-    bool const no_ancestor_establishes_a_fixed_position_containing_block = !any_ancestor_establishes_a_fixed_position_containing_block(*layout_node());
-    if (layout_node()->is_fixed_position() && no_ancestor_establishes_a_fixed_position_containing_block)
+    bool const no_ancestor_establishes_a_fixed_position_containing_block = !any_ancestor_establishes_a_fixed_position_containing_block(box);
+    if (position_of(box) == CSS::Positioning::Fixed && no_ancestor_establishes_a_fixed_position_containing_block)
         return nullptr;
 
     // 2. Let ancestor be the containing block of the element in the flat tree and repeat these substeps:
-    auto ancestor = layout_node()->containing_block();
+    auto ancestor = box.containing_block();
     while (ancestor) {
         // 1. If ancestor is the initial containing block, return the scrollingElement for the element’s document if it
         //    is not closed-shadow-hidden from the element, otherwise return null.
-        if (ancestor->is_viewport()) {
+        if (ancestor.is_viewport()) {
             auto const scrolling_element = document().scrolling_element();
             if (scrolling_element && !scrolling_element->is_closed_shadow_hidden_from(*this))
                 return const_cast<Element*>(scrolling_element.ptr());
@@ -576,60 +585,99 @@ GC::Ptr<DOM::Element> HTMLElement::scroll_parent() const
 
         // 2. If ancestor is not closed-shadow-hidden from the element, and is a scroll container, terminate this
         //    algorithm and return ancestor.
-        if ((ancestor->dom_node() && !ancestor->dom_node()->is_closed_shadow_hidden_from(*this))
-            && ancestor->is_scroll_container()) {
-            return const_cast<Element*>(static_cast<DOM::Element const*>(ancestor->dom_node()));
+        if (auto ancestor_node = ancestor.dom_node(); ancestor_node && !ancestor_node->is_closed_shadow_hidden_from(*this)
+            && ancestor.is_scroll_container()) {
+            return &as<DOM::Element>(*ancestor_node);
         }
 
         // 3. If the computed value of the position property of ancestor is fixed, and no ancestor establishes a fixed
         //    position containing block, terminate this algorithm and return null.
-        if (ancestor->position() == CSS::Positioning::Fixed && no_ancestor_establishes_a_fixed_position_containing_block)
+        if (position_of(ancestor) == CSS::Positioning::Fixed && no_ancestor_establishes_a_fixed_position_containing_block)
             return nullptr;
 
         // 4. Let ancestor be the containing block of ancestor in the flat tree.
-        ancestor = ancestor->containing_block();
+        ancestor = ancestor.containing_block();
     }
 
     return nullptr;
 }
 
-// https://drafts.csswg.org/cssom-view-1/#dom-htmlelement-offsetparent
-GC::Ptr<DOM::Element> HTMLElement::offset_parent() const
-{
-    // NOTE: We have to ensure that the layout is up-to-date before querying the layout tree.
-    const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLElementOffsetParent);
+// What the offsetParent algorithm reads of the boxes of an element and its ancestors: the boxes themselves, once a read
+// brought style and layout up to date.
+class LiveOffsetBoxes {
+public:
+    using Box = Painting::BoxSlot;
 
+    Optional<Box> box_of(DOM::Element const& element) const
+    {
+        if (auto box = Painting::BoxSlot::bound_to(element))
+            return box;
+        return {};
+    }
+    bool any_ancestor_establishes_a_fixed_position_containing_block(Box const& box) const { return ::Web::HTML::any_ancestor_establishes_a_fixed_position_containing_block(box); }
+    bool is_fixed_position(Box const& box) const { return position_of(box) == CSS::Positioning::Fixed; }
+    bool is_positioned(Box const& box) const { return position_of(box) != CSS::Positioning::Static; }
+    bool establishes_an_absolute_positioning_containing_block(Box const& box) const { return Layout::RustFFI::layout_arena_node_establishes_an_absolute_positioning_containing_block(box.arena(), box.slot()); }
+    bool establishes_a_fixed_positioning_containing_block(Box const& box) const { return Layout::RustFFI::layout_arena_node_establishes_a_fixed_positioning_containing_block(box.arena(), box.slot()); }
+};
+
+// The same, from the document's query snapshot, for a clean read.
+class QueryOffsetBoxes {
+public:
+    using Box = Painting::QueryBox;
+
+    explicit QueryOffsetBoxes(Painting::QueryView const& view)
+        : m_view(view)
+    {
+    }
+
+    Optional<Box> box_of(DOM::Element const& element) const { return m_view.box_of(element); }
+    bool any_ancestor_establishes_a_fixed_position_containing_block(Box box) const { return m_view.any_ancestor_establishes_a_fixed_position_containing_block(box); }
+    bool is_fixed_position(Box box) const { return m_view.facts(box).is_fixed_position(); }
+    bool is_positioned(Box box) const { return m_view.facts(box).is_positioned(); }
+    bool establishes_an_absolute_positioning_containing_block(Box box) const { return m_view.facts(box).establishes_an_absolute_positioning_containing_block; }
+    bool establishes_a_fixed_positioning_containing_block(Box box) const { return m_view.facts(box).establishes_a_fixed_positioning_containing_block; }
+
+private:
+    Painting::QueryView const& m_view;
+};
+
+// https://drafts.csswg.org/cssom-view-1/#dom-htmlelement-offsetparent
+template<typename Boxes>
+static GC::Ptr<DOM::Element> offset_parent_of(HTMLElement const& element, Boxes const& boxes)
+{
     // 1. If any of the following holds true return null and terminate this algorithm:
     //    - The element does not have an associated box.
     //    - The element is the root element.
     //    - The element is the HTML body element.
     //    - The element’s computed value of the position property is fixed and no ancestor establishes a fixed position containing block.
-    if (!layout_node())
+    auto element_box = boxes.box_of(element);
+    if (!element_box.has_value())
         return nullptr;
-    if (is_document_element())
+    if (element.is_document_element())
         return nullptr;
-    if (is_html_body_element())
+    if (element.is_html_body_element())
         return nullptr;
-    bool const no_ancestor_establishes_a_fixed_position_containing_block = !any_ancestor_establishes_a_fixed_position_containing_block(*layout_node());
-    if (layout_node()->is_fixed_position() && no_ancestor_establishes_a_fixed_position_containing_block)
+    bool const no_ancestor_establishes_a_fixed_position_containing_block = !boxes.any_ancestor_establishes_a_fixed_position_containing_block(*element_box);
+    if (boxes.is_fixed_position(*element_box) && no_ancestor_establishes_a_fixed_position_containing_block)
         return nullptr;
 
     // NB: The spec does not define "the element is in a fixed position containing block".  Other engines treat it as
     //     holding only when the element itself is fixed-positioned. We also set it to true for the remainder of the
     //     walk once a fixed-positioned ancestor is crossed.
-    auto element_is_in_a_fixed_position_containing_block = layout_node()->is_fixed_position();
+    auto element_is_in_a_fixed_position_containing_block = boxes.is_fixed_position(*element_box);
 
     // 2. Let ancestor be the parent of the element in the flat tree and repeat these substeps:
-    auto ancestor = first_flat_tree_ancestor_of_type<DOM::Element>();
+    auto ancestor = element.first_flat_tree_ancestor_of_type<DOM::Element>();
     while (true) {
         // 1. If ancestor is closed-shadow-hidden from the element, its computed value of the position property is
         //    fixed, and no ancestor establishes a fixed position containing block, terminate this algorithm and return
         //    null.
-        bool ancestor_is_closed_shadow_hidden = ancestor->is_closed_shadow_hidden_from(*this);
+        bool ancestor_is_closed_shadow_hidden = ancestor->is_closed_shadow_hidden_from(element);
         auto const* ancestor_box_values = ancestor->style_group<CSS::ComputedValues::BoxValues>();
         VERIFY(ancestor_box_values);
         bool ancestor_is_fixed_position = static_cast<CSS::Positioning>(ancestor_box_values->position) == CSS::Positioning::Fixed;
-        auto const* ancestor_layout_node = ancestor->layout_node();
+        auto ancestor_box = boxes.box_of(*ancestor);
         if (ancestor_is_closed_shadow_hidden
             && ancestor_is_fixed_position
             && no_ancestor_establishes_a_fixed_position_containing_block)
@@ -643,8 +691,8 @@ GC::Ptr<DOM::Element> HTMLElement::offset_parent() const
             // - The element is in a fixed position containing block, and ancestor is a containing block for
             //   fixed-positioned descendants.
             if (element_is_in_a_fixed_position_containing_block) {
-                if (ancestor_layout_node && ancestor_layout_node->establishes_a_fixed_positioning_containing_block())
-                    return const_cast<Element*>(ancestor);
+                if (ancestor_box.has_value() && boxes.establishes_a_fixed_positioning_containing_block(*ancestor_box))
+                    return const_cast<DOM::Element*>(ancestor);
             }
             // - The element is not in a fixed position containing block, and:
             else {
@@ -653,22 +701,22 @@ GC::Ptr<DOM::Element> HTMLElement::offset_parent() const
                 // NB: is_positioned() covers positioned inline ancestors, which
                 //     establishes_an_absolute_positioning_containing_block() excludes because they do not generate a
                 //     box.
-                if (ancestor_layout_node && (ancestor_layout_node->is_positioned() || ancestor_layout_node->establishes_an_absolute_positioning_containing_block()))
-                    return const_cast<Element*>(ancestor);
+                if (ancestor_box.has_value() && (boxes.is_positioned(*ancestor_box) || boxes.establishes_an_absolute_positioning_containing_block(*ancestor_box)))
+                    return const_cast<DOM::Element*>(ancestor);
                 // - It is the body element.
                 if (ancestor->is_html_body_element())
-                    return const_cast<Element*>(ancestor);
+                    return const_cast<DOM::Element*>(ancestor);
                 // - The computed value of the position property of the element is static and the ancestor is one of
                 //   the following HTML elements: td, th, or table.
-                auto style = computed_style();
+                auto style = element.computed_style();
                 VERIFY(style);
                 if (style->position() == CSS::Positioning::Static && ancestor->local_name().is_one_of(HTML::TagNames::td, HTML::TagNames::th, HTML::TagNames::table))
-                    return const_cast<Element*>(ancestor);
+                    return const_cast<DOM::Element*>(ancestor);
             }
             // - FIXME: The element has a different effective zoom than ancestor.
         }
 
-        if (ancestor_layout_node && ancestor_layout_node->is_fixed_position())
+        if (ancestor_box.has_value() && boxes.is_fixed_position(*ancestor_box))
             element_is_in_a_fixed_position_containing_block = true;
 
         // 3. If there is no more parent of ancestor in the flat tree, terminate this algorithm and return null.
@@ -681,6 +729,113 @@ GC::Ptr<DOM::Element> HTMLElement::offset_parent() const
     }
 }
 
+// A read with nothing sent since the document published its query snapshot is answered from it; any other brings
+// style and layout up to date first, and leaves them published for the reads after it.
+template<typename Result>
+static Result read_offset(HTMLElement const& element, auto&& read_in_view, auto&& read_after_layout_update)
+{
+    auto& document = const_cast<DOM::Document&>(element.document());
+    auto view = document.query_view_for_clean_read();
+    if (!view.has_value()) {
+        Result result = read_after_layout_update();
+        document.publish_query_snapshot_after_read(Painting::QueryVisualContexts::Stale);
+        return result;
+    }
+    return read_in_view(*view);
+}
+
+// https://drafts.csswg.org/cssom-view-1/#dom-htmlelement-offsetparent
+GC::Ptr<DOM::Element> HTMLElement::offset_parent() const
+{
+    return read_offset<GC::Ptr<DOM::Element>>(
+        *this,
+        [&](Painting::QueryView const& view) {
+            return offset_parent_of(*this, QueryOffsetBoxes { view });
+        },
+        [&] {
+            // NOTE: We have to ensure that the layout is up-to-date before querying the layout tree.
+            const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLElementOffsetParent);
+            return offset_parent_of(*this, LiveOffsetBoxes {});
+        });
+}
+
+enum class OffsetAxis : u8 {
+    Horizontal,
+    Vertical,
+};
+
+static CSSPixels coordinate_on(CSSPixelRect const& rect, OffsetAxis axis)
+{
+    return axis == OffsetAxis::Horizontal ? rect.x() : rect.y();
+}
+
+// https://www.w3.org/TR/cssom-view-1/#dom-htmlelement-offsettop
+// https://www.w3.org/TR/cssom-view-1/#dom-htmlelement-offsetleft
+static int offset_coordinate_in_view(HTMLElement const& element, Painting::QueryView const& view, OffsetAxis axis)
+{
+    auto box = view.principal_box_of(element);
+    if (!box.has_value() || !view.facts(*box).has_committed_box)
+        return 0;
+    CSSPixels border_edge_of_element = coordinate_on(view.absolute_border_box_rect(*box), axis);
+
+    auto offset_parent = offset_parent_of(element, QueryOffsetBoxes { view });
+    auto offset_parent_box = offset_parent ? view.box_of(*offset_parent) : Optional<Painting::QueryBox> {};
+    if (!offset_parent_box.has_value() || !view.facts(*offset_parent_box).has_committed_box)
+        return border_edge_of_element.to_int();
+
+    // NOTE: We give special treatment to the body element to match other browsers.
+    //       Spec bug: https://github.com/w3c/csswg-drafts/issues/10549
+    CSSPixels padding_edge_of_offset_parent;
+    if (offset_parent->is_html_body_element() && !view.facts(*offset_parent_box).is_positioned_for_painting)
+        padding_edge_of_offset_parent = 0;
+    else
+        padding_edge_of_offset_parent = coordinate_on(view.absolute_padding_box_rect(*offset_parent_box), axis);
+    return (border_edge_of_element - padding_edge_of_offset_parent).to_int();
+}
+
+static int offset_coordinate_after_layout_update(HTMLElement const& element, OffsetAxis axis)
+{
+    // NOTE: Ensure that layout is up-to-date before looking at metrics.
+    auto reason = axis == OffsetAxis::Horizontal ? DOM::UpdateLayoutReason::HTMLElementOffsetLeft : DOM::UpdateLayoutReason::HTMLElementOffsetTop;
+    auto answer = const_cast<DOM::Document&>(element.document()).update_layout_answering_geometry_read(element, reason, Layout::RustFFI::FfiGeometryReadKind::BorderBox);
+    CSSPixels border_edge_of_element;
+    if (answer.has_value()) {
+        if (!answer->has_box)
+            return 0;
+        border_edge_of_element = coordinate_on(CSSPixelRect(answer->rect), axis);
+    } else {
+        auto box = element.principal_box();
+        if (!Painting::has_committed_box(box))
+            return 0;
+        border_edge_of_element = coordinate_on(Painting::absolute_border_box_rect(box), axis);
+    }
+
+    // 2. If the offsetParent of the element is null
+    //    return the coordinate of the border edge of the first CSS layout box associated with the element,
+    //    relative to the initial containing block origin,
+    //    ignoring any transforms that apply to the element and its ancestors, and terminate this algorithm.
+    auto offset_parent = element.offset_parent();
+    auto offset_parent_box = offset_parent ? Painting::BoxSlot::bound_to(*offset_parent) : Painting::BoxSlot {};
+    if (!Painting::has_committed_box(offset_parent_box))
+        return border_edge_of_element.to_int();
+
+    // 3. Return the result of subtracting the coordinate of the padding edge
+    //    of the first box associated with the offsetParent of the element
+    //    from the coordinate of the border edge of the first box associated with the element,
+    //    relative to the initial containing block origin,
+    //    ignoring any transforms that apply to the element and its ancestors.
+
+    // NOTE: We give special treatment to the body element to match other browsers.
+    //       Spec bug: https://github.com/w3c/csswg-drafts/issues/10549
+
+    CSSPixels padding_edge_of_offset_parent;
+    if (offset_parent->is_html_body_element() && !Painting::is_positioned(offset_parent_box))
+        padding_edge_of_offset_parent = 0;
+    else
+        padding_edge_of_offset_parent = coordinate_on(Painting::absolute_padding_box_rect(offset_parent_box), axis);
+    return (border_edge_of_element - padding_edge_of_offset_parent).to_int();
+}
+
 // https://www.w3.org/TR/cssom-view-1/#dom-htmlelement-offsettop
 int HTMLElement::offset_top() const
 {
@@ -689,41 +844,10 @@ int HTMLElement::offset_top() const
     if (is<HTML::HTMLBodyElement>(*this))
         return 0;
 
-    // NOTE: Ensure that layout is up-to-date before looking at metrics.
-    const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLElementOffsetTop);
-
-    auto const* layout_node = principal_layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
-        return 0;
-
-    CSSPixels top_border_edge_of_element = Painting::absolute_border_box_rect(*layout_node).y();
-
-    // 2. If the offsetParent of the element is null
-    //    return the y-coordinate of the top border edge of the first CSS layout box associated with the element,
-    //    relative to the initial containing block origin,
-    //    ignoring any transforms that apply to the element and its ancestors, and terminate this algorithm.
-    auto offset_parent = this->offset_parent();
-    auto const* offset_parent_layout_node = offset_parent ? offset_parent->layout_node() : nullptr;
-    if (!offset_parent_layout_node || !Painting::has_committed_box(*offset_parent_layout_node)) {
-        return top_border_edge_of_element.to_int();
-    }
-
-    // 3. Return the result of subtracting the y-coordinate of the top padding edge
-    //    of the first box associated with the offsetParent of the element
-    //    from the y-coordinate of the top border edge of the first box associated with the element,
-    //    relative to the initial containing block origin,
-    //    ignoring any transforms that apply to the element and its ancestors.
-
-    // NOTE: We give special treatment to the body element to match other browsers.
-    //       Spec bug: https://github.com/w3c/csswg-drafts/issues/10549
-
-    CSSPixels top_padding_edge_of_offset_parent;
-    if (offset_parent->is_html_body_element() && !Painting::is_positioned(*offset_parent_layout_node)) {
-        top_padding_edge_of_offset_parent = 0;
-    } else {
-        top_padding_edge_of_offset_parent = Painting::absolute_padding_box_rect(*offset_parent_layout_node).y();
-    }
-    return (top_border_edge_of_element - top_padding_edge_of_offset_parent).to_int();
+    return read_offset<int>(
+        *this,
+        [&](Painting::QueryView const& view) { return offset_coordinate_in_view(*this, view, OffsetAxis::Vertical); },
+        [&] { return offset_coordinate_after_layout_update(*this, OffsetAxis::Vertical); });
 }
 
 // https://www.w3.org/TR/cssom-view-1/#dom-htmlelement-offsetleft
@@ -733,79 +857,67 @@ int HTMLElement::offset_left() const
     if (is<HTML::HTMLBodyElement>(*this))
         return 0;
 
-    // NOTE: Ensure that layout is up-to-date before looking at metrics.
-    const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLElementOffsetLeft);
+    return read_offset<int>(
+        *this,
+        [&](Painting::QueryView const& view) { return offset_coordinate_in_view(*this, view, OffsetAxis::Horizontal); },
+        [&] { return offset_coordinate_after_layout_update(*this, OffsetAxis::Horizontal); });
+}
 
-    auto const* layout_node = principal_layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
-        return 0;
+enum class OffsetDimension : u8 {
+    Width,
+    Height,
+};
 
-    CSSPixels left_border_edge_of_element = Painting::absolute_border_box_rect(*layout_node).x();
+// https://drafts.csswg.org/cssom-view/#dom-htmlelement-offsetwidth
+// https://drafts.csswg.org/cssom-view/#dom-htmlelement-offsetheight
+static int offset_dimension(HTMLElement const& element, OffsetDimension dimension, DOM::UpdateLayoutReason reason)
+{
+    auto size_on = [dimension](CSSPixelRect const& border_box) {
+        return round(dimension == OffsetDimension::Width ? border_box.width() : border_box.height()).to_int();
+    };
+    return read_offset<int>(
+        element,
+        [&](Painting::QueryView const& view) {
+            // 1. If the element does not have any associated box return zero and terminate this algorithm.
+            auto box = view.principal_box_of(element);
+            if (!box.has_value() || !view.facts(*box).has_committed_box)
+                return 0;
+            // 2. Return the unscaled size of the axis-aligned bounding box of the border boxes of all fragments
+            //    generated by the element’s principal box, ignoring any transforms that apply to the element and its
+            //    ancestors.
+            return size_on(view.absolute_border_box_rect(*box));
+        },
+        [&] {
+            // NOTE: Ensure that layout is up-to-date before looking at metrics.
+            auto answer = const_cast<DOM::Document&>(element.document()).update_layout_answering_geometry_read(element, reason, Layout::RustFFI::FfiGeometryReadKind::BorderBox);
+            if (answer.has_value())
+                return answer->has_box ? size_on(CSSPixelRect(answer->rect)) : 0;
 
-    // 2. If the offsetParent of the element is null
-    //    return the x-coordinate of the left border edge of the first CSS layout box associated with the element,
-    //    relative to the initial containing block origin,
-    //    ignoring any transforms that apply to the element and its ancestors, and terminate this algorithm.
-    auto offset_parent = this->offset_parent();
-    auto const* offset_parent_layout_node = offset_parent ? offset_parent->layout_node() : nullptr;
-    if (!offset_parent_layout_node || !Painting::has_committed_box(*offset_parent_layout_node)) {
-        return left_border_edge_of_element.to_int();
-    }
+            // 1. If the element does not have any associated box return zero and terminate this algorithm.
+            auto box = element.principal_box();
+            if (!Painting::has_committed_box(box))
+                return 0;
 
-    // 3. Return the result of subtracting the x-coordinate of the left padding edge
-    //    of the first CSS layout box associated with the offsetParent of the element
-    //    from the x-coordinate of the left border edge of the first CSS layout box associated with the element,
-    //    relative to the initial containing block origin,
-    //    ignoring any transforms that apply to the element and its ancestors.
-
-    // NOTE: We give special treatment to the body element to match other browsers.
-    //       Spec bug: https://github.com/w3c/csswg-drafts/issues/10549
-
-    CSSPixels left_padding_edge_of_offset_parent;
-    if (offset_parent->is_html_body_element() && !Painting::is_positioned(*offset_parent_layout_node)) {
-        left_padding_edge_of_offset_parent = 0;
-    } else {
-        left_padding_edge_of_offset_parent = Painting::absolute_padding_box_rect(*offset_parent_layout_node).x();
-    }
-    return (left_border_edge_of_element - left_padding_edge_of_offset_parent).to_int();
+            // 2. Return the unscaled size of the axis-aligned bounding box of the border boxes of all fragments
+            //    generated by the element’s principal box, ignoring any transforms that apply to the element and its
+            //    ancestors.
+            //
+            //    If the element’s principal box is an inline-level box which was "split" by a block-level descendant,
+            //    also include fragments generated by the block-level descendants, unless they are zero width or height.
+            return size_on(Painting::absolute_border_box_rect(box));
+        });
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-htmlelement-offsetwidth
 int HTMLElement::offset_width() const
 {
-    // NOTE: Ensure that layout is up-to-date before looking at metrics.
-    const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLElementOffsetWidth);
-
-    // 1. If the element does not have any associated box return zero and terminate this algorithm.
-    auto const* layout_node = principal_layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
-        return 0;
-
-    // 2. Return the unscaled width of the axis-aligned bounding box of the border boxes of all fragments generated by
-    //    the element’s principal box, ignoring any transforms that apply to the element and its ancestors.
-    //
-    //    If the element’s principal box is an inline-level box which was "split" by a block-level descendant, also
-    //    include fragments generated by the block-level descendants, unless they are zero width or height.
-    return round(Painting::absolute_border_box_rect(*layout_node).width()).to_int();
+    return offset_dimension(*this, OffsetDimension::Width, DOM::UpdateLayoutReason::HTMLElementOffsetWidth);
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-htmlelement-offsetheight
 int HTMLElement::offset_height() const
 {
-    // NOTE: Ensure that layout is up-to-date before looking at metrics.
-    const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLElementOffsetHeight);
-
-    // 1. If the element does not have any associated box return zero and terminate this algorithm.
-    auto const* layout_node = principal_layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
-        return 0;
-
-    // 2. Return the unscaled height of the axis-aligned bounding box of the border boxes of all fragments generated by
-    //    the element’s principal box, ignoring any transforms that apply to the element and its ancestors.
-    //
-    //    If the element’s principal box is an inline-level box which was "split" by a block-level descendant, also
-    //    include fragments generated by the block-level descendants, unless they are zero width or height.
-    return round(Painting::absolute_border_box_rect(*layout_node).height()).to_int();
+    return offset_dimension(*this, OffsetDimension::Height, DOM::UpdateLayoutReason::HTMLElementOffsetHeight);
 }
 
 void HTMLElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
@@ -900,14 +1012,18 @@ void HTMLElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16St
 void HTMLElement::set_subtree_inertness(bool is_inert)
 {
     auto repaint_if_inertness_reaches_painted_output = [](DOM::Node& node) {
-        auto* layout_node = node.unsafe_layout_node();
-        if (layout_node && layout_node->refresh_dom_paint_facts())
-            node.set_needs_repaint();
+        Layout::publish_dom_paint_facts(node);
     };
+    // An inert node is never editable, and an <area> has no row to carry that fact, so a flip here
+    // has to reach the areas its image publishes. The walk below skips a subtree that was already
+    // inert, whose areas therefore did not change.
+    bool reached_an_image_map_area = false;
     auto update_inertness = [&](HTMLElement& element) {
         if (element.is_inert() == is_inert)
             return;
         element.set_inert(is_inert);
+        if (is<HTMLAreaElement>(element))
+            reached_an_image_map_area = true;
         repaint_if_inertness_reaches_painted_output(element);
     };
 
@@ -924,6 +1040,8 @@ void HTMLElement::set_subtree_inertness(bool is_inert)
         update_inertness(*html_element);
         return TraversalDecision::Continue;
     });
+    if (reached_an_image_map_area)
+        Painting::refresh_image_map_area_facts(document());
     document().page().keyboard_scroll_editability_changed(document());
 }
 

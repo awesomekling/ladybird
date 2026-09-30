@@ -9,7 +9,10 @@
 #include <LibWeb/HTML/CustomElements/CustomElementAlgorithms.h>
 #include <LibWeb/HTML/CustomElements/CustomElementDefinition.h>
 #include <LibWeb/HTML/CustomElements/CustomElementReactions.h>
+#include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/HTMLFormElement.h>
+#include <LibWeb/HTML/Scripting/SimilarOriginWindowAgent.h>
 
 namespace Web::HTML {
 

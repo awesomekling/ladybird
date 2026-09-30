@@ -9,6 +9,7 @@
 #include <LibWeb/CSS/Invalidation/EmbeddedContentInvalidator.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/DOM/DOMTokenList.h>
@@ -24,7 +25,6 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Infra/SerializedURL.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/ResourceTiming/PerformanceResourceTiming.h>
 #include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
 #include <LibWeb/TrustedTypes/TrustedTypePolicy.h>
@@ -40,9 +40,9 @@ HTMLIFrameElement::HTMLIFrameElement(DOM::Document& document, DOM::QualifiedName
 
 HTMLIFrameElement::~HTMLIFrameElement() = default;
 
-Layout::Node* HTMLIFrameElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind HTMLIFrameElement::box_kind() const
 {
-    return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::NavigableContainerViewport);
+    return CSS::ElementBoxKind::NavigableContainerViewport;
 }
 
 void HTMLIFrameElement::attribute_changed(Utf16FlyString const& name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
@@ -92,7 +92,10 @@ void HTMLIFrameElement::attribute_changed(Utf16FlyString const& name, Optional<U
         if (auto* document = this->content_document_without_origin_check()) {
             if (auto* body_element = document->body()) {
                 auto& mutable_body_element = const_cast<HTMLElement&>(*body_element);
-                mutable_body_element.document().style_computer().style_engine().record_element_style_input_change(mutable_body_element.style_node_id());
+                // NB: The body's presentational hints read these iframe attributes. Publish their
+                //     new values before invalidating the declaration block the engine cascades.
+                CSS::StyleComputer::collect_presentational_hint_properties({ mutable_body_element });
+                CSS::record_element_declarations_changed(mutable_body_element, CSS::ElementDeclarationKind::PresentationalHint, true, true);
             }
         }
     }

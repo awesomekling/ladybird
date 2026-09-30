@@ -7,6 +7,7 @@
  */
 
 #include <LibWeb/Bindings/HTMLSlotElement.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/Text.h>

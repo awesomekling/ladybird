@@ -17,6 +17,7 @@
 #include <LibWeb/Bindings/WrapperWorld.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
@@ -34,7 +35,6 @@
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Infra/SerializedURL.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/PaintFacts.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
@@ -329,9 +329,9 @@ void HTMLCanvasElement::attribute_changed(Utf16FlyString const& local_name, Opti
     }
 }
 
-Layout::Node* HTMLCanvasElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind HTMLCanvasElement::box_kind() const
 {
-    return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::CanvasBox);
+    return CSS::ElementBoxKind::Canvas;
 }
 
 HTMLCanvasElement::HasOrCreatedContext HTMLCanvasElement::create_2d_context(CanvasRenderingContext2DSettings context_attributes)

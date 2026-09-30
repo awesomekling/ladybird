@@ -9,9 +9,11 @@
 #include <LibWeb/CSS/Invalidation/EmbeddedContentInvalidator.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
+#include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/DocumentLoadEventDelayer.h>
 #include <LibWeb/DOM/DocumentLoading.h>
@@ -33,18 +35,19 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/SharedResourceRequest.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/MimeSniff/Resource.h>
+#include <LibWeb/Painting/BoxSlot.h>
+#include <LibWeb/SVG/SVGSVGElement.h>
 #include <LibWebCommon/MimeSniff/MimeType.h>
 
 namespace Web::HTML {
 
 GC_DEFINE_ALLOCATOR(HTMLObjectElement);
 
-Layout::Node const* HTMLObjectElement::image_provider_layout_node() const
+Painting::BoxSlot HTMLObjectElement::image_provider_box() const
 {
-    return unsafe_layout_node();
+    return Painting::BoxSlot::bound_to(*this);
 }
 
 static GC::Ref<DOM::Event> create_event_for_element(HTMLElement& element, Utf16FlyString const& event_name)
@@ -192,22 +195,22 @@ void HTMLObjectElement::apply_presentational_hints(Vector<CSS::StyleProperty>& p
     });
 }
 
-Layout::Node* HTMLObjectElement::create_layout_node(CSS::LayoutStyle style)
+CSS::ElementBoxKind HTMLObjectElement::box_kind() const
 {
     switch (m_representation) {
     case Representation::Children:
-        return NavigableContainer::create_layout_node(style);
+        return NavigableContainer::box_kind();
     case Representation::ContentNavigable:
-        return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::NavigableContainerViewport);
+        return CSS::ElementBoxKind::NavigableContainerViewport;
     case Representation::Image:
         if (image_data())
-            return &Layout::allocate_layout_node<Layout::Box>(document(), *this, style, Layout::RustFFI::NodeKind::ImageBox);
+            return CSS::ElementBoxKind::Image;
         break;
     default:
         break;
     }
 
-    return nullptr;
+    return CSS::ElementBoxKind::NoBox;
 }
 
 bool HTMLObjectElement::has_ancestor_media_element_or_object_element_not_showing_fallback_content() const
@@ -527,8 +530,10 @@ void HTMLObjectElement::load_image()
     m_document_load_event_delayer_for_resource_load.empend(document());
 
     m_resource_request = HTML::SharedResourceRequest::get_or_create(document(), *url);
+    CSS::record_element_replaced_content_input(*this);
     m_resource_request->add_callbacks(
         [this] {
+            CSS::record_element_replaced_content_input(*this);
             run_object_representation_completed_steps(Representation::Image);
             m_document_load_event_delayer_for_resource_load.take_last();
         },
@@ -554,6 +559,10 @@ void HTMLObjectElement::update_layout_and_child_objects(Representation represent
     }
 
     m_representation = representation;
+    // The representation decides which box the element asks for, and the build reads that from
+    // the mirror, as it does what the box is sized from.
+    CSS::record_element_construction_facts(*this);
+    CSS::record_element_replaced_content_input(*this);
 
     if (auto parent_element = this->parent_element())
         parent_element->set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::HTMLObjectElementUpdateLayoutAndChildObjects);
@@ -564,6 +573,21 @@ i32 HTMLObjectElement::default_tab_index_value() const
 {
     // See the base function for the spec comments.
     return 0;
+}
+
+CSS::SizeWithAspectRatio HTMLObjectElement::natural_size_of_content_svg_document() const
+{
+    auto const* content_document = content_document_without_origin_check();
+    if (!content_document)
+        return {};
+    auto const* root = as_if<SVG::SVGSVGElement>(content_document->document_element());
+    if (!root)
+        return {};
+    // The size is published as the document loads, when its layout may not be up to date yet.
+    auto resolution_context = content_document->layout_is_up_to_date() && Painting::BoxSlot::bound_to(*root)
+        ? CSS::Length::ResolutionContext::for_element(DOM::AbstractElement { *root })
+        : CSS::Length::ResolutionContext::for_document(*content_document);
+    return SVG::SVGSVGElement::negotiate_natural_metrics(*root, resolution_context);
 }
 
 GC::Ptr<DecodedImageData> HTMLObjectElement::image_data() const

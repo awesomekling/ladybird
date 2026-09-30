@@ -53,7 +53,6 @@
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Infra/SerializedURL.h>
 #include <LibWeb/InvalidateDisplayList.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/MediaCapture/MediaStream.h>
 #include <LibWeb/MediaSourceExtensions/MediaSource.h>
 #include <LibWeb/Page/Page.h>
@@ -204,7 +203,9 @@ void HTMLMediaElement::finalize()
         m_playback_manager->on_playback_state_change = nullptr;
         m_playback_manager->on_buffered_ranges_change = nullptr;
     }
-    release_active_video_sink();
+    // A collected element's box shows no frame anymore, and looking it up here would join a layout
+    // pass in flight, whose take-back allocates in the middle of the collection.
+    disable_active_video_sink();
 
     if (m_playback_position_update_timer) {
         m_playback_position_update_timer->stop();
@@ -1866,12 +1867,17 @@ void HTMLMediaElement::detach_video_sink_edge()
         m_playback_manager->forget_presented_frame_page(m_active_video_sink->handle());
 }
 
-void HTMLMediaElement::release_active_video_sink()
+void HTMLMediaElement::disable_active_video_sink()
 {
     auto handle = video_sink_handle();
     m_active_video_sink.clear();
     if (m_playback_manager && handle.has_value())
         m_playback_manager->disable_video_sink_by_handle(*handle);
+}
+
+void HTMLMediaElement::release_active_video_sink()
+{
+    disable_active_video_sink();
     if (auto* video_element = as_if<HTMLVideoElement>(this))
         Painting::push_video_paint_facts(*video_element);
 }
@@ -2648,8 +2654,8 @@ bool HTMLMediaElement::video_sink_should_tick() const
         return true;
     if (document().visibility_state() != VisibilityState::Visible)
         return false;
-    auto const* layout_node = this->layout_node();
-    return layout_node && Painting::has_committed_box(*layout_node) && Painting::is_visible(*layout_node);
+    auto box = Painting::BoxSlot::bound_to(*this);
+    return Painting::has_committed_box(box) && Painting::is_visible(box);
 }
 
 void HTMLMediaElement::sync_video_sink_ticking() const

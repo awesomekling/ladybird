@@ -8,9 +8,11 @@
 #include "CanvasTextDrawingStyles.h"
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/FontComputer.h>
+#include <LibWeb/CSS/FontResolution.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/CSS/StyleValues/FontStyleStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
@@ -21,6 +23,7 @@
 #include <LibWeb/HTML/OffscreenCanvas.h>
 #include <LibWeb/HTML/OffscreenCanvasRenderingContext2D.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Window.h>
 
 namespace Web::HTML {
 
@@ -73,8 +76,8 @@ void CanvasTextDrawingStyles<CanvasType>::set_font(Utf16View font)
         //     display:none, where style updates leave it stale. Only then is its style computed again.
         auto& document = canvas_element.document();
         document.update_style_for_element(DOM::AbstractElement { canvas_element }, DOM::Document::StyleUpdateMode::OnlyIfNeeded);
-        auto style_record = canvas_element.style_record_identity();
-        if (!style_record || has_flag(document.style_computer().style_engine().style_record_dependency_flags(style_record), CSS::StyleRecordDependencyFlag::InDisplayNoneSubtree))
+        auto const* style_record = canvas_element.published_style_record();
+        if (!style_record || has_flag(style_record->dependency_flags(), CSS::StyleRecordDependencyFlag::InDisplayNoneSubtree))
             document.update_style_for_element(DOM::AbstractElement { canvas_element });
 
         if (canvas_element.navigable() && canvas_element.is_connected()) {
@@ -143,16 +146,28 @@ void CanvasTextDrawingStyles<CanvasType>::set_font(Utf16View font)
     // https://drafts.csswg.org/css-font-loading/#font-source
     auto& font_computer = canvas_element.canvas_font_computer();
 
+    // NB: @font-feature-values are looked up in the tree scope the canvas belongs to. A worker's font computer has
+    //     no document, so a canvas there has no tree scope to look in.
+    u32 tree_scope = 0;
+    if constexpr (SameAs<CanvasType, HTML::HTMLCanvasElement>) {
+        tree_scope = canvas_element.document_or_shadow_root_style_scope().style_engine_tree_scope().value();
+    } else if (auto* window = window_from_global_object(canvas_element.relevant_global_object())) {
+        tree_scope = window->associated_document().style_scope().style_engine_tree_scope().value();
+    }
+
+    CSS::ComputedFontCacheKey key {
+        .tree_scope = tree_scope,
+        .font_families = CSS::computed_font_families_from_value_data(*font_family->rust_style_value_data()),
+        .font_optical_sizing = CSS::FontOpticalSizing::Auto,
+        .font_size = computed_font_size->as_length().length().absolute_length_to_px(),
+        .font_slope = computed_font_style->as_font_style().to_font_slope(),
+        .font_weight = computed_font_weight->as_number().number(),
+        .font_width = computed_font_width->as_percentage().percentage(),
+        .font_variation_settings = {},
+        .font_feature_data = font_feature_data,
+    };
     drawing_state().font_environment_generation = font_computer.environment_generation();
-    drawing_state().current_font_cascade_list = font_computer.compute_font_for_style_values(
-        *font_family,
-        computed_font_size->as_length().length().absolute_length_to_px(),
-        computed_font_style->as_font_style().to_font_slope(),
-        computed_font_weight->as_number().number(),
-        computed_font_width->as_percentage().percentage(),
-        CSS::FontOpticalSizing::Auto,
-        {},
-        font_feature_data);
+    drawing_state().current_font_cascade_list = CSS::resolve_font_for_style_values(font_computer, move(key));
 }
 
 // https://html.spec.whatwg.org/multipage/canvas.html#dom-context-2d-letterspacing
