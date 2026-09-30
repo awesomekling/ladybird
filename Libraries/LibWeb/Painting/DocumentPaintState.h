@@ -14,9 +14,12 @@
 #include <LibCompositing/Scrolling/ScrollState.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
-#include <LibWeb/Layout/NodeArena.h>
 
 namespace Web::Painting {
+
+// Reads the nodes a selection range reaches into `nodes`, for the render side to stamp the selection states of the rows
+// they are bound to from the snapshot. The snapshot points into `nodes`.
+WEB_API Layout::RustFFI::FfiSelectionSnapshot read_selection_snapshot(DOM::Range&, Vector<Layout::RustFFI::FfiSelectionSnapshotNode>& nodes);
 
 struct BlockingWheelEventRegionState {
     bool has_blocking_wheel_event_listeners { false };
@@ -27,7 +30,8 @@ class WEB_API DocumentPaintState {
 public:
     AK_ALLOC_WITH_KMALLOC;
 
-    explicit DocumentPaintState(Layout::NodeArena&);
+    // `arena` is the document's layout rows, which outlive the document's paint state.
+    explicit DocumentPaintState(void* arena);
 
     void viewport_row_was_reset();
 
@@ -37,6 +41,10 @@ public:
     // context tree is settled; every other consumer reaches the scroll state through that update.
     void refresh_scroll_state(DOM::Document&);
     void did_update_visual_context_values() { m_visual_context_tree_needs_compositor_update = true; }
+    // What the document's flight prepared of the paint state: its visual context update, and the scroll state
+    // snapshot it refreshed, which it hands the snapshot through this.
+    void did_update_accumulated_visual_contexts_in_flight(Layout::RustFFI::FfiVisualContextUpdateOutcome const&);
+    Compositing::ScrollStateSnapshot& scroll_state_snapshot_for_flight() { return m_scroll_state_snapshot; }
 
     void update_accumulated_visual_contexts(DOM::Document&);
     void update_visual_viewport_accumulated_visual_context(DOM::Document&);
@@ -56,7 +64,7 @@ public:
     void append_recording_trace(String trace) { m_recording_traces.append(move(trace)); }
     Vector<String> take_recording_traces() { return exchange(m_recording_traces, {}); }
 
-    void recompute_selection_states(DOM::Document&, DOM::Range&);
+    void recompute_selection_states(DOM::Range&);
     void reset_selection_states(DOM::Document&);
 
     void invalidate_all_cached_paint(DOM::Document&);
@@ -87,7 +95,7 @@ private:
     Vector<String> m_recording_traces;
     void ensure_visual_context_tree(DOM::Document const&) const;
 
-    NonnullRefPtr<Layout::NodeArena> m_layout_node_arena;
+    void* m_arena { nullptr };
 
     Compositing::ScrollStateSnapshot m_scroll_state_snapshot;
 

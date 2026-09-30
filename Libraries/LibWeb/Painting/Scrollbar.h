@@ -13,7 +13,7 @@ namespace Web::Painting {
 
 class Scrollbar final : public ChromeWidget {
 public:
-    static NonnullRefPtr<Scrollbar> create(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId, ScrollDirection);
+    static NonnullRefPtr<Scrollbar> create(DOM::Document&, Compositing::RustFFI::NodeSlotId, ScrollDirection);
 
     bool is_enlarged() const { return m_hovered || m_thumb_grab_position.has_value() || m_drag_is_driven_by_compositor; }
 
@@ -24,15 +24,17 @@ public:
     virtual void mouse_enter() override;
     virtual void mouse_leave() override;
 
+    void publish_enlarged_state(Badge<DOM::InvalidationJournal>);
+
 private:
-    Scrollbar(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId, ScrollDirection);
+    Scrollbar(DOM::Document&, Compositing::RustFFI::NodeSlotId, ScrollDirection);
 
     MouseAction mouse_down(CSSPixelPoint, unsigned button);
     MouseAction mouse_move(CSSPixelPoint);
     MouseAction mouse_up(CSSPixelPoint, unsigned button);
     bool scroll_to_mouse_position(CSSPixelPoint);
     void release_thumb_grab();
-    void push_enlarged_state();
+    void note_enlarged_state_change();
     virtual void did_detach() override;
 
     ScrollDirection m_direction;

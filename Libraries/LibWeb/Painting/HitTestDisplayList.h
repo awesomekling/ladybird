@@ -13,7 +13,6 @@
 #include <LibGC/Ptr.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Painting/ChromeWidget.h>
 #include <LibWeb/Painting/HitTestResult.h>
 
@@ -40,11 +39,12 @@ enum class CaretLineDirection : u8 {
     Next,
 };
 
+// A document's hit-test list with the rows it was recorded over, as the document published them for the main thread to
+// hit test (hit_test/snapshot.rs): finding what a point hits reads the snapshot, and nothing of the layout node arena.
 class WEB_API HitTestDisplayList : public RefCounted<HitTestDisplayList> {
 public:
-    static NonnullRefPtr<HitTestDisplayList> create_from_rust_recording(u64 visual_context_tree_structural_epoch, Layout::NodeArena&, ChromeWidgetRegistry&);
-
-    void visit_edges(GC::Cell::Visitor&);
+    static NonnullRefPtr<HitTestDisplayList> create_from_rust_recording(u64 visual_context_tree_structural_epoch, DOM::Document&, ChromeWidgetRegistry&);
+    ~HitTestDisplayList();
 
     u64 visual_context_tree_structural_epoch() const { return m_visual_context_tree_structural_epoch; }
     [[nodiscard]] bool is_current() const;
@@ -62,11 +62,11 @@ public:
     TraversalDecision hit_test_all(CSSPixelPoint, DOM::Document const&, double device_pixels_per_css_pixel, ChromeMetrics const&, Function<TraversalDecision(HitTestResult)> const&) const;
 
 private:
-    HitTestDisplayList(u64 visual_context_tree_structural_epoch, Layout::NodeArena&, ChromeWidgetRegistry&, u64 rust_generation);
+    HitTestDisplayList(u64 visual_context_tree_structural_epoch, DOM::Document&, ChromeWidgetRegistry&, u64 rust_generation);
 
     struct Item {
         size_t item_index { 0 };
-        Layout::RustFFI::FfiHitTestItemExport facts;
+        Layout::RustFFI::FfiHitTestSnapshotItem facts;
 
         size_t index() const { return item_index; }
         bool can_produce_caret_position() const { return facts.can_produce_caret_position; }
@@ -100,9 +100,26 @@ private:
     };
 
     struct QueryContext;
+
+    // The snapshot a query reads, published as the query starts and let go of as it ends: a held snapshot keeps the
+    // arena from reusing the slots freed after it was published, so the list holds none between queries. A query made
+    // inside another, from a callback of it, reads a snapshot of its own, and the outer query its own again after it.
+    class [[nodiscard]] QuerySnapshotScope {
+        AK_MAKE_NONCOPYABLE(QuerySnapshotScope);
+        AK_MAKE_NONMOVABLE(QuerySnapshotScope);
+
+    public:
+        explicit QuerySnapshotScope(HitTestDisplayList const&);
+        ~QuerySnapshotScope();
+
+    private:
+        HitTestDisplayList const& m_list;
+        RefPtr<HitTestSnapshot const> m_outer_snapshot;
+    };
+    void const* snapshot() const { return m_snapshot->handle(); }
     static Optional<TopmostItem> topmost_item_from(Layout::RustFFI::FfiTopmostItem const&);
     [[nodiscard]] Item item(size_t index) const;
-    [[nodiscard]] Layout::RustFFI::FfiCaretLineExport caret_line(size_t line_index) const { return Layout::RustFFI::layout_arena_hit_test_caret_line(m_arena->handle(), line_index); }
+    [[nodiscard]] Layout::RustFFI::FfiCaretLineExport caret_line(size_t line_index) const { return Layout::RustFFI::hit_test_snapshot_caret_line(snapshot(), line_index); }
 
     [[nodiscard]] Optional<TopmostItem> find_topmost_item(CSSPixelPoint, DOM::Document const&, double device_pixels_per_css_pixel, ChromeMetrics const&) const;
     void find_topmost_items_for_caret(CSSPixelPoint, DOM::Document const&, double device_pixels_per_css_pixel, ChromeMetrics const&, Optional<TopmostItem>& caret_item, Optional<TopmostItem>& hit_item) const;
@@ -114,9 +131,10 @@ private:
 
     [[nodiscard]] Optional<CSSPixelPoint> local_point_for_visual_context(Compositing::ContextRef, CSSPixelPoint, DOM::Document const&, double device_pixels_per_css_pixel) const;
     [[nodiscard]] CSSPixelRect viewport_rect_for_context(Compositing::SpatialNodeIndex, CSSPixelRect const&, DOM::Document const&, double device_pixels_per_css_pixel) const;
-    [[nodiscard]] Layout::Node const* layout_node_for_item(Item) const;
     [[nodiscard]] RefPtr<ChromeWidget> chrome_widget_for_item(Item) const;
     [[nodiscard]] DOM::Node const* item_dom_node(size_t item_index) const;
+    [[nodiscard]] DOM::NodeIdentity item_identity(size_t item_index) const;
+    [[nodiscard]] DOM::NodeIdentity event_dispatch_identity_for_item(size_t item_index) const;
     [[nodiscard]] DOM::Node const* event_dispatch_dom_node_for_item(size_t item_index) const;
     [[nodiscard]] bool item_is_direct_caret_target(size_t item_index) const;
     [[nodiscard]] HitTestResult hit_test_result_for_item(Item, CSSPixelPoint local_point) const;
@@ -125,10 +143,11 @@ private:
     [[nodiscard]] Optional<CaretPosition> caret_position_for_line(size_t line_index, CSSPixelPoint local_point, CaretPositionMode) const;
 
     u64 m_visual_context_tree_structural_epoch { 0 };
-    NonnullRefPtr<Layout::NodeArena> m_arena;
+    GC::Weak<DOM::Document> m_document;
     NonnullRefPtr<ChromeWidgetRegistry> m_chrome_widget_registry;
+    // The snapshot the query in progress reads, which the hits it finds hold as well. None outside a query.
+    mutable RefPtr<HitTestSnapshot const> m_snapshot;
     u64 m_rust_generation { 0 };
-    Vector<GC::Ptr<DOM::Node>> m_caret_node_roots;
 };
 
 }

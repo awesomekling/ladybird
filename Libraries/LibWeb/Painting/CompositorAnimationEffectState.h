@@ -21,6 +21,9 @@ enum class FfiVisualAnimationTargetKind : u8;
 
 namespace Web::Painting {
 
+class BoxSlot;
+struct CompositorAnimationTargetBox;
+
 // The keyframes of an effect as the compositor animation builder reads them: which properties each
 // keyframe gives a value, the easing descriptors with the storage they borrow, and the keyframe set
 // entries the builder resolves values from by index, against the effect's target. An update pass
@@ -37,14 +40,21 @@ public:
 
     // Whether the transforms the effect animates keep the axes in place: it does not rotate, and
     // its transform keyframes only translate and scale.
-    bool transform_preserves_axes(Layout::Node const&) const;
+    bool transform_preserves_axes(DOM::NodeIdentity) const;
+    bool transform_preserves_axes(BoxSlot const&) const;
     // Whether the effect targets only the transform property and only ever translates horizontally.
-    bool only_translates_horizontally(Layout::Node const&) const;
+    bool only_translates_horizontally(DOM::NodeIdentity) const;
+    bool only_translates_horizontally(BoxSlot const&) const;
+
+    // For callers outside Painting that still hold a layout node; these go with the Layout classes.
 
     struct Data;
 
 private:
     friend class CompositorAnimationEffectState;
+
+    bool transform_preserves_axes(CompositorAnimationTargetBox const&) const;
+    bool only_translates_horizontally(CompositorAnimationTargetBox const&) const;
 
     NonnullOwnPtr<Data> m_data;
 };
@@ -80,7 +90,9 @@ public:
     // Builds the animation of one target kind from the effect's keyframes and timing for the nodes
     // of the target's box, and keeps it pending. The builder in Rust lowers and validates the
     // keyframes.
-    BuildOutcome build(CompositorAnimationKeyframes const&, Layout::Node const&, Compositing::RustFFI::FfiVisualAnimationTargetKind, TimingAnchor);
+    BuildOutcome build(CompositorAnimationKeyframes const&, DOM::NodeIdentity, Compositing::RustFFI::FfiVisualAnimationTargetKind, TimingAnchor);
+    BuildOutcome build(CompositorAnimationKeyframes const&, BoxSlot const&, Compositing::RustFFI::FfiVisualAnimationTargetKind, TimingAnchor);
+    // For callers outside Painting that still hold a layout node; these go with the Layout classes.
     void discard_pending(Compositing::RustFFI::FfiVisualAnimationTargetKind);
     bool has_pending() const;
     void clear_pending();
@@ -99,6 +111,8 @@ public:
     void reset();
 
 private:
+    BuildOutcome build(CompositorAnimationKeyframes const&, CompositorAnimationTargetBox const&, Compositing::RustFFI::FfiVisualAnimationTargetKind, TimingAnchor);
+
     void* m_handle { nullptr };
 };
 

@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibGC/WeakInlines.h>
+#include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
-#include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Page/ElementResizeAction.h>
+#include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/ResizeHandle.h>
 #include <LibWeb/UIEvents/EventNames.h>
 #include <LibWeb/UIEvents/PointerEvent.h>
@@ -15,26 +16,25 @@
 
 namespace Web::Painting {
 
-NonnullRefPtr<ResizeHandle> ResizeHandle::create(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
+NonnullRefPtr<ResizeHandle> ResizeHandle::create(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot)
 {
-    return adopt_ref(*new ResizeHandle(arena, slot));
+    return adopt_ref(*new ResizeHandle(document, slot));
 }
 
-ResizeHandle::ResizeHandle(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
-    : ChromeWidget(arena, slot)
-    , m_element(as<DOM::Element>(*layout_node()->dom_node()))
+ResizeHandle::ResizeHandle(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot)
+    : ChromeWidget(document, slot)
+    , m_element(dom_node_identity_of_committed_slot(document, slot))
 {
 }
 
 Optional<CSS::CursorPredefined> ResizeHandle::cursor() const
 {
-    auto* node = layout_node();
-    if (!node)
+    if (!is_current())
         return {};
-    auto axes = physical_resize_axes(*node);
+    auto axes = Layout::RustFFI::layout_arena_paintable_physical_resize_axes(arena(), slot());
     if (axes.vertical) {
         if (axes.horizontal) {
-            if (Layout::RustFFI::layout_arena_paintable_is_chrome_mirrored(node->arena_handle(), committed_row_slot(*node)))
+            if (Layout::RustFFI::layout_arena_paintable_is_chrome_mirrored(arena(), slot()))
                 return CSS::CursorPredefined::SwResize;
             return CSS::CursorPredefined::SeResize;
         }
@@ -52,7 +52,8 @@ MouseAction ResizeHandle::handle_pointer_event(Utf16FlyString const& type, unsig
         return MouseAction::None;
     }
 
-    auto element = m_element.ptr();
+    auto document = this->document();
+    auto* element = document ? as_if<DOM::Element>(m_element.resolve(*document).ptr()) : nullptr;
     if (!element || !element->is_connected()) {
         m_resize_action.clear();
         return MouseAction::None;

@@ -11,6 +11,7 @@
 #include <LibGfx/DecodedImageFrame.h>
 #include <LibGfx/Size.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWebCommon/PixelUnits.h>
 
 namespace Web::Layout {
@@ -44,8 +45,12 @@ public:
 
     virtual void layout_node_was_detached() const { }
 
-    virtual Layout::Node const* image_provider_layout_node() const = 0;
+    // The box the provider provides the image of, if it has one.
+    virtual Painting::BoxSlot image_provider_box() const = 0;
     void image_provider_contents_changed() const;
 };
+
+// The provider an image box paints: the one it owns, or its element.
+ImageProvider const* image_provider_of_image_box(Painting::BoxSlot const&);
 
 }
