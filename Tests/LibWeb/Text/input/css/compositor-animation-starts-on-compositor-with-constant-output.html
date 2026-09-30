@@ -11,7 +11,7 @@
     }
 
     asyncTest(async done => {
-        internals.setManualRenderingOpportunities(true);
+        internals.setManualRenderingOpportunities(true, true);
         await nextTask();
         const firstFrameTime = performance.now();
         for (let i = 0; i < 4; ++i) {
