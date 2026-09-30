@@ -16,7 +16,6 @@
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/DecodedImageData.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/ImagePaint.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
@@ -55,14 +54,18 @@ ValueComparingNonnullRefPtr<StyleValue const> CursorStyleValue::absolutized(Comp
     return CursorStyleValue::create(image().absolutized(computation_context)->as_abstract_image(), absolutized_x, absolutized_y);
 }
 
-Optional<Gfx::ImageCursor> CursorStyleValue::make_image_cursor(Layout::NodeWithStyle const& layout_node, GC::Ptr<HTML::DecodedImageData> decoded_image_data) const
+Optional<Gfx::ImageCursor> CursorStyleValue::make_image_cursor(DOM::Document const& document, Color current_color, GC::Ptr<HTML::DecodedImageData> decoded_image_data) const
+{
+    return make_image_cursor(document, ColorResolutionContext { .color_scheme = {}, .current_color = current_color, .calculation_resolution_context = {} }, decoded_image_data);
+}
+
+Optional<Gfx::ImageCursor> CursorStyleValue::make_image_cursor(DOM::Document const& document, ColorResolutionContext const& gradient_stop_color_resolution_context, GC::Ptr<HTML::DecodedImageData> decoded_image_data) const
 {
     auto const& image = this->image();
-    auto const& document = layout_node.document();
     if (!image.is_paintable(decoded_image_data))
         return {};
 
-    auto current_color = layout_node.color();
+    auto current_color = gradient_stop_color_resolution_context.current_color.value_or(Color {});
     auto const current_color_scheme = document.page().preferred_color_scheme();
 
     // Create a bitmap if needed.
@@ -114,7 +117,7 @@ Optional<Gfx::ImageCursor> CursorStyleValue::make_image_cursor(Layout::NodeWithS
             .dest_rect = bitmap.rect().to_type<float>(),
             .image_rendering = ImageRendering::Auto,
             .color_scheme = current_color_scheme,
-            .gradient_stop_color_resolution_context = Painting::gradient_stop_color_resolution_context(layout_node),
+            .gradient_stop_color_resolution_context = gradient_stop_color_resolution_context,
             .accumulated_scale = { 1, 1 },
             .resource_storage = resource_storage,
         };

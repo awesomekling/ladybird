@@ -63,6 +63,7 @@ void CSSAnimation::set_animation_name_index(size_t index)
     if (m_animation_name_index == index)
         return;
     m_animation_name_index = index;
+    invalidate_style_timing_row();
     if (auto effect = this->effect(); effect && is<Animations::KeyframeEffect>(*effect)) {
         if (auto target = static_cast<Animations::KeyframeEffect&>(*effect).target())
             target->invalidate_associated_animation_composite_order();
@@ -139,6 +140,28 @@ void CSSAnimation::apply_css_properties(AnimationProperties const& animation_pro
 
     auto& effect = as<Animations::KeyframeEffect>(*this->effect());
 
+    // Recorded before the early return below, so that the row always says what the style
+    // computation last computed. The computation's own test is stricter than this function's - it
+    // compares computed values where this compares the easings and durations they parsed into - so
+    // a definition the row calls unchanged is one that would take that early return.
+    m_applied_definition_row = {};
+    auto& row = m_applied_definition_row;
+    row.words[AppliedAnimationDefinitionRow::Duration] = bit_cast<u64>(animation_properties.duration.visit(
+        [](double duration) { return duration; },
+        [](Utf16String const&) { return 0.0; }));
+    row.words[AppliedAnimationDefinitionRow::IterationCount] = bit_cast<u64>(animation_properties.iteration_count);
+    row.words[AppliedAnimationDefinitionRow::Delay] = bit_cast<u64>(animation_properties.delay);
+    row.words[AppliedAnimationDefinitionRow::Flags] = (animation_properties.duration.has<Utf16String>() ? AppliedAnimationDefinitionRow::duration_is_auto : 0)
+        | (static_cast<u64>(to_underlying(animation_properties.direction)) << AppliedAnimationDefinitionRow::direction_shift)
+        | (static_cast<u64>(to_underlying(animation_properties.play_state)) << AppliedAnimationDefinitionRow::play_state_shift)
+        | (static_cast<u64>(to_underlying(animation_properties.fill_mode)) << AppliedAnimationDefinitionRow::fill_mode_shift)
+        | (static_cast<u64>(to_underlying(animation_properties.composition)) << AppliedAnimationDefinitionRow::composition_shift)
+        | (static_cast<u64>(to_underlying(animation_properties.timeline.kind)) << AppliedAnimationDefinitionRow::timeline_kind_shift)
+        | (static_cast<u64>(to_underlying(animation_properties.timeline.scroller)) << AppliedAnimationDefinitionRow::scroller_shift)
+        | (static_cast<u64>(to_underlying(animation_properties.timeline.axis)) << AppliedAnimationDefinitionRow::axis_shift);
+    m_applied_timing_function_value = animation_properties.timing_function_value;
+    m_has_applied_definition_row = static_cast<bool>(m_applied_timing_function_value);
+
     auto const update_timeline = !m_ignored_css_properties.contains(PropertyID::AnimationTimeline)
         && should_update_timeline(timeline(), animation_properties.timeline, timeline_target);
     AppliedCSSProperties applied_properties {
@@ -191,10 +214,26 @@ void CSSAnimation::apply_css_properties(AnimationProperties const& animation_pro
     }
 }
 
+AppliedAnimationDefinitionRow CSSAnimation::applied_definition_row() const
+{
+    // An animation no plan has applied a definition to describes nothing, and an all-zero row is
+    // one no definition can equal: the timing-function word of a real row is never null.
+    if (!m_has_applied_definition_row)
+        return {};
+    auto row = m_applied_definition_row;
+    // The keyframe set is read here rather than recorded, since a definition that creates an
+    // animation applies its properties before the effect is given its keyframes.
+    if (auto effect = this->effect(); effect && is<Animations::KeyframeEffect>(*effect))
+        row.words[AppliedAnimationDefinitionRow::KeyframeSet] = bit_cast<u64>(as<Animations::KeyframeEffect>(*effect).key_frame_set());
+    row.words[AppliedAnimationDefinitionRow::TimingFunction] = bit_cast<u64>(m_applied_timing_function_value.data());
+    return row;
+}
+
 void CSSAnimation::mark_script_play_state_override()
 {
-    if (!m_applying_css_play_state)
-        m_script_overrode_play_state = true;
+    if (m_applying_css_play_state || exchange(m_script_overrode_play_state, true))
+        return;
+    invalidate_style_timing_row();
 }
 
 void CSSAnimation::play_from_css()

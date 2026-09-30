@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/ScopeGuard.h>
 #include <LibWeb/CSS/CalculationResolutionContext.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CustomPropertyRegistration.h>
@@ -12,7 +13,12 @@
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
+#include <LibWeb/ComputedValuesRustFFI.h>
+#include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Element.h>
+#include <LibWeb/StyleDrainScopedFFI.h>
+#include <LibWeb/StyleEngineRustFFI.h>
 
 namespace Web::CSS {
 
@@ -57,41 +63,6 @@ NonnullRefPtr<StyleValue const> initial_custom_property_value(Optional<CustomPro
     // For non-registered properties, the initial value is the guaranteed-invalid value.
     // See: https://drafts.csswg.org/css-variables/#propdef-
     return StyleValue::create_guaranteed_invalid();
-}
-
-NonnullRefPtr<StyleValue const> inherited_custom_property_value(Optional<CustomPropertyRegistration const&> registration, AbstractOrHypotheticalElement const& element, Utf16FlyString const& name, ComputedStyleWorkingSet const* computed_style_for_custom_property_resolution)
-{
-    if (auto element_to_inherit_style_from = element.element_to_inherit_style_from(); element_to_inherit_style_from.has_value()) {
-        if (auto parent_property = element_to_inherit_style_from->get_custom_property(name)) {
-            // NB: With normal style computation we know that ancestors' custom properties are already in their
-            //     computed form (since style computation happens in tree order).
-            if (element.has<DOM::AbstractElement>())
-                return parent_property.release_nonnull();
-
-            VERIFY(element.has<HypotheticalElement*>());
-
-            // NB: Unlike with normal style computation - we don't know that parent's values are in their computed forms
-            //     when evaluating a custom function - a property may rely on resolving a custom function which in turn
-            //     contains a value which inherits a different, not yet computed, custom property's value.
-
-            // FIXME: We probably need to compute this against the declaring element rather than the parent element.
-            auto computed_parent_value = element.document().style_computer().compute_value_of_custom_property(computed_style_for_custom_property_resolution, element_to_inherit_style_from.value(), name);
-
-            // https://drafts.csswg.org/css-mixins/#resolve-function-styles
-            // inherit
-            //   Resolves like an inherit() function with the custom property name as its one and only argument.
-            // Note: This ensures that a function parameter defaulted to inherit is reinterpreted using the local parameter type.
-            if (computed_parent_value->is_guaranteed_invalid())
-                return StyleValue::create_guaranteed_invalid();
-
-            return UnresolvedStyleValue::create(computed_parent_value->is_unresolved()
-                    ? computed_parent_value->as_unresolved().token_source()
-                    : computed_parent_value->to_utf16_string(SerializationMode::ResolvedValueForReparse),
-                {});
-        }
-    }
-
-    return initial_custom_property_value(registration, element.document());
 }
 
 }

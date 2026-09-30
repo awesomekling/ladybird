@@ -7,6 +7,8 @@
 #pragma once
 
 #include <AK/Function.h>
+#include <AK/Span.h>
+#include <LibGC/Ptr.h>
 #include <LibWeb/CSS/PseudoClass.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/Export.h>
@@ -28,27 +30,52 @@ WEB_API void flush_deferred_style_change_events_for_rule(CSSRule&);
 // node identity records nothing at all, which is what keeps disconnected and never-styled content
 // free.
 //
-// Called once a subtree has been linked into a connected tree. Allocates a style node identity for
-// every element and shadow root in it that has none yet, and records the arrival of each element.
+// Called once the document's tree starts being tracked, before anything in it connects. Allocates
+// the document's style node identity, which is the parent every top-level child names.
+WEB_API void record_document_tree_tracked(DOM::Document&);
+
+// Called once a subtree has been linked into a connected tree. Marks it as waiting to arrive: the
+// elements, text nodes and shadow roots in it that have no style node identity yet take one, and
+// the elements record their arrival, only once something observes the style engine.
 WEB_API void record_subtree_connecting(DOM::Node& root);
 
-// Called once a node has been linked into a connected tree. Allocates the element's style node
-// identity if it does not have one yet.
+// Called once a node has been linked into a connected tree. Marks the element as waiting to arrive
+// if it has no style node identity yet and no subtree waiting to arrive covers it.
 WEB_API void record_element_connected(DOM::Element&);
+
+// Called once a text node has been linked into a connected tree. Marks it as waiting to arrive if it
+// has no style node identity yet and no subtree waiting to arrive covers it.
+WEB_API void record_text_connected(DOM::Text&);
+
+// Gives every node waiting to arrive its style node identity and records its arrival, in tree
+// order. Whatever reads the style engine, or a connected node's identity, calls this first.
+WEB_API void take_in_pending_style_arrivals(DOM::Document&);
+
+// Whether a style read of an element needs the nodes still waiting to arrive: they can decide its
+// style, or the style of a node that has arrived, which the read's style update may compute.
+WEB_API bool pending_style_arrivals_may_decide_style_of(DOM::AbstractElement const&);
+
+// Takes in the nodes waiting to arrive for a style read that needs them, even inside a read that
+// left them waiting.
+WEB_API void take_in_pending_style_arrivals_for_read(DOM::Document&);
+
+// While one is alive, the nodes of the document that wait to arrive keep waiting: a read of one
+// element's style that does not need them leaves them to the next observer that does.
+class WEB_API PendingStyleArrivalsWaitScope {
+public:
+    explicit PendingStyleArrivalsWaitScope(DOM::Document const&);
+    ~PendingStyleArrivalsWaitScope();
+
+private:
+    DOM::Document const* m_previous_document { nullptr };
+};
+
+// Called once a text node's data has stopped being, or started being, nothing but ASCII whitespace.
+// That is the only thing about its data the mirror carries.
+WEB_API void record_text_whitespace_state_changed(DOM::Text&);
+WEB_API void record_text_data_changed(DOM::Text&);
 WEB_API void publish_pending_element_features(StyleEngine&, StyleComputer&);
 WEB_API void publish_required_attribute_value_texts(StyleEngine&, StyleComputer&);
-
-WEB_API void configure_isolated_selector_query_engine(StyleEngine&, DOM::Document&);
-
-// Populate an isolated engine with the current facts of a DOM tree. The callback receives the temporary identity
-// assigned to each element; no identity or transaction in the document's resident engine is changed.
-// Returns the query root: the element itself, a fragment's synthetic root, or a document's document element.
-WEB_API StyleNodeID populate_isolated_selector_query_engine(StyleEngine&, DOM::ParentNode&, Function<void(GC::Ref<DOM::Element>, StyleNodeID)> const&);
-
-// Tell the document's engine whether this is an HTML document. Selectors compile against that fact,
-// so it is published before any rule compiles; a selector query compiled by an early script can run
-// before the first sheet attaches, and has to say it itself.
-WEB_API void record_document_kind(DOM::Document&);
 
 // Called while the subtree is still linked, so its old relations are still readable.
 WEB_API void record_subtree_disconnecting(DOM::Node&);
@@ -57,10 +84,28 @@ WEB_API void record_subtree_disconnecting(DOM::Node&);
 // and its identity, so nothing disconnects and nothing connects, and only its relations move.
 WEB_API void record_element_moved(DOM::Element&, DOM::Node* old_parent, DOM::Element* old_previous_sibling, DOM::Element* old_next_sibling);
 
+// Report that an element or text node moved without leaving the tree, which moves its place in the
+// DOM child sequence even where its element relations stay the same.
+WEB_API void record_node_moved_in_dom_order(DOM::Node&, DOM::Node const& old_parent);
+
 // A slottable's assigned slot is its parent in the flat tree, and a slot's name changing reassigns
 // it there without any DOM mutation. Nothing else says so: the element did not move, so no tree
 // delta carries it.
 WEB_API void record_element_assigned_slot_changed(DOM::Element&, DOM::Element* old_slot);
+
+// Report the whole ordered list of slottables a slot has assigned to it. The per-slottable relation
+// above cannot stand in for it: a text slottable holds no relation row to stage a change on, and the
+// order is the DOM's rather than the order assignments arrive in -- a manual assignment orders its
+// nodes the way `assign()` named them, and a reorder among one slot's assignees changes no
+// slottable's slot at all.
+//
+// Assignment runs inside an insertion, before the inserted subtree is named, so a slottable's
+// arrival republishes the list it is now a member of.
+WEB_API void record_slot_assignment_changed(HTML::HTMLSlotElement&);
+WEB_API void record_top_layer_elements_changed(DOM::Document&);
+// Records the slot assignments and the top layer that changed since the recorded input was last submitted, each read
+// from the DOM whole, once.
+void record_changed_node_lists(DOM::Document&, StyleEngine&);
 
 // Called once every element of a shadow tree has recorded its own removal, so nothing still names
 // the root as a parent. A shadow root's identity follows its host's lifetime: keeping it across a
@@ -102,20 +147,107 @@ enum ElementStyleAdjustmentFact : u32 {
     IsTh = 1 << 15,
     IsDocumentElement = 1 << 16,
     HasAnimations = 1 << 17,
-    HasPresentationalHints = 1 << 18,
+    // An SVG graphics element folds its own transform into its SVG container's layout, which the
+    // style engine's damage for the element reads.
+    IsSvgGraphicsElement = 1 << 18,
     // The element stands for an element-reference pseudo-element of its shadow host, whose style
     // it takes.
     IsShadowHostPseudoElement = 1 << 19,
-    // The element's presentational hints are mapped from another element's attributes: a table
-    // cell's from its table's, an image's from its picture's source, a link's from the body's link
-    // colors. They move without any attribute of the element moving.
-    HasDerivedPresentationalHints = 1 << 20,
+    // An HTML <body>. The root's first one propagates its overflow to the viewport, which the style
+    // engine's damage for the element reads.
+    IsHtmlBodyElement = 1 << 20,
+    // The element types layout tree construction branches on. An element's type is fixed when it is
+    // created, so the store holds these rather than the tree builder asking the DOM for them.
+    IsSvgElement = 1 << 21,
+    IsSvgSwitchElement = 1 << 22,
+    IsSvgContainer = 1 << 23,
+    RequiresSvgContainer = 1 << 24,
+    IsSvgForeignObjectElement = 1 << 25,
+    IsSvgMaskElement = 1 << 26,
+    IsSvgClipPathElement = 1 << 27,
+    IsSvgPatternElement = 1 << 28,
+    // Whether the element is rendered in the top layer. Unlike the type facts above it moves during
+    // the element's lifetime, and every move is recorded where the top layer is maintained.
+    RenderedInTopLayer = 1 << 29,
 };
+// What a layout row records about the element it is built for at the moment it is allocated. The
+// tree build reads these out of the mirror rather than out of the DOM node.
+// Mirrors Rust `element_construction_fact`.
+enum ElementConstructionFact : u32 {
+    IsHtmlInputElement = 1 << 0,
+    IsHtmlHtmlElement = 1 << 1,
+    IsInUserAgentShadowTree = 1 << 2,
+    UsesButtonLayout = 1 << 3,
+    IsEditingHost = 1 << 4,
+    IsBody = 1 << 5,
+    // Also an ElementStyleAdjustmentFact, which the style computation reads. A row is built out of
+    // this word alone, so the fact is published into both rather than read across two.
+    ConstructedAsDocumentElement = 1 << 6,
+    IsHtmlImageElement = 1 << 7,
+};
+// What an element's `disabled` attribute makes of it, as the walk from a hit node to an event
+// target reads it.
+enum ElementFormControlDisabledFact : u8 {
+    // A button, input, select, textarea or form-associated custom element carrying the attribute.
+    // It is disabled, and so is everything written under it.
+    DisabledFormControl = 1 << 0,
+    // A `<fieldset>` carrying the attribute. The fieldset itself stays enabled; everything written
+    // under it does not, its first `<legend>` included.
+    DisabledFieldSet = 1 << 1,
+};
+// Which principal box an element asks for before its computed style has a say. The element's own
+// type and state decide this; the tree build resolves it against the element's computed display
+// and appearance. Mirrors Rust `FfiElementBoxKind`.
+enum class ElementBoxKind : u8 {
+    // The computed display decides the box on its own.
+    FromDisplay,
+    // The element generates no box, whatever its display says.
+    NoBox,
+    Break,
+    FieldSet,
+    Legend,
+    Audio,
+    Video,
+    Canvas,
+    NavigableContainerViewport,
+    TextArea,
+    Image,
+    SvgGraphics,
+    SvgSvg,
+    SvgText,
+    SvgTextPath,
+    SvgForeignObject,
+    SvgImage,
+    SvgGeometry,
+    // An input's native widget. `appearance: none` suppresses it, and then the computed display
+    // decides the box like it does for any other element.
+    InputButton,
+    InputCheckBox,
+    InputRadioButton,
+    InputRange,
+    InputText,
+};
+WEB_API u32 element_construction_facts(DOM::Element const&);
+
+// Whether an event aimed at the node named by `identity` would reach a disabled form control on its
+// way out of the tree: the node itself is one, or one of the nodes it is written under is. Each
+// element on the way answers from its own type and attribute alone.
+WEB_API bool event_dispatch_is_disabled(DOM::Document&, DOM::NodeIdentity);
 WEB_API u32 element_style_adjustment_facts(DOM::Element const&);
 WEB_API u32 element_box_type_adjustment_facts(DOM::Element const&);
 WEB_API void record_element_adjustment_facts(DOM::Element&);
+WEB_API void record_element_construction_facts(DOM::Element&);
+WEB_API void record_element_replaced_content_input(DOM::Element&);
 WEB_API bool record_element_presentational_hint_properties(DOM::Element&, ReadonlySpan<StyleProperty>);
+WEB_API void republish_presentational_hints(DOM::Element&);
 WEB_API void record_element_animation_names(DOM::Element&, ReadonlySpan<Utf16FlyString>);
+WEB_API void record_element_css_defined_animations(DOM::Element&, u8 slot, ReadonlySpan<Utf16FlyString> names, ReadonlySpan<u64> definition_words);
+WEB_API void record_element_animation_timing_rows(DOM::Element&, u8 slot, ReadonlySpan<u32> words, ReadonlySpan<u64> times, ReadonlySpan<u64> linear_points);
+WEB_API void record_element_animation_effect_descriptions(DOM::Element&, u8 slot, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>);
+// The keyframe sets travel as the pointers the scope's name table names them by: naming their type
+// here would mean pulling `Animations::KeyframeEffect` into every translation unit that styles.
+WEB_API void record_tree_scope_animation_keyframes(DOM::Document&, TreeScopeID, FlatPtr shadow_root_identity, ReadonlySpan<u32> name_lengths, ReadonlySpan<u16> name_units, ReadonlySpan<FlatPtr> keyframe_sets);
+WEB_API void record_animation_timeline_samples(DOM::Document&, ReadonlySpan<u32> identities, ReadonlySpan<u32> words, ReadonlySpan<u64> times);
 WEB_API void record_element_custom_property_names(DOM::Element&, ReadonlySpan<Utf16FlyString>, bool uses_unnamed, bool uses_custom_functions);
 
 // The same index, from the environments the element and its pseudo-elements resolved to, plus
@@ -136,9 +268,20 @@ WEB_API void record_element_emptiness_changed(DOM::Element&, DOM::Node const& ch
 WEB_API bool can_record_element_state_change(DOM::Element&);
 WEB_API void record_element_state_changed(DOM::Element&, PseudoClass, bool new_value);
 
+class RecordedNonAuthorSheets;
+
 // Called before each style flush. The user-agent and user origins have no sheet list to announce
 // themselves from, so the engine is told about them from here.
-WEB_API void record_non_author_stylesheets(DOM::Document&);
+WEB_API RecordedNonAuthorSheets record_non_author_stylesheets(DOM::Document&);
+
+// That a document's user-agent and user sheets are recorded with its style engine, which only
+// record_non_author_stylesheets() tells. A document that is styled long after it is built takes it
+// as it is built, so that the render owner publishes the sheets' rules as it idles.
+class RecordedNonAuthorSheets {
+private:
+    friend RecordedNonAuthorSheets record_non_author_stylesheets(DOM::Document&);
+    RecordedNonAuthorSheets() = default;
+};
 
 // Called once a sheet has taken its place in the sheet list, so its successor is known.
 WEB_API void record_stylesheet_attached(StyleSheetState&, DOM::Node& document_or_shadow_root, StyleSheetState* before);
@@ -182,5 +325,12 @@ enum class ElementDeclarationKind : u8 {
     SvgPresentationAttribute,
 };
 WEB_API void record_element_declarations_changed(DOM::Element&, ElementDeclarationKind, bool had_declarations, bool has_declarations);
+
+// While a batch's reactions are applied, a host's own style application may rewrite the
+// declarations of an element in its shadow tree, after the engine computed that element's record
+// from the ones it had. These name the elements whose declarations changed that way.
+void begin_noting_declaration_changes_during_apply();
+void end_noting_declaration_changes_during_apply();
+bool declarations_changed_during_apply(StyleNodeID);
 
 }

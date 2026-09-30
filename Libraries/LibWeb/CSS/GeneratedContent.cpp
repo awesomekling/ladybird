@@ -4,46 +4,29 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/GeneratedContent.h>
-#include <LibWeb/CSS/StyleValues/ContentStyleValue.h>
+#include <LibWeb/CSS/PublishedStyleRecord.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
 
 namespace Web::CSS {
 
-static bool style_affects_generated_content_state(ComputedValues const& style)
-{
-    if (!style.counter_increment().is_empty() || !style.counter_reset().is_empty() || !style.counter_set().is_empty())
-        return true;
-    auto content = style.computed_content();
-    return content->is_content() && any_of(content->as_content().content().values(), [](auto const& item) {
-        return item->is_keyword() && first_is_one_of(item->to_keyword(), Keyword::OpenQuote, Keyword::CloseQuote, Keyword::NoOpenQuote, Keyword::NoCloseQuote);
-    });
-}
-
+// Whether the node or any of its descendants styles a counter or a quote, as the records the drain installed say: the
+// ones the node's boxes were built with. Moving such a subtree renumbers what follows it, so the layout tree update has
+// to rebuild rather than splice, and so does a removal.
 bool subtree_affects_generated_content_state(DOM::Node const& node)
 {
-    auto style_affects_state = [](auto const& style) {
-        return style && style_affects_generated_content_state(*style);
+    auto affects = [](PublishedStyleRecord const* style_record) {
+        return style_record && style_record->affects_generated_content_state();
     };
-    bool affects_generated_content_state = false;
-    node.for_each_in_inclusive_subtree([&](DOM::Node const& descendant) {
-        auto const* element = as_if<DOM::Element>(descendant);
-        if (!element)
-            return TraversalDecision::Continue;
-
-        if (!style_affects_state(element->computed_style())
-            && !style_affects_state(element->computed_style(PseudoElement::Before))
-            && !style_affects_state(element->computed_style(PseudoElement::After))
-            && !style_affects_state(element->computed_style(PseudoElement::Marker))) {
-            return TraversalDecision::Continue;
-        }
-
-        affects_generated_content_state = true;
-        return TraversalDecision::Break;
-    });
-    return affects_generated_content_state;
+    return node.for_each_in_inclusive_subtree_of_type<DOM::Element>([&](DOM::Element const& element) {
+        if (affects(element.published_style_record())
+            || affects(element.published_style_record(PseudoElement::Before))
+            || affects(element.published_style_record(PseudoElement::After))
+            || affects(element.published_style_record(PseudoElement::Marker)))
+            return TraversalDecision::Break;
+        return TraversalDecision::Continue;
+    }) == TraversalDecision::Break;
 }
 
 }

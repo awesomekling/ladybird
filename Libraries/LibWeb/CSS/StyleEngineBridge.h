@@ -11,6 +11,7 @@
 #include <AK/HashTable.h>
 #include <AK/Noncopyable.h>
 #include <AK/Optional.h>
+#include <AK/Queue.h>
 #include <AK/Span.h>
 #include <AK/StringView.h>
 #include <AK/Types.h>
@@ -18,11 +19,21 @@
 #include <AK/Vector.h>
 #include <LibGC/Cell.h>
 #include <LibGC/Ptr.h>
+#include <LibWeb/CSS/PublishedStyleRecord.h>
+#include <LibWeb/CSS/StyleDrainScope.h>
 #include <LibWeb/CSS/StyleEngineIdentifiers.h>
+#include <LibWeb/CSS/StyleInputScope.h>
 #include <LibWeb/CSS/StyleRecordID.h>
 #include <LibWeb/ComputedValuesRustFFI.h>
 #include <LibWeb/Export.h>
+#include <LibWeb/StyleDrainScopedFFI.h>
 #include <LibWeb/StyleEngineRustFFI.h>
+
+namespace Web::CSS::Parser::ValueParserFFI {
+
+struct DeclarationBlockData;
+
+}
 
 namespace Web::CSS::StyleValueFFI {
 
@@ -36,8 +47,26 @@ namespace Web::CSS {
 enum class StyleRecordDependencyFlag : u8;
 
 class StyleComputer;
+class StyleInputScope;
 class RustDeclarationBlock;
 struct StyleProperty;
+
+// A style sheet's resource context as a rule's cascaded values read it, keyed by its native
+// sheet: an imported sheet has its own.
+struct CollectedStyleSheetResourceContext {
+    u64 source_identity { 0 };
+    String base_url;
+    bool has_base_url { false };
+    bool origin_clean { false };
+};
+// The resource contexts of the document's style sheets as the last transaction was lent them,
+// and what they were collected against. A document can have a shadow root, and a sheet, per
+// element, so they are collected again only once either has moved on.
+struct StyleSheetResourceContexts {
+    Vector<CollectedStyleSheetResourceContext> contexts;
+    u64 style_sheet_set_generation { 0 };
+    String document_api_base_url;
+};
 
 // Owns one document's StyleEngine. The engine itself lives entirely on the Rust side: selector
 // evaluation, cascade, computed values, and every index and identity they are keyed by. C++ keeps
@@ -52,16 +81,25 @@ class WEB_API StyleEngine {
 
 public:
     using DeviceClass = StyleEngineFFI::FfiDeviceClass;
-    explicit StyleEngine(DeviceClass, StyleComputer* = nullptr);
+    // The engine is born linked to the render state of its document, whose arena `render_state_arena` is.
+    StyleEngine(void* render_state_arena, DeviceClass, StyleComputer* = nullptr);
     ~StyleEngine();
 
     void visit_edges(GC::Cell::Visitor&);
 
 #include <LibWeb/StyleEngineBridgeGenerated.h>
 
-    // Identity 0 is never returned; it means "no node".
-    StyleNodeID allocate_style_node();
-    void allocate_style_nodes(Span<StyleNodeID> nodes);
+    // The host names a node the moment it connects, from identities the engine granted it ahead of
+    // time, and the mint crosses with the next transaction ahead of everything written to the identity
+    // since. Identity 0 is never minted; it means "no node".
+    StyleNodeID mint_style_node();
+    void mint_style_nodes(Span<StyleNodeID> nodes);
+    void mint_text_style_nodes(Span<StyleNodeID> nodes);
+    // An identity that stands in the tree only to be named by relations, and is never styled.
+    StyleNodeID mint_relation_only_style_node();
+    // Makes the grant cover this many mints of each kind, so that minting a subtree asks for identities
+    // at most once.
+    void ensure_granted_style_nodes(size_t element_count, size_t text_count);
     void defer_element_initial_features(StyleNodeID style_node)
     {
         m_nodes_with_pending_initial_features.set(style_node);
@@ -74,56 +112,65 @@ public:
     }
     [[nodiscard]] bool has_deferred_element_initial_features(StyleNodeID style_node) const { return m_nodes_with_pending_initial_features.contains(style_node); }
     HashTable<StyleNodeID> take_deferred_element_initial_features();
+    [[nodiscard]] bool has_elements_awaiting_first_style_computation() const { return !m_nodes_awaiting_first_style_computation.is_empty(); }
     HashTable<StyleNodeID> take_elements_awaiting_first_style_computation();
 
     void set_element_parts(StyleNodeID node, ReadonlySpan<StyleAtomID> names, ReadonlySpan<StyleNodeID> hosts);
     void set_element_language(StyleNodeID node, StyleAtomID language, Utf16View tag);
+    void set_element_id_name(StyleNodeID node, StyleAtomID name);
+    void set_element_directionality(StyleNodeID node, StyleAtomID directionality);
+    void set_element_heading_level(StyleNodeID node, u8 level);
+    void set_element_custom_states(StyleNodeID node, ReadonlySpan<StyleAtomID> states);
+    void set_element_part_exposure(StyleNodeID node, StyleNodeID exposure);
     // Which longhand properties one of an element's own declarations covers, their canonical
     // specified values and their authored aliases, and whether the inventory has complete
     // continuation semantics.
-    void set_element_inline_style_properties(StyleNodeID node, RustDeclarationBlock const*);
     void set_element_presentational_hint_properties(StyleNodeID node, StyleEngineFFI::FfiElementDeclarationKind, ReadonlySpan<StyleProperty>);
     struct StyleRecordDelta {
         StyleRecordID old_style_record;
         StyleRecordID new_style_record;
     };
     using StyleRecordView = StyleEngineFFI::FfiStyleRecordView;
-    using ExactCascadePublication = StyleEngineFFI::FfiExactCascadePublication;
-    // The returned assignments borrow Rust storage until the next mutable engine call or an
-    // explicit discard. Consume them synchronously before asking the engine anything else.
-    [[nodiscard]] ReadonlySpan<ComputedValuesFFI::FfiSourceSlotAssignment> materialize_retained_cascade_state(StyleNodeID node, u8 pseudo_kind, ComputedValuesFFI::CascadedPropertyStore*, ReadonlySpan<ComputedValuesFFI::FfiCascadeBlock>);
-    void discard_retained_cascade_assignments();
-    [[nodiscard]] ExactCascadePublication publish_exact_cascade_state(StyleNodeID node, u8 pseudo_kind, ComputedValuesFFI::CascadedPropertyStore const*, u8 inherited_style_groups = 0, StyleNodeID donor_node = {}, StyleRecordID donor_style_record = {});
     // Publish the immutable input identities of an element or pseudo-element's base style and
     // return its previous and current StyleRecordID assignments. A zero node interns an unassigned
     // record for a style target which is not registered in the engine.
     [[nodiscard]] StyleRecordDelta publish_computed_groups(StyleNodeID node, u8 pseudo_kind, ReadonlySpan<void const*> payloads, size_t inherited_group_count, u64 custom_property_environment, bool inherited_group_swap_candidate, u64 counter_style_environment_identity, u64 animation_overlay_identity, void const* animated_overlay, ReadonlySpan<void const*> animation_overlay_payloads, void const* computed_longhand_table, void const* custom_property_store);
-    [[nodiscard]] Optional<StyleRecordDelta> publish_animation_overlay(StyleNodeID node, u8 pseudo_kind, u64 animation_overlay_identity, void const* animated_overlay, ReadonlySpan<void const*> payloads);
-    [[nodiscard]] StyleRecordDelta assign_shared_style_record(StyleNodeID node, u8 pseudo_kind, StyleRecordID style_record, bool inherited_group_swap_eligible);
-    [[nodiscard]] Optional<StyleRecordDelta> reaffirm_style_record(StyleNodeID node, u8 pseudo_kind);
-    // The borrowed payload array is stable while a base record exists or an animation-overlay
-    // generation remains assigned or pinned.
-    [[nodiscard]] void const* style_record_payloads(StyleRecordID style_record) const;
-    [[nodiscard]] StyleRecordDependencyFlag style_record_dependency_flags(StyleRecordID style_record) const;
-    [[nodiscard]] u64 style_record_custom_property_environment(StyleRecordID style_record) const;
-    void begin_computed_record_verification();
-    void end_computed_record_verification();
-    [[nodiscard]] bool style_records_match_for_verification(StyleNodeID, u8 pseudo_kind, StyleRecordID, StyleRecordID) const;
-    [[nodiscard]] u32 compare_style_records(StyleRecordID old_style_record, StyleRecordID new_style_record, bool font_lists_equal, bool element_folds_transform_into_layout, bool element_propagates_overflow_to_viewport) const;
-    [[nodiscard]] bool animation_overlay_changed(StyleRecordID old_style_record, void const* animated_overlay) const;
-    [[nodiscard]] Optional<u32> current_color_dependent_style_groups(StyleNodeID node, u8 pseudo_kind) const;
-    [[nodiscard]] StyleEngineFFI::FfiAnimationInvalidation compare_animation_overlay(StyleRecordID old_style_record, void const* animated_overlay, ReadonlySpan<void const*> payloads, bool is_document_element) const;
-    [[nodiscard]] StyleRecordView style_record_view(StyleRecordID style_record) const;
+    // The record as a value that owns everything a read of it reads, for the drain to install; null for a record the
+    // engine no longer holds. Nothing reads a record through its identity: every read is made through the value.
+    [[nodiscard]] RefPtr<PublishedStyleRecord const> publish_style_record(StyleDrainScope const&, StyleRecordID style_record) const;
+    // A style read that has to answer synchronously: the render owner answers it with the document's engine. The
+    // answer owns one reference to the record it names (published_record), which the caller adopts.
+    [[nodiscard]] StyleEngineFFI::FfiRecordDemandAnswer answer_read_demand(StyleNodeID node, u8 pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only, StyleRecordID parent_highlight);
+    // The animation definitions an engine-settled row left for the host, taken so that exactly one
+    // application drains them. Borrowed until the next row's are taken.
+    struct SettledAnimationDefinitions {
+        ReadonlySpan<ComputedValuesFFI::FfiComputedAnimation> definitions;
+        bool owed { false };
+        bool in_display_none_subtree { false };
+    };
+    [[nodiscard]] SettledAnimationDefinitions take_settled_animation_definitions(StyleDrainScope const&, StyleNodeID node, u8 pseudo_kind);
+    // The document thread's own pins, which keep a record from reclamation for its readers. They
+    // live in a table beside the engine, so taking or releasing one never waits for a style pass.
+    void pin_style_record(StyleRecordID style_record) const;
+    void unpin_style_record(StyleRecordID style_record) const;
+    // A pin the document thread takes once the frame in flight is taken in, for a record it cannot
+    // name before then. Until the pin lands, the engine reclaims no record.
+    void begin_pin_waiting_for_frame() const;
+    void end_pin_waiting_for_frame() const;
+    void begin_style_record_view_epoch();
+    void end_style_record_view_epoch();
     void decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput&, StyleValueFFI::FfiTransitionAction*) const;
     // Remove the retained input identities for one pseudo-element kind and return its removal.
     [[nodiscard]] StyleRecordDelta remove_computed_pseudo(StyleNodeID node, u8 pseudo_kind);
-    void finish_sheet_rules_replacement(SheetID sheet);
-    // A fresh identity for an element-sourced declaration block.
-    //
-    // A block's contents change while the CSSOM object stays the same, so its address is not what
-    // makes one version of it different from the next. A version is: an edit that reported the same
-    // identity on both sides would cancel in the journal and invalidate nothing.
-    [[nodiscard]] u32 next_declaration_block_version() { return StyleEngineFFI::style_engine_next_declaration_block_version(m_impl); }
+    // Replaces a sheet's rules with what `compile` publishes, as one unit: its two ends go to the engine the way the
+    // compiled rules do, so nothing another replacement sends can come between them.
+    template<typename Compile>
+    void replace_sheet_rules(SheetID sheet, Compile&& compile)
+    {
+        StyleEngineFFI::style_engine_begin_sheet_rules_replacement(rust_handle(), sheet.value());
+        compile();
+        StyleEngineFFI::style_engine_finish_sheet_rules_replacement(rust_handle(), sheet.value());
+    }
 
     // Interns one selector-mentioned name and returns its process-global atom, retained by this
     // document.
@@ -134,14 +181,12 @@ public:
     StyleAtomID intern_atom(Utf16FlyString const&);
     // The engine keeps what a custom property's name spells, once per name, for the environments
     // it computes.
-    void note_custom_property_name(StyleAtomID, Utf16FlyString const&);
     // The store of an environment the engine resolved, with one strong reference transferred, and
     // the environment it was resolved over; null for one C++ published.
     [[nodiscard]] void const* borrow_engine_custom_property_environment(u64 identity, u64& parent_identity) const;
-    // Moves a node's record to the environment its inherited custom-property data was refreshed
-    // to; the new record's identity, or zero when nothing moved.
-    [[nodiscard]] StyleRecordID republish_record_environment(StyleNodeID, u64 environment, void const* store);
-    [[nodiscard]] StyleEngineFFI::FfiEngineComputedRecord retry_engine_record_after_ancestor(StyleNodeID);
+    void prepare_root_font_resolution(u64 font_environment_generation);
+    void publish_font_faces();
+
     // Whether an environment identity is one the engine minted for an environment it resolved.
     [[nodiscard]] static bool is_engine_custom_property_environment(u64 identity) { return (identity & (1ull << 62)) != 0; }
     [[nodiscard]] u64 atom_generation() const { return m_atom_generation; }
@@ -161,11 +206,11 @@ public:
     // boundary again merely to recover an already published name.
     StyleAtomID intern_attribute_name(Utf16FlyString const& local_name, Optional<Utf16FlyString> const& namespace_uri);
 
-    // Interns an attribute value and records what it spells when a selector for this name needs
-    // text. Values repeat heavily, so demanded text crosses once per distinct value.
+    // Interns an attribute value and records what it spells when a selector or an attr() can read
+    // this name. Values repeat heavily, so the text crosses once per distinct value.
     StyleAtomID intern_attribute_value(StyleAtomID name, Utf16String const& value);
     // Demand expansion already has every value identity. Check the name before interning the text
-    // so attributes no selector reads do not pay another string hash.
+    // so attributes nothing reads as text do not pay another string hash.
     void backfill_attribute_value_text_if_required(StyleAtomID name, Utf16String const& value);
 
     // Deltas accumulate here and cross in one flat batch per style flush, never one call per
@@ -175,6 +220,53 @@ public:
     void record_local_feature_delta(StyleEngineFFI::FfiLocalFeatureDelta const&);
     void record_state_delta(StyleEngineFFI::FfiStateDelta const&);
     void record_element_declaration_delta(StyleEngineFFI::FfiElementDeclarationDelta const&);
+    // Writes to the facts of the mirror the DOM holds and nothing selects or invalidates on: the DOM
+    // child sequence, what a text node holds, and what an element is. They cross with the next
+    // transaction, in the order they were made.
+    //
+    // DOM-order links are `(node, parent, previous sibling)` triples of raw identities in tree order,
+    // so that each previous sibling is linked first.
+    void record_dom_order_links(ReadonlySpan<u32> links);
+    void record_dom_order_unlink(StyleNodeID node, StyleNodeID parent);
+    void record_text_retirements(ReadonlySpan<StyleNodeID>);
+    void record_text_is_ascii_whitespace(StyleNodeID, bool);
+    // The unique id the document knows a node by, which arrives with the node's identity.
+    void record_unique_node_id(StyleNodeID, u64 unique_node_id);
+    // A shadow root's link to its host, the root a tree scope is named by, and a tree scope styled by the document's
+    // sheets rather than its own.
+    void record_shadow_root(StyleNodeID host, StyleNodeID shadow_root);
+    void record_tree_scope_root(TreeScopeID, StyleNodeID root);
+    void record_tree_scope_uses_document_sheets(TreeScopeID);
+    // The nodes assigned to a slot, and the document's top layer, each a whole list at a time. A change to one only
+    // notes it: record_changed_node_lists() records each list that changed once, as the recorded input is submitted.
+    void note_slot_assignment_changed(StyleNodeID slot);
+    void note_top_layer_changed();
+    [[nodiscard]] OrderedHashTable<StyleNodeID> take_slots_whose_assignment_changed() { return move(m_slots_whose_assignment_changed); }
+    [[nodiscard]] bool take_top_layer_changed() { return exchange(m_top_layer_changed, false); }
+    void record_slot_assigned_nodes(StyleNodeID slot, ReadonlySpan<StyleNodeID> assigned);
+    void record_top_layer_elements(ReadonlySpan<StyleNodeID> elements);
+    // What an element's style asked of size query containers, which finds the dependents a container's new box moves,
+    // and that a moved custom-property environment computes it again. None of them is ever taken back.
+    void record_size_query_container(StyleNodeID);
+    void record_style_depends_on_size_container_query(StyleNodeID);
+    void record_recomputes_on_environment_move(StyleNodeID);
+    void record_size_container_needs_evaluation_after_layout(StyleNodeID);
+    void record_children_explicitly_inherit(StyleNodeID);
+    void record_rule_conditions_hold(u64 rule_identity, bool holds);
+    // What a row built for a node is painted and hit-tested with, and the spans of a table cell or column. Each is
+    // recorded as the node arrives and again as it changes, and the last one recorded goes in.
+    void record_dom_paint_facts(StyleNodeID, u8 facts);
+    void record_table_spans(StyleNodeID, u16 column_span, u16 row_span, u32 raw_column_span);
+    void record_text_is_in_user_agent_shadow_tree(StyleNodeID, bool);
+    void record_text_is_password_input(StyleNodeID, bool);
+    void record_text_data(StyleNodeID, Utf16String const&);
+    void record_adjustment_facts(StyleNodeID, u32 facts);
+    void record_associated_pseudo_kind(StyleNodeID, u8 pseudo_kind_plus_one);
+    void record_construction_facts(StyleNodeID, u32 facts, u8 box_kind);
+    void record_replaced_content_input(StyleNodeID, StyleEngineFFI::FfiReplacedContentInput const&);
+    // A snapshot of the element's inline style declarations, or null for none. The write takes the
+    // snapshot's reference.
+    void record_inline_style_properties(StyleNodeID, Parser::ValueParserFFI::DeclarationBlockData const*);
     enum StyleReaction : u8 {
         PublishedStyle = 1 << 0,
         RecomputeStyle = 1 << 1,
@@ -185,6 +277,21 @@ public:
         PseudoInputsMayHaveChanged = 1 << 6,
         FontInputsChanged = 1 << 7,
     };
+    // What a record the engine settled leaves for the host to apply once the batch is installed:
+    // the transition step it owes, and whether it also left an animation plan.
+    enum SettledRowEffectDebt : u8 {
+        SettledRowTransitionDebt = 3,
+        SettledRowOwesAnAnimationPlan = 1 << 2,
+        SettledRowOwesAnAnimationSample = 1 << 3,
+    };
+    // What the winners an element's records were computed from read beyond their cascade.
+    enum NodeRecordReads : u8 {
+        NodeRecordReadsIfFunction = 1 << 0,
+        NodeRecordReadsInheritFunction = 1 << 1,
+        NodeRecordReadsCustomFunction = 1 << 2,
+        NodeRecordReadsAttributes = 1 << 3,
+        NodeRecordReadsTreeCounting = 1 << 4,
+    };
     // What applying a style reaction found, reported so the engine derives the children's reactions.
     enum StyleReactionAppliedFact : u32 {
         DidChangeCustomProperties = 1 << 0,
@@ -193,23 +300,52 @@ public:
         RecomputeDescendants = 1 << 3,
         ChildrenExplicitlyInherit = 1 << 4,
         ShadowChildrenExplicitlyInherit = 1 << 5,
-        WasUnstyled = 1 << 6,
-        WasDisplayNone = 1 << 7,
-        DisplayChanged = 1 << 11,
+        // What the element held as the application began, against what it holds now.
+        RowWasUnstyled = 1 << 6,
+        RowWasDisplayNone = 1 << 7,
+        RowDisplayChanged = 1 << 8,
     };
-    void record_element_style_input_change(StyleNodeID style_node, u8 reaction = PublishedStyle | RecomputeStyle, u8 inherited_style_groups = 0);
+    void record_container_query_input_change(StyleNodeID);
+    // Records every element whose style a size query or container-relative unit decided against the container.
+    void record_size_container_query_dependents(StyleNodeID container);
     // A reaction C++ derived from one it applied, for the engine to settle where it can.
     void record_derived_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups = 0);
+    void record_tree_counting_style_input_change(StyleNodeID style_node);
     void record_flat_tree_descendant_style_input_changes(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups = 0);
-    [[nodiscard]] Vector<StyleNodeID> viewport_dependent_style_nodes();
+    // Gives every row whose style depends on viewport metrics the derived reaction, where the engine's owner applies it.
+    void record_viewport_dependent_style_inputs(u8 reaction);
     [[nodiscard]] bool has_recorded_element_style_input_change(StyleNodeID style_node) const;
     void record_benchmark_marker(Utf16View);
     [[nodiscard]] bool has_recorded_input() const;
+    // Nodes that connected without taking an identity yet count as recorded input: they arrive when the input is
+    // next submitted.
+    void note_pending_arrivals(size_t count);
+    [[nodiscard]] bool has_pending_arrivals() const { return m_pending_arrival_count > 0; }
+    void forget_pending_arrivals() { m_pending_arrival_count = 0; }
     [[nodiscard]] bool has_pending_transaction() const;
+    // Keep a style reaction the host applied to an element as it installed a batch, which the next transaction derives
+    // the element's children's reactions from: `reaction` is what the element reacted to, `inherited_style_groups_changed`
+    // names the inherited groups its style moved, and `facts` says what else the application found. It goes to the
+    // engine with that transaction.
+    void record_applied_style_reaction(StyleNodeID, u8 reaction, u8 inherited_style_groups_changed, u32 facts);
+    // Leave the element's synthetic pseudo-elements for the next transaction's pass to settle, as the drain installed a
+    // composition they inherit from after the pass that settled the element: `old_is_list_item` is whether the element
+    // generated a marker before, and `held_pseudo_records` the records the host holds for its pseudo-elements, one per
+    // kind. It goes to the engine with that transaction.
+    void settle_pseudo_elements_in_next_pass(StyleDrainScope const&, StyleNodeID, bool old_is_list_item, ReadonlySpan<u64> held_pseudo_records);
+    // Whether the host's installs handed back anything the next transaction takes (see record_applied_style_reaction()
+    // and settle_pseudo_elements_in_next_pass()). What a flush without a document root held back is not owed: it goes
+    // with the first transaction with a root, which something else asks for.
+    [[nodiscard]] bool has_install_feedback() const { return !m_install_feedback_held_back && (!m_applied_style_reactions.is_empty() || !m_pseudo_element_settles.is_empty()); }
+    // Whether a `:has()` or `:empty` selector may take part in the next transaction, letting a node anywhere decide an
+    // element's style.
+    [[nodiscard]] bool may_have_child_dependent_selectors() const;
     [[nodiscard]] bool has_deferred_geometry_transaction() const;
     [[nodiscard]] bool has_deferred_element_style_inputs() const;
     [[nodiscard]] bool has_deferred_element_style_input(StyleNodeID style_node) const;
-    [[nodiscard]] bool pending_transaction_may_affect_layout_geometry();
+    // Whether a geometry read may reuse the current layout: nothing pending can move layout geometry. What is pending
+    // is kept as the style change event the read establishes, which a later inline transition declaration still needs
+    // as its before-change style.
     [[nodiscard]] bool defer_pending_transaction_for_geometry_read();
     [[nodiscard]] bool begin_deferred_geometry_transaction_flush();
     void end_deferred_geometry_transaction_flush();
@@ -221,18 +357,80 @@ public:
 
     // Submits everything recorded since the last flush as one transaction and normalizes it.
     void flush();
+    // Flushes as flush() does while the document has no root to take a transaction from, holding back what the host's
+    // installs handed back for the first transaction with one.
+    void flush_without_document_root();
 
     using PublishedStyleDelta = StyleEngineFFI::FfiStyleDelta;
     struct PublishedTransactionVersion {
         u64 transaction;
         u64 program;
     };
+    // The version pair the last non-empty style transaction published. The program version names
+    // the match program the engine answered from; the transaction version names the publication.
+    // A reader that saw a value at a program version is looking at the same program while it has
+    // not moved.
+    [[nodiscard]] PublishedTransactionVersion published_transaction_version() const { return m_published_transaction_version; }
+    void note_published_transaction_version(PublishedTransactionVersion version) { m_published_transaction_version = version; }
+    // The elements connected to the document as the last style transaction was taken, published
+    // with it.
+    [[nodiscard]] u32 connected_element_count_at_last_transaction() const { return m_connected_element_count_at_last_transaction; }
+
+    // Whether a style pass is in flight: a batch the engine published waits for the host, or the
+    // host is draining one. An input published now is one the pass did not see (see StyleInputScope).
+    [[nodiscard]] bool pass_is_in_flight() const { return m_published_batch_waits || !m_effect_drain_scopes.is_empty(); }
+    void set_published_batch_waits(bool waits)
+    {
+        m_published_batch_waits = waits;
+        publish_inputs_queued_during_pass();
+    }
+    // The drain installs a batch under its scope; publish_input_or_apply_in_drain() hands the innermost one on.
+    void enter_effect_drain(StyleDrainScope const& scope) { m_effect_drain_scopes.append(&scope); }
+    void leave_effect_drain()
+    {
+        VERIFY(!m_effect_drain_scopes.is_empty());
+        m_effect_drain_scopes.take_last();
+        publish_inputs_queued_during_pass();
+    }
+
+    // Whether a layout pass that reads this engine is in flight. What the host publishes beside it waits for the
+    // pass to be taken back, and is published as its frame ends (see publish_inputs_waiting_for_layout_pass()).
+    [[nodiscard]] bool layout_pass_is_in_flight() const;
+
+    // Publish a style input: at once between passes, and once the pass has drained while one is in
+    // flight, in the order the host published them. Beside a layout pass it waits for the pass the same way.
+    void publish_input(Function<void(StyleInputScope const&)>&&);
+    // Publish an input the drain records too, and whose later waves read: at once inside a drain, under
+    // the drain's scope, and as publish_input() otherwise. `input` takes either scope (a dual entry, see
+    // StyleInputScope).
+    template<typename Input>
+    void publish_input_or_apply_in_drain(Input&& input)
+    {
+        if (m_effect_drain_scopes.is_empty()) {
+            publish_input(forward<Input>(input));
+            return;
+        }
+        input(*m_effect_drain_scopes.last());
+    }
+
+    // The layout frame's end: what was published beside its pass reaches the engine, ahead of anything published
+    // after it.
+    void publish_inputs_waiting_for_layout_pass() { publish_inputs_queued_during_pass(); }
+    // Whether anything was recorded or published beside the layout pass in flight, which the frame that submitted
+    // the pass did not apply before it.
+    [[nodiscard]] bool has_input_beside_layout_pass() const { return has_recorded_input() || !m_inputs_queued_during_pass.is_empty(); }
+
+    // While the host takes a submitted pass back and drains it, what was recorded and published beside the pass
+    // waits for the next transaction: an operation that the drain interrupted must not have half of its input
+    // taken by the drain's waves.
+    void begin_holding_input_recorded_beside_pass();
+    void end_holding_input_recorded_beside_pass();
+
     struct PublishedStyleTransaction {
         PublishedTransactionVersion version;
         ReadonlySpan<PublishedStyleDelta> reactions;
         bool is_scoped;
         bool only_derived_child_reactions;
-        u32 connected_element_count;
         // Returned to the caller so diagnostic transactions do not charge style-update clocks.
         u64 submission_microseconds;
         u64 bridge_microseconds;
@@ -244,9 +442,46 @@ public:
     // NB: The returned reactions borrow Rust storage until the next mutable engine call or an
     //     explicit discard. Consume them synchronously before asking the engine anything else.
     bool take_diagnostic_style_transaction(StyleNodeID root, Function<void(ReadonlySpan<StyleNodeID>)>&&);
-    PublishedStyleTransaction take_style_transaction(StyleNodeID root);
-    void sort_style_deltas_for_direct_application(Span<PublishedStyleDelta>) const;
-    void discard_style_transaction_outputs();
+    // Where the render owner applies the batch of a style transaction it takes to the layout nodes of the rows'
+    // elements itself, as a flight applies its pass's: the elements the viewport propagates its overflow, writing mode
+    // and direction from, which only a full layout pass propagates again.
+    struct OwnerRenderHalf {
+        ReadonlySpan<StyleNodeID> viewport_propagation_sources;
+    };
+    PublishedStyleTransaction take_style_transaction(StyleNodeID root, Optional<OwnerRenderHalf> = {});
+    // Whether the owner applied the batch of a transaction the host took since it asked last: the style update that
+    // installs the batch ends that render half once it has installed it.
+    [[nodiscard]] bool take_owner_applied_render_half() { return exchange(m_owner_applied_render_half, false); }
+    // Takes pending inputs as take_style_transaction() does, and hands the transaction's pass to the render side
+    // instead of waiting for it. Until the frame in flight is taken back, the pass owns
+    // the engine, and every engine entrance joins the frame first. The document's layout arena stays the main
+    // thread's.
+    void submit_style_transaction(StyleNodeID root);
+    // The transaction submit_style_transaction() submitted, once its frame has been taken back.
+    PublishedStyleTransaction finish_submitted_style_transaction();
+    // A node removed beside a submitted pass gives up its style node identity while the pass may still answer for
+    // it. Its removal waits with the rest of what was published beside the pass, so the engine goes on answering for
+    // it in the drain's waves too, and the identity is not issued again until the removal has crossed. Until then,
+    // the drain skips its answers.
+    void note_style_node_retired(StyleNodeID);
+    // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
+    // The before-change style of a target in the style stabilization epoch: the first record named for it, which the
+    // engine's passes decide the target's transitions against too, and which stays live while it is held here, until
+    // the epoch commits or the target's identity retires.
+    void record_transition_baseline(StyleDrainScope const&, StyleNodeID, u8 pseudo_kind, RefPtr<PublishedStyleRecord const>);
+    [[nodiscard]] RefPtr<PublishedStyleRecord const> transition_baseline(StyleNodeID, u8 pseudo_kind) const;
+    void release_transition_baselines(StyleDrainScope const&);
+    [[nodiscard]] bool style_node_was_retired_beside_pass(StyleNodeID style_node) const { return m_style_nodes_retired_beside_pass.contains(style_node); }
+    // A submitted pass counts an element's siblings as they were when it was submitted. An element whose first record
+    // reading a tree-counting function comes from that pass is not known to read one while its siblings change beside
+    // the pass, so the parents whose children changed are kept until the drain has installed the pass's records.
+    void note_children_changed(StyleNodeID parent)
+    {
+        if (m_submitted_pass_in_flight && parent != 0)
+            m_parents_whose_children_changed_beside_pass.set(parent);
+    }
+    [[nodiscard]] bool children_changed_beside_pass(StyleNodeID parent) const { return m_parents_whose_children_changed_beside_pass.contains(parent); }
+    void discard_style_transaction_outputs(StyleDrainScope const&);
 
     using RuleMatch = StyleEngineFFI::FfiRuleMatch;
 
@@ -259,22 +494,9 @@ public:
     // callers may omit rules whose declarations cannot win; exact callers receive the same answer
     // as the document pass. Returns false when matching could not complete.
     bool match_element(StyleNodeID node, Vector<RuleMatch>&, MatchPurpose);
-    // Reads the complete match answer published by the style transaction which opened the active
-    // traversal. False means that transaction did not publish an answer for this node.
-    bool consume_published_match_answer(StyleNodeID node, Vector<RuleMatch>&);
-    void* compile_selector_query(ReadonlySpan<void const*> selectors);
-    // For an engine with no StyleComputer to reach its elements through: when the new query demands attribute value
-    // text that earlier facts were published without, the callback republishes every attribute value the engine holds.
-    void* compile_selector_query(ReadonlySpan<void const*> selectors, Function<void()> const& backfill_attribute_value_texts);
-    static void destroy_selector_query(void*);
-    void prepare_selector_query();
-    Optional<bool> selector_query_matches(void const* query, StyleNodeID node, StyleNodeID scope_root, StyleNodeID shadow_root);
-    Optional<bool> selector_query_matches_without_document_root(void const* query, StyleNodeID node, StyleNodeID scope_root, StyleNodeID shadow_root);
-    bool selector_query_all(void* query, StyleNodeID root, bool include_root, StyleNodeID scope_root, StyleNodeID shadow_root, bool has_document_root, Vector<StyleNodeID>& matches);
-    bool selector_query_first(void* query, StyleNodeID root, bool include_root, StyleNodeID scope_root, StyleNodeID shadow_root, bool has_document_root, StyleNodeID& matched);
 
-    // Enumerates the engine's counters. Returns false once index is past the last counter.
-    bool counter(size_t index, StringView& out_name, u64& out_value) const;
+    // Calls back with the name and value of each of the engine's counters, reading them in one go.
+    void for_each_counter(Function<void(StringView name, u64 value)> const&) const;
 
     [[nodiscard]] void* rust_handle() { return m_impl; }
     [[nodiscard]] void const* rust_handle() const { return m_impl; }
@@ -282,22 +504,63 @@ public:
 private:
     using InputTransaction = StyleEngineFFI::FfiStyleInputTransaction;
 
-    bool read_matches(StyleNodeID, Vector<RuleMatch>&, Optional<MatchPurpose>);
-    void apply_transaction(InputTransaction const&);
-    void submit_recorded_input();
+    void apply_transaction(StyleInputScope const&, InputTransaction const&);
+    // Where the input submit_recorded_input() takes goes: to the engine at once, or to the style transaction
+    // lend_style_transaction_inputs() hands it over with, which applies it as its first step.
+    enum class RecordedInputGoesTo : u8 {
+        Engine,
+        Transaction,
+    };
+    void submit_recorded_input(RecordedInputGoesTo = RecordedInputGoesTo::Engine);
+    [[nodiscard]] bool has_journaled_input() const;
+    void publish_inputs_queued_during_pass();
+    void lend_style_transaction_inputs(RecordedInputGoesTo, Function<void(StyleEngineFFI::FfiDocumentStyleComputationInputs const&, void* layout_arena, InputTransaction const* input)> const&);
+    PublishedStyleTransaction publish_style_transaction_view(StyleEngineFFI::FfiStyleTransactionView const&, i64 submission_microseconds, i64 bridge_microseconds);
+    StyleEngineFFI::FfiInstallFeedback install_feedback() const;
+    void record_host_fact_write(StyleEngineFFI::FfiHostFactWrite);
+    void record_element_language_write(u32 node, StyleAtomID language, Utf16View tag);
+    void mint_style_nodes(Span<StyleNodeID>, Vector<StyleNodeID>& granted, size_t& grant_request, StyleEngineFFI::FfiHostFactKind, u8 value);
     bool refresh_attribute_value_text_requirements();
-    [[nodiscard]] bool attribute_name_requires_value_text(StyleAtomID);
-    void publish_attribute_value_text(StyleAtomID, Utf16View);
+    // Which of a selector and an attr() read the value text of this name, as bits; zero if neither.
+    [[nodiscard]] u32 attribute_value_text_readers(StyleAtomID);
+    void publish_attribute_value_text(StyleAtomID, Utf16View, bool read_by_selectors);
+    StyleAtomID acquire_qualified_atom(StyleAtomID namespace_atom, StyleAtomID name_atom);
+
+    Optional<StyleSheetResourceContexts> m_style_sheet_resource_contexts;
 
     void* m_impl { nullptr };
+    void* m_host_style_record_pins { nullptr };
     GC::Ptr<StyleComputer> m_style_computer;
+    // The recording stream the engine records under, or zero.
+    u64 m_recording_stream { 0 };
 
     HashMap<FlatPtr, StyleAtomID> m_atoms;
     HashTable<StyleAtomID> m_published_language_atoms;
     HashTable<StyleAtomID> m_published_custom_property_names;
     HashMap<StyleAtomID, HashMap<StyleAtomID, StyleAtomID>> m_attribute_name_atoms;
-    HashMap<StyleAtomID, bool> m_attribute_names_requiring_value_text;
+    struct AttributeName {
+        // What the readers of the value text are known by.
+        Utf16FlyString folded_local_name;
+        bool has_no_namespace { false };
+        // Which read the value text, as bits, until the requirements move.
+        Optional<u32> value_text_readers;
+    };
+    HashMap<StyleAtomID, AttributeName> m_attribute_names;
     u64 m_atom_generation { 1 };
+    PublishedTransactionVersion m_published_transaction_version { 0, 0 };
+    u32 m_connected_element_count_at_last_transaction { 0 };
+    bool m_published_batch_waits { false };
+    bool m_holds_input_recorded_beside_pass { false };
+    i64 m_submitted_style_transaction_microseconds { 0 };
+    bool m_submitted_pass_in_flight { false };
+    HashTable<StyleNodeID> m_style_nodes_retired_beside_pass;
+    // By style node and pseudo-element kind (see transition_baseline_key()).
+    HashMap<u64, NonnullRefPtr<PublishedStyleRecord const>> m_transition_baselines;
+    HashTable<StyleNodeID> m_parents_whose_children_changed_beside_pass;
+    Vector<StyleDrainScope const*> m_effect_drain_scopes;
+    // Drained from the front one input at a time, and a busy page queues thousands beside a pass.
+    Queue<Function<void(StyleInputScope const&)>, 64> m_inputs_queued_during_pass;
+    bool m_publishing_queued_inputs { false };
     u64 m_attribute_value_text_requirements_version { 0 };
     HashTable<StyleNodeID> m_nodes_with_pending_initial_features;
     HashTable<StyleNodeID> m_nodes_awaiting_first_style_computation;
@@ -309,7 +572,80 @@ private:
     Vector<StyleEngineFFI::FfiLocalFeatureDelta> m_local_feature_deltas;
     Vector<StyleEngineFFI::FfiStateDelta> m_state_deltas;
     Vector<StyleEngineFFI::FfiElementDeclarationDelta> m_element_declaration_deltas;
+    Vector<StyleEngineFFI::FfiHostFactWrite> m_host_fact_writes;
+    // The reactions the host applied since the last transaction. They are no input the host recorded, which a pass in
+    // flight holds back: they go with the next transaction, which is the next wave of the style update that applied them.
+    Vector<StyleEngineFFI::FfiAppliedStyleReaction> m_applied_style_reactions;
+    Vector<StyleEngineFFI::FfiPseudoElementSettle> m_pseudo_element_settles;
+    bool m_install_feedback_held_back { false };
+    bool m_owner_applied_render_half { false };
+    // How many of the host fact writes are atom adoptions, which are no input to style.
+    size_t m_pending_atom_adoption_count { 0 };
+    // What each `TextData` write holds, by the index its `data` names until the writes cross.
+    Vector<Utf16String> m_host_fact_text_data;
+    Vector<StyleEngineFFI::FfiReplacedContentInput> m_host_fact_replaced_content_inputs;
+    // The slots whose assigned nodes changed, and whether the top layer did, since the recorded input was last
+    // submitted.
+    OrderedHashTable<StyleNodeID> m_slots_whose_assignment_changed;
+    bool m_top_layer_changed { false };
+    [[nodiscard]] bool has_changed_node_lists() const { return !m_slots_whose_assignment_changed.is_empty() || m_top_layer_changed; }
+    // The recorded input submit_recorded_input() took for the style pass submit_style_transaction() submits, until
+    // the pass takes it.
+    struct RecordedInputForPass {
+        Vector<StyleEngineFFI::FfiTreeDelta> tree_deltas;
+        Vector<StyleEngineFFI::FfiElementArrival> element_arrivals;
+        Vector<u32> arrival_custom_state_atoms;
+        Vector<StyleEngineFFI::FfiLocalFeatureDelta> local_feature_deltas;
+        Vector<StyleEngineFFI::FfiStateDelta> state_deltas;
+        Vector<StyleEngineFFI::FfiElementDeclarationDelta> element_declaration_deltas;
+        Vector<StyleEngineFFI::FfiHostFactWrite> host_fact_writes;
+        Vector<Utf16String> host_fact_text_data;
+        Vector<StyleEngineFFI::FfiReplacedContentInput> host_fact_replaced_content_inputs;
+        Vector<StyleNodeID> style_node_grant;
+        Vector<StyleNodeID> text_style_node_grant;
+    };
+    Optional<RecordedInputForPass> m_recorded_input_for_pass;
+    // The identities the engine granted and the host has yet to mint, and how many more the host asks
+    // for with the next transaction.
+    Vector<StyleNodeID> m_granted_style_nodes;
+    Vector<StyleNodeID> m_granted_text_style_nodes;
+    size_t m_style_node_grant_request { 0 };
+    size_t m_pending_arrival_count { 0 };
+    // Only a geometry read defers a transaction, so whether one may be waiting is known here, and the mutations that
+    // must flush it first ask the engine only after a read deferred one.
+    mutable bool m_geometry_read_deferred_transaction { false };
+    size_t m_text_style_node_grant_request { 0 };
     bool m_css_transitions_may_observe_style_changes { false };
+};
+
+// What a read asks of the document's style engine beyond what a const engine answers: interning a name, matching the
+// rules of one element, marking a benchmark, and keeping the records a read views alive while it views them. None of it is an input: it changes no answer of a style or layout pass, so it needs
+// none of the document's render inputs (DOM::RenderInputs) and leaves the query snapshot the document published in
+// place. It reaches nothing else of the engine.
+class StyleEngineQueries {
+public:
+    StyleEngine const& engine() const { return m_engine; }
+
+    StyleAtomID intern_atom(Utf16FlyString const& name) const { return m_engine.intern_atom(name); }
+    bool match_element(StyleNodeID node, Vector<StyleEngine::RuleMatch>& matches, StyleEngine::MatchPurpose purpose) const { return m_engine.match_element(node, matches, purpose); }
+    void record_benchmark_marker(Utf16View name) const { m_engine.record_benchmark_marker(name); }
+    void begin_style_record_view_epoch() const { m_engine.begin_style_record_view_epoch(); }
+    // The record of an element or one of its pseudo-elements that no style update installs, as a CSSOM read asks for
+    // it. Settling the published match answer as it answers is settling what a pass would answer.
+    StyleEngineFFI::FfiRecordDemandAnswer answer_read_demand(StyleNodeID node, u8 pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only, StyleRecordID parent_highlight) const
+    {
+        return m_engine.answer_read_demand(node, pseudo_kind, exclude_inline_style, targeted, read_only, parent_highlight);
+    }
+    void end_style_record_view_epoch() const { m_engine.end_style_record_view_epoch(); }
+
+private:
+    friend class StyleComputer;
+    explicit StyleEngineQueries(StyleEngine& engine)
+        : m_engine(engine)
+    {
+    }
+
+    StyleEngine& m_engine;
 };
 
 }

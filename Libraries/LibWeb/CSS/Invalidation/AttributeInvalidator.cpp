@@ -106,14 +106,32 @@ void invalidate_style_after_attribute_change(
     // declaration input, not a selector one, and StyleEngine reaches the element from it directly.
     if (attribute_name == HTML::AttributeNames::style) {
         record_element_declarations_changed(element, ElementDeclarationKind::InlineStyle, old_value.has_value(), new_value.has_value());
-    } else if (element.is_presentational_hint(attribute_name) || element.style_uses_attr_css_function()
-        || (element.supports_dimension_attributes() && attribute_name.is_one_of(HTML::AttributeNames::width, HTML::AttributeNames::height))) {
+    } else {
+        // An attr() substitutes the attribute's value, which the engine holds beside the element's
+        // other facts: the element's record is driven again there, like any derived recompute. A
+        // shadow host's element-backed pseudo-elements read its attributes too, and are driven
+        // again with it.
+        if (element.style_uses_attr_css_function()) {
+            auto& style_engine = element.document().render_inputs_for_write().style_engine();
+            style_engine.record_derived_element_style_input_change(element.style_node_id(), StyleEngine::RecomputeStyle);
+            if (auto shadow_root = element.shadow_root()) {
+                shadow_root->for_each_in_subtree_of_type<DOM::Element>([&](DOM::Element& shadow_element) {
+                    if (shadow_element.associated_shadow_host_pseudo_element().has_value())
+                        style_engine.record_derived_element_style_input_change(shadow_element.style_node_id(), StyleEngine::RecomputeStyle);
+                    return TraversalDecision::Continue;
+                });
+            }
+        }
+    }
+    if (attribute_name != HTML::AttributeNames::style
+        && (element.is_presentational_hint(attribute_name)
+            || (element.supports_dimension_attributes() && attribute_name.is_one_of(HTML::AttributeNames::width, HTML::AttributeNames::height)))) {
         // The width and height attributes of an element that supports them map to hints the way
         // the presentational hint attributes do.
-        auto kind = element.publishes_presentational_hints_on_arrival() && !element.style_uses_attr_css_function()
-            ? ElementDeclarationKind::SvgPresentationAttribute
-            : ElementDeclarationKind::PresentationalHint;
-        record_element_declarations_changed(element, kind, true, true);
+        // The hints are published now, as a declaration input the engine takes as current.
+        record_element_declarations_changed(element, ElementDeclarationKind::SvgPresentationAttribute, true, true);
+        if (!element.publishes_presentational_hints_on_arrival())
+            StyleComputer::collect_presentational_hint_properties({ element });
     }
 
     // The pseudo-classes an attribute implies are separate facts about the element, and each is its

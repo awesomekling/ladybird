@@ -6,13 +6,14 @@
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/Function.h>
 #include <AK/HashMap.h>
 #include <AK/NumericLimits.h>
 #include <AK/QuickSort.h>
-#include <AK/RefCounted.h>
 #include <AK/RefPtr.h>
 #include <AK/Types.h>
+#include <LibWeb/CSS/PseudoElement.h>
 #include <LibWeb/CSS/StyleEngineIdentifiers.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/Export.h>
@@ -23,7 +24,8 @@ namespace Web::CSS {
 // Chain of custom property maps with structural sharing.
 // Each node stores only the properties declared directly on its element,
 // with a parent pointer to the inherited chain.
-class WEB_API CustomPropertyData : public RefCounted<CustomPropertyData> {
+// NB: A style pass beside the main thread references the data elements hold.
+class WEB_API CustomPropertyData : public AtomicRefCounted<CustomPropertyData> {
 public:
     static NonnullRefPtr<CustomPropertyData> create(
         OrderedHashMap<Utf16FlyString, StyleProperty> own_values,
@@ -34,10 +36,16 @@ public:
         u64 identity = 0);
     static NonnullRefPtr<CustomPropertyData> create_animation_overlay(
         OrderedHashMap<Utf16FlyString, StyleProperty> animated_values,
-        RefPtr<CustomPropertyData const> base);
+        RefPtr<CustomPropertyData const> base, DOM::AbstractElement const& owner);
+    // A view of the environment the style engine composed an element's animated custom properties
+    // into: the store's own entries over `base`, which the store is composed over. Retains `store`.
+    static NonnullRefPtr<CustomPropertyData> view_animation_overlay(void const* store, u64 identity,
+        RefPtr<CustomPropertyData const> base, DOM::AbstractElement const& owner);
+    // Transfers one Rust store reference and materializes its entries for CSSOM readers.
+    static NonnullRefPtr<CustomPropertyData> from_rust_store(void const*, RefPtr<CustomPropertyData const> parent = nullptr, u64 identity = 0, bool effective_entries = false);
     ~CustomPropertyData();
 
-    bool is_animation_overlay() const { return m_is_animation_overlay; }
+    bool is_animation_overlay_for(DOM::AbstractElement const&) const;
 
     StyleProperty const* get(Utf16FlyString const& name) const;
     RefPtr<CustomPropertyData const> inheritable_impl(RefPtr<CustomPropertyData const> inheritable_parent, AK::Function<Optional<CustomPropertyRegistration const&>(Utf16FlyString const&)> get_custom_property_registration) const;
@@ -96,31 +104,6 @@ public:
     u64 identity() const { return m_identity; }
     void const* rust_store() const { return m_rust_store; }
 
-    // What this environment resolves to, which is a function of the values it holds and of the
-    // environment it inherits from - both of which are its identity. Two elements handed the same
-    // environment therefore resolve the same one, and the second of them does no work at all.
-    [[nodiscard]] RefPtr<CustomPropertyData const> cached_resolution(FlatPtr document_identity, size_t registration_generation, PreferredColorScheme color_scheme) const
-    {
-        if (m_cached_resolution_document_identity != document_identity || m_cached_resolution_generation != registration_generation)
-            return {};
-        // Registered color values can resolve light-dark() against the element's color scheme,
-        // so a resolution only answers for elements sharing the scheme it was made under.
-        if (m_cached_resolution_color_scheme != color_scheme)
-            return {};
-        if (m_cached_resolution_is_self)
-            return RefPtr<CustomPropertyData const>(this);
-        return m_cached_resolution;
-    }
-    void set_cached_resolution(FlatPtr document_identity, size_t registration_generation, PreferredColorScheme color_scheme, RefPtr<CustomPropertyData const> resolution) const
-    {
-        m_cached_resolution_document_identity = document_identity;
-        m_cached_resolution_generation = registration_generation;
-        m_cached_resolution_color_scheme = color_scheme;
-        // Storing a reference to itself would keep the object alive forever, so that case is a flag.
-        m_cached_resolution_is_self = resolution.ptr() == this;
-        m_cached_resolution = m_cached_resolution_is_self ? nullptr : move(resolution);
-    }
-
 private:
     CustomPropertyData(OrderedHashMap<Utf16FlyString, StyleProperty> own_values, RefPtr<CustomPropertyData const> parent, RefPtr<CustomPropertyData const> inheritance_parent, u8 ancestor_count, size_t declared_count, void const* prebuilt_rust_store, u64 identity = 0);
 
@@ -136,13 +119,14 @@ private:
     mutable size_t m_cached_inheritable_generation { NumericLimits<size_t>::max() };
     mutable RefPtr<CustomPropertyData const> m_cached_inheritable_data;
     mutable bool m_cached_inheritable_is_self { false };
-    mutable FlatPtr m_cached_resolution_document_identity { NumericLimits<FlatPtr>::max() };
-    mutable size_t m_cached_resolution_generation { NumericLimits<size_t>::max() };
-    mutable PreferredColorScheme m_cached_resolution_color_scheme { PreferredColorScheme::Auto };
-    mutable RefPtr<CustomPropertyData const> m_cached_resolution;
-    mutable bool m_cached_resolution_is_self { false };
-    bool m_is_animation_overlay { false };
+    Optional<UniqueNodeID> m_animation_owner;
+    Optional<PseudoElement> m_animation_pseudo_element;
     void const* m_rust_store { nullptr };
 };
 
 }
+
+// The style engine retains an element's custom-property environment so that a row inheriting from
+// that element does not have to walk to it.
+extern "C" WEB_API void web_css_custom_property_data_reference(void const*);
+extern "C" WEB_API void web_css_custom_property_data_unreference(void const*);

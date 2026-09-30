@@ -6,13 +6,12 @@
 
 #include <AK/AllOf.h>
 #include <LibWeb/CSS/ComputedValues.h>
-#include <LibWeb/CSS/Invalidation/ContainerQueryInvalidator.h>
 #include <LibWeb/CSS/RustQueryHandle.h>
 #include <LibWeb/CSS/ScrollStateContainerQuery.h>
+#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
-#include <LibWeb/Layout/Box.h>
-#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/ScrollSnap.h>
@@ -22,6 +21,11 @@ namespace Web::CSS {
 
 using namespace Parser::ValueParserFFI;
 
+static void publish_scroll_state_snapshots(DOM::Document& document, ReadonlySpan<Layout::RustFFI::FfiLayoutStyleScrollState> snapshots)
+{
+    Layout::RustFFI::layout_arena_publish_style_snapshot_scroll_states(Layout::document_layout_arena(document), snapshots.data(), snapshots.size());
+}
+
 static bool is_scroll_state_container(DOM::Element const& element)
 {
     auto const* box_values = element.style_group<ComputedValues::BoxValues>();
@@ -30,23 +34,23 @@ static bool is_scroll_state_container(DOM::Element const& element)
 
 // The scrolling box a scroll-state(scrollable) or scroll-state(scrolled) query asks about. The root element's is the
 // viewport's.
-static Layout::Node* scrolling_box_of(DOM::Document& document, DOM::Element& element)
+static Painting::BoxSlot scrolling_box_of(DOM::Document& document, DOM::Element& element)
 {
     if (&element == document.document_element())
-        return document.unsafe_layout_node();
-    auto* layout_node = element.unsafe_layout_node();
-    if (!layout_node || !layout_node->is_scroll_container())
-        return nullptr;
-    return layout_node;
+        return Painting::BoxSlot::viewport_of(document);
+    auto box = Painting::BoxSlot::bound_to(element);
+    if (!box.is_scroll_container())
+        return {};
+    return box;
 }
 
 // https://drafts.csswg.org/css-conditional-5/#stuck
-static u8 stuck_edges(DOM::Document& document, Layout::Node const& layout_node)
+static u8 stuck_edges(DOM::Document& document, Painting::BoxSlot const& box)
 {
-    auto const* node_with_style = as_if<Layout::NodeWithStyle>(layout_node);
-    if (!node_with_style || !node_with_style->is_sticky_position())
+    auto const* box_values = box.style_group<ComputedValues::BoxValues>();
+    if (!box_values || static_cast<Positioning>(box_values->position) != Positioning::Sticky)
         return 0;
-    auto sticky_node_index = Layout::RustFFI::layout_arena_sticky_spatial_node_index(layout_node.arena_handle(), Painting::committed_row_slot(layout_node));
+    auto sticky_node_index = Layout::RustFFI::layout_arena_sticky_spatial_node_index(box.arena(), box.slot());
     if (sticky_node_index == NumericLimits<u32>::max())
         return 0;
 
@@ -65,7 +69,7 @@ static u8 stuck_edges(DOM::Document& document, Layout::Node const& layout_node)
 }
 
 // https://drafts.csswg.org/css-conditional-5/#scrollable
-static u8 scrollable_edges(Layout::Node const& scrolling_box)
+static u8 scrollable_edges(Painting::BoxSlot const& scrolling_box)
 {
     if (!Painting::has_committed_box(scrolling_box) || !Painting::scrollable_overflow_rect(scrolling_box).has_value())
         return 0;
@@ -94,16 +98,16 @@ static u8 scrollable_edges(Layout::Node const& scrolling_box)
 }
 
 // https://drafts.csswg.org/css-conditional-5/#snapped
-static u8 snapped_axes(DOM::Document& document, DOM::Element& element, Layout::Node const& layout_node)
+static u8 snapped_axes(DOM::Document& document, DOM::Element& element, Painting::BoxSlot const& box)
 {
     // A snap area is snapped by its nearest ancestor scroll container, if that is a snap container.
-    Layout::Box const* snap_container = layout_node.containing_block();
-    while (snap_container && !snap_container->is_scroll_container())
-        snap_container = snap_container->containing_block();
-    if (!snap_container || !Painting::is_scroll_snap_container(*snap_container))
+    auto snap_container = box.containing_block();
+    while (snap_container && !snap_container.is_scroll_container())
+        snap_container = snap_container.containing_block();
+    if (!snap_container || !Painting::is_scroll_snap_container(snap_container))
         return 0;
 
-    auto stable_node_id = Painting::async_scroll_node_stable_id(*snap_container);
+    auto stable_node_id = Painting::async_scroll_node_stable_id(snap_container);
     if (!stable_node_id.has_value())
         return 0;
 
@@ -119,16 +123,27 @@ static u8 snapped_axes(DOM::Document& document, DOM::Element& element, Layout::N
 
 ScrollStateSnapshot ScrollStateQueryContainers::snapshot_for_query(DOM::Element& container)
 {
-    return m_containers.ensure(container).snapshot;
+    if (auto it = m_containers.find(container); it != m_containers.end())
+        return it->value.snapshot;
+    auto& state = m_containers.ensure(container);
+    Layout::RustFFI::FfiLayoutStyleScrollState snapshot {
+        .style_node = container.style_node_id().value(),
+        .stuck = 0,
+        .snapped = 0,
+        .scrollable = 0,
+        .scrolled = 0,
+    };
+    publish_scroll_state_snapshots(container.document(), { &snapshot, 1 });
+    return state.snapshot;
 }
 
-void ScrollStateQueryContainers::did_scroll_relatively(Layout::Node const& scrolling_box, CSSPixelPoint delta)
+void ScrollStateQueryContainers::did_scroll_relatively(Painting::BoxSlot const& scrolling_box, CSSPixelPoint delta)
 {
     DOM::Element* element = nullptr;
     if (!scrolling_box.is_viewport()) {
         if (scrolling_box.generated_for_pseudo_element().has_value())
             return;
-        element = const_cast<DOM::Element*>(as_if<DOM::Element>(scrolling_box.dom_node()));
+        element = as_if<DOM::Element>(scrolling_box.dom_node().ptr());
         if (!element)
             return;
     }
@@ -161,6 +176,7 @@ bool ScrollStateQueryContainers::snapshot_post_layout_state(DOM::Document& docum
     document.update_paint_and_hit_testing_properties_if_needed();
 
     Vector<GC::Ref<DOM::Element>> containers_to_forget;
+    Vector<Layout::RustFFI::FfiLayoutStyleScrollState> published_snapshots;
     bool any_state_changed = false;
     for (auto& [element, container] : m_containers) {
         if (which == Snapshot::NewContainersOnly && container.has_been_snapshotted)
@@ -172,20 +188,27 @@ bool ScrollStateQueryContainers::snapshot_post_layout_state(DOM::Document& docum
         }
 
         ScrollStateSnapshot snapshot;
-        if (auto* layout_node = element->unsafe_layout_node(); layout_node && Painting::has_committed_box(*layout_node)) {
-            snapshot.stuck = stuck_edges(document, *layout_node);
-            snapshot.snapped = snapped_axes(document, element, *layout_node);
+        if (auto box = Painting::BoxSlot::bound_to(element); Painting::has_committed_box(box)) {
+            snapshot.stuck = stuck_edges(document, box);
+            snapshot.snapped = snapped_axes(document, element, box);
         }
-        if (auto* scrolling_box = scrolling_box_of(document, element)) {
-            snapshot.scrollable = scrollable_edges(*scrolling_box);
-            snapshot.scrolled = scrolling_box->is_viewport() ? m_viewport_last_relative_scroll_direction : element->last_relative_scroll_direction();
+        if (auto scrolling_box = scrolling_box_of(document, element)) {
+            snapshot.scrollable = scrollable_edges(scrolling_box);
+            snapshot.scrolled = scrolling_box.is_viewport() ? m_viewport_last_relative_scroll_direction : element->last_relative_scroll_direction();
         }
 
-        if (snapshot == container.snapshot)
-            continue;
-        container.snapshot = snapshot;
-        any_state_changed = true;
-        Invalidation::invalidate_descendant_styles_depending_on_size_container_query(element);
+        if (snapshot != container.snapshot) {
+            container.snapshot = snapshot;
+            any_state_changed = true;
+            document.render_inputs_for_write().style_engine().record_size_container_query_dependents(element->style_node_id());
+        }
+        published_snapshots.append({
+            .style_node = element->style_node_id().value(),
+            .stuck = snapshot.stuck,
+            .snapped = snapshot.snapped,
+            .scrollable = snapshot.scrollable,
+            .scrolled = snapshot.scrolled,
+        });
     }
 
     for (auto& element : containers_to_forget) {
@@ -193,9 +216,17 @@ bool ScrollStateQueryContainers::snapshot_post_layout_state(DOM::Document& docum
         // A container that goes away with state still has styles that read it, and they read no state now.
         if (container.has_value() && container->snapshot != ScrollStateSnapshot {} && element->is_connected()) {
             any_state_changed = true;
-            Invalidation::invalidate_descendant_styles_depending_on_size_container_query(element);
+            document.render_inputs_for_write().style_engine().record_size_container_query_dependents(element->style_node_id());
         }
+        published_snapshots.append({
+            .style_node = element->style_node_id().value(),
+            .stuck = 0,
+            .snapped = 0,
+            .scrollable = 0,
+            .scrolled = 0,
+        });
     }
+    publish_scroll_state_snapshots(document, published_snapshots.span());
     return any_state_changed;
 }
 

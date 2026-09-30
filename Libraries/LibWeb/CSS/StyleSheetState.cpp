@@ -7,6 +7,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/AnyOf.h>
 #include <AK/Utf16StringBuilder.h>
 #include <LibJS/Runtime/ExternalMemory.h>
 #include <LibWeb/CSS/CSSImportRule.h>
@@ -424,6 +425,7 @@ void StyleSheetState::add_owning_document_or_shadow_root(DOM::Node& document_or_
     VERIFY(document_or_shadow_root.is_document() || document_or_shadow_root.is_shadow_root());
     auto had_document_owner = has_document_owner();
     m_owning_documents_or_shadow_roots.set(document_or_shadow_root);
+    document_or_shadow_root.document().note_style_sheet_set_change();
 
     // CSSOM's "add a CSS style sheet" steps bail out once the disabled flag is set, so ownership alone should not
     // make a disabled sheet observable in the destination document. Delay its media-query evaluation and
@@ -459,6 +461,7 @@ void StyleSheetState::remove_owning_document_or_shadow_root(DOM::Node& document_
         document_or_shadow_root.document().font_computer().unload_fonts_from_sheet(*this);
 
     m_owning_documents_or_shadow_roots.remove(document_or_shadow_root);
+    document_or_shadow_root.document().note_style_sheet_set_change();
 
     for (auto const& import_rule : m_import_rules) {
         if (import_rule->loaded_style_sheet())
@@ -653,6 +656,11 @@ bool StyleSheetState::evaluate_media_queries(DOM::Document const& document)
     return evaluate_media_queries(document, result);
 }
 
+bool StyleSheetState::has_evaluated_media_queries_for(DOM::Document const& document) const
+{
+    return any_of(m_document_media_states, [&](auto const& state) { return state->document.ptr().ptr() == &document; });
+}
+
 StyleSheetState::DocumentMediaState::DocumentMediaState(DOM::Document const& document)
     : document(document)
     , state(Parser::ValueParserFFI::rust_media_evaluation_state_create())
@@ -675,7 +683,21 @@ bool StyleSheetState::evaluate_media_queries(DOM::Document const& document, Pars
         state = m_document_media_states.end() - 1;
     }
     MediaEnvironmentSnapshot environment { document };
-    result = Parser::ValueParserFFI::rust_style_sheet_evaluate_media_queries(m_native_sheet.handle(), environment.ffi_environment(), (*state)->state, mutable_document.style_computer().style_engine().rust_handle());
+    struct FlippedConditions {
+        Vector<u64> identities;
+        Vector<bool> holds;
+    } flipped;
+    result = Parser::ValueParserFFI::rust_style_sheet_evaluate_media_queries(m_native_sheet.handle(), environment.ffi_environment(), (*state)->state, &flipped, [](void* opaque, u64 identity, bool holds) {
+        auto& flipped = *static_cast<FlippedConditions*>(opaque);
+        flipped.identities.append(identity);
+        flipped.holds.append(holds);
+    });
+    // The rule conditions that flipped are recorded for the engine, in order with the sheet changes around them.
+    if (!flipped.identities.is_empty()) {
+        auto& style_engine = mutable_document.render_inputs_for_write().style_engine();
+        for (size_t i = 0; i < flipped.identities.size(); ++i)
+            style_engine.record_rule_conditions_hold(flipped.identities[i], flipped.holds[i]);
+    }
     if (result.sheet_changed)
         record_conditions_for_owners();
     if (result.any_changed) {

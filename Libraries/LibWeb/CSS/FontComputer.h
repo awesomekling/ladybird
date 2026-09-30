@@ -26,6 +26,8 @@
 
 namespace Web::CSS {
 
+class FontCascadeMemo;
+
 struct FontWeightRange {
     int min { 0 };
     int max { 0 };
@@ -64,6 +66,7 @@ struct ComputedFontFamilyName {
 using ComputedFontFamily = Variant<GenericFontFamily, ComputedFontFamilyName>;
 
 struct ComputedFontCacheKey {
+    u32 tree_scope { 0 };
     Vector<ComputedFontFamily> font_families;
     FontOpticalSizing font_optical_sizing;
     CSSPixels font_size;
@@ -75,6 +78,9 @@ struct ComputedFontCacheKey {
 
     [[nodiscard]] bool operator==(ComputedFontCacheKey const& other) const = default;
 };
+
+using FontFeatureValuesTable = HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>>;
+using ScopedFontFeatureValuesTables = HashMap<u32, FontFeatureValuesTable>;
 
 class FontLoader final : public GC::Cell {
     GC_CELL(FontLoader, GC::Cell);
@@ -133,8 +139,16 @@ public:
 
     void clear_computed_font_cache(Utf16FlyString const& family_name);
     void clear_font_feature_values_cache(Utf16FlyString const& family_name);
+    void invalidate_font_feature_values_snapshot();
     void did_load_font(Utf16FlyString const& family_name);
     void did_load_font(FontFaceKey const&);
+
+    // A face's typeface becomes available one task before the font-loading task announces it, and
+    // a resolution in between must see it rather than the pending face it replaces.
+    void did_parse_font_face(FontFaceKey const& key) { did_load_font(key); }
+
+    // The one funnel: every change to what a font resolution would answer passes through here.
+    void bump_environment_generation();
 
     void register_font_face(NonnullRefPtr<FontFaceState>);
     void unregister_font_face(NonnullRefPtr<FontFaceState>);
@@ -145,9 +159,14 @@ public:
     void load_fonts_from_sheet(StyleSheetState&);
     void unload_fonts_from_sheet(StyleSheetState&);
 
-    NonnullRefPtr<Gfx::FontCascadeList const> compute_font_for_style_values(Vector<ComputedFontFamily> font_families, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const;
-    NonnullRefPtr<Gfx::FontCascadeList const> compute_font_for_style_values(StyleValue const& font_family, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const;
     u64 environment_generation() const { return m_environment_generation; }
+
+    // The `@font-face` table as everything outside the document sees it: an immutable snapshot of
+    // one font-environment generation, owned by an `Arc` on the Rust side. Rebuilt by the single
+    // funnel that bumps the generation, and nowhere else.
+    [[nodiscard]] void const* published_font_faces() const { return m_published_font_faces; }
+    [[nodiscard]] FontCascadeMemo& font_cascade_memo() const { return *m_font_cascade_memo; }
+    [[nodiscard]] ScopedFontFeatureValuesTables const& published_font_feature_values() const;
 
 private:
     virtual void visit_edges(Visitor&) override;
@@ -156,11 +175,8 @@ private:
     void end_font_face_change_batch();
     void clear_computed_font_cache_for_families(Vector<Utf16FlyString> const& family_names);
 
-    struct MatchingFontCandidate;
-    RefPtr<Gfx::FontCascadeList const> find_matching_font_weight_ascending(Vector<MatchingFontCandidate> const& candidates, int target_weight, float font_size_in_pt, Gfx::FontVariationSettings const& variations, FontFeatureData const& font_feature_data, HashMap<FontFeatureValueKey, Vector<u32>> const& font_feature_values, bool inclusive) const;
-    RefPtr<Gfx::FontCascadeList const> find_matching_font_weight_descending(Vector<MatchingFontCandidate> const& candidates, int target_weight, float font_size_in_pt, Gfx::FontVariationSettings const& variations, FontFeatureData const& font_feature_data, HashMap<FontFeatureValueKey, Vector<u32>> const& font_feature_values, bool inclusive) const;
-    NonnullRefPtr<Gfx::FontCascadeList const> compute_font_for_style_values_impl(ReadonlySpan<ComputedFontFamily const> font_families, CSSPixels const& font_size, int font_slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data) const;
-    RefPtr<Gfx::FontCascadeList const> font_matching_algorithm(Utf16FlyString const& family_name, int weight, Percentage const& font_width, int slope, float font_size_in_pt, Gfx::FontVariationSettings const& variations, FontFeatureData const& font_feature_data, HashMap<FontFeatureValueKey, Vector<u32>> const& font_feature_values) const;
+    [[nodiscard]] void const* build_font_face_snapshot() const;
+    void publish_font_faces();
 
     HashMap<FontFeatureValueKey, Vector<u32>> const& font_feature_values_for_family(Utf16FlyString const& family_name) const;
 
@@ -169,14 +185,56 @@ private:
     HashMap<FontFaceKey, Vector<NonnullRefPtr<FontFaceState>>> m_font_faces;
     HashMap<String, GC::Ref<FontLoader>> m_loaders_by_source;
 
-    mutable HashMap<ComputedFontCacheKey, NonnullRefPtr<Gfx::FontCascadeList const>> m_computed_font_cache;
+    // Shared rather than owned: the style stage's between-pass batch fills this too.
+    NonnullRefPtr<FontCascadeMemo> m_font_cascade_memo;
     mutable HashMap<Utf16FlyString, HashMap<FontFeatureValueKey, Vector<u32>>> m_font_feature_values_cache;
+    mutable ScopedFontFeatureValuesTables m_published_font_feature_values;
+    mutable bool m_font_feature_values_snapshot_dirty { true };
 
     bool m_has_completed_initial_paint { false };
     bool m_initial_paint_had_pending_fonts { false };
     u32 m_font_face_change_batch_depth { 0 };
     u64 m_environment_generation { 1 };
     Vector<Utf16FlyString> m_batched_font_face_change_families;
+
+    // An owned `Arc<FontFaceSnapshot>` from the Rust style engine.
+    void const* m_published_font_faces { nullptr };
+};
+
+}
+
+namespace AK {
+
+template<>
+struct Traits<Web::CSS::FontFaceKey> : public DefaultTraits<Web::CSS::FontFaceKey> {
+    static unsigned hash(Web::CSS::FontFaceKey const& key) { return key.hash(); }
+};
+
+template<>
+struct Traits<Web::CSS::ComputedFontCacheKey> : public DefaultTraits<Web::CSS::ComputedFontCacheKey> {
+    static unsigned hash(Web::CSS::ComputedFontCacheKey const& key)
+    {
+        unsigned hash = key.tree_scope;
+        for (auto const& family : key.font_families) {
+            if (family.has<Web::CSS::GenericFontFamily>()) {
+                hash = pair_int_hash(hash, to_underlying(family.get<Web::CSS::GenericFontFamily>()));
+            } else {
+                auto const& name = family.get<Web::CSS::ComputedFontFamilyName>();
+                hash = pair_int_hash(hash, pair_int_hash(name.name.hash(), to_underlying(name.syntax)));
+            }
+        }
+
+        hash = pair_int_hash(hash, to_underlying(key.font_optical_sizing));
+        hash = pair_int_hash(hash, Traits<Web::CSSPixels>::hash(key.font_size));
+        hash = pair_int_hash(hash, key.font_slope);
+        hash = pair_int_hash(hash, Traits<double>::hash(key.font_weight));
+        hash = pair_int_hash(hash, Traits<double>::hash(key.font_width.value()));
+        for (auto const& [variation_name, variation_value] : key.font_variation_settings)
+            hash = pair_int_hash(hash, pair_int_hash(variation_name.hash(), Traits<double>::hash(variation_value)));
+        hash = pair_int_hash(hash, Traits<Web::CSS::FontFeatureData>::hash(key.font_feature_data));
+
+        return hash;
+    }
 };
 
 }

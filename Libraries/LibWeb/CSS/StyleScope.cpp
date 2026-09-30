@@ -11,11 +11,13 @@
 #include <LibWeb/CSS/CounterStyle.h>
 #include <LibWeb/CSS/CounterStyleDefinition.h>
 #include <LibWeb/CSS/Enums.h>
+#include <LibWeb/CSS/FontComputer.h>
 #include <LibWeb/CSS/FontFaceSet.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
+#include <LibWeb/CSS/StyleInputScope.h>
 #include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/CSS/StyleSheetImport.h>
 #include <LibWeb/CSS/StyleSheetInvalidation.h>
@@ -23,11 +25,16 @@
 #include <LibWeb/ComputedValuesRustFFI.h>
 #include <LibWeb/DOM/AdoptedStyleSheets.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Loader/ContentBlocker.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/ValueParserRustFFI.h>
 
 namespace Web::CSS {
+
+extern "C" void style_engine_unpublish_tree_scope_animation_keyframes(void*, u32, FlatPtr, void*, void (*)(void*));
 
 // https://www.w3.org/TR/cssom/#remove-a-css-style-sheet
 void StyleScope::remove_a_css_style_sheet(CSS::StyleSheetState& sheet, StyleEngineUpdate style_engine_update)
@@ -303,6 +310,18 @@ StyleCache& StyleScope::ensure_style_cache()
                 sheets.append(style_sheet);
         });
 
+        // OPTIMIZATION: A scope with no stylesheets of its own, such as the user-agent shadow tree of every form
+        //               control, holds only what the user-agent origin puts in its cache. That is the same for every
+        //               such scope in the document, so they share one cache, which the document's scope drops along
+        //               with its own.
+        if (all_sheets_are_constructed && sheets.is_empty()) {
+            auto& document_scope = document().style_scope();
+            if (!document_scope.m_sheetless_shadow_root_style_cache)
+                document_scope.m_sheetless_shadow_root_style_cache = StyleCache::create();
+            m_style_cache = document_scope.m_sheetless_shadow_root_style_cache;
+            return *m_style_cache;
+        }
+
         if (all_sheets_are_constructed && !sheets.is_empty()) {
             if (sheets.size() == 1) {
                 m_style_cache = sheets.first()->shared_single_constructed_sheet_style_cache();
@@ -328,6 +347,7 @@ StyleCache& StyleScope::ensure_style_cache() const
 
 void StyleScope::build_rule_cache()
 {
+    HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::StyleScopeCaches };
     auto& style_cache = ensure_style_cache();
 
     if (!style_cache.rule_cache) {
@@ -343,6 +363,7 @@ void StyleScope::build_rule_cache()
     // this cache generation into that slot once.
     if (m_published_layer_order_generation != style_cache.rule_cache_generation) {
         publish_cascade_layer_order();
+        publish_animation_keyframes();
         m_published_layer_order_generation = style_cache.rule_cache_generation;
     }
 }
@@ -369,13 +390,17 @@ void StyleScope::populate_rule_cache(StyleRuleCache& rule_cache)
 
 void StyleScope::invalidate_style_cache()
 {
+    document().note_style_sheet_set_change();
     invalidate_counter_style_cache();
     m_style_cache = nullptr;
+    m_sheetless_shadow_root_style_cache = nullptr;
     m_published_layer_order_generation = 0;
     // The registered custom properties cache is built from the document's active stylesheets, so it only needs a
     // rebuild when the document scope's rule set changes.
-    if (m_node->is_document())
+    if (m_node->is_document()) {
         document().set_needs_registered_properties_cache_update();
+        document().font_computer().invalidate_font_feature_values_snapshot();
+    }
 }
 
 void StyleScope::invalidate_user_style_sheet()
@@ -652,10 +677,84 @@ void StyleScope::publish_cascade_layer_order(StyleSheetState* pending_attachment
     if (pending_attachment && !pending_attachment->disabled() && pending_attachment->native_media_list().matches())
         sheets.append(pending_attachment->native_sheet().handle());
 
+    m_published_layer_ranks.clear();
     m_has_published_named_layer_order = Parser::ValueParserFFI::rust_style_sheet_publish_layer_order(
-        sheets.data(), sheets.size(), document().style_computer().style_engine().rust_handle(),
+        sheets.data(), sheets.size(), document().render_inputs_for_write().style_engine().rust_handle(),
         style_engine_tree_scope().value(), m_has_published_named_layer_order, &document(),
-        [](void* document) { static_cast<DOM::Document*>(document)->flush_deferred_style_change_event(); });
+        [](void* document) { static_cast<DOM::Document*>(document)->flush_deferred_style_change_event(); },
+        &m_published_layer_ranks,
+        [](void* ranks, u16 const* name, size_t length) {
+            auto& published_layer_ranks = *static_cast<HashMap<Utf16FlyString, u32>*>(ranks);
+            published_layer_ranks.set(Utf16FlyString::from_utf16(Utf16View { reinterpret_cast<char16_t const*>(name), length }), published_layer_ranks.size());
+        });
+}
+
+// The rank of a layer in the order this scope published, as the engine ranks it: a named layer by
+// its place in the order, and the implicit outer layer or an undeclared name after every named layer.
+// A rule lookup reads the host's copy, not the engine's, so it asks no engine state while a style
+// pass is in flight.
+u32 StyleScope::published_layer_index(Utf16FlyString const& qualified_layer_name) const
+{
+    auto const unlayered = static_cast<u32>(m_published_layer_ranks.size());
+    if (qualified_layer_name.is_empty())
+        return unlayered;
+    return m_published_layer_ranks.get(qualified_layer_name).value_or(unlayered);
+}
+
+// The `@keyframes` this scope defines, as the rule cache just built resolved them.
+//
+// The style computation resolves an animation's keyframes from these rather than reaching into the
+// rule cache itself, which it could only do by building the cache on the spot - parsing the user
+// sheet, evaluating the user-agent sheet's media queries - inside the sealed stage.
+void StyleScope::publish_animation_keyframes()
+{
+    auto const& rule_cache = *m_style_cache->rule_cache;
+
+    Vector<u32> name_lengths;
+    Vector<u16> name_units;
+    Vector<FlatPtr> keyframe_sets;
+    Vector<NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet const>> published;
+    name_lengths.ensure_capacity(rule_cache.rules_by_animation_keyframes.size());
+    keyframe_sets.ensure_capacity(rule_cache.rules_by_animation_keyframes.size());
+    published.ensure_capacity(rule_cache.rules_by_animation_keyframes.size());
+    for (auto const& [name, keyframe_set] : rule_cache.rules_by_animation_keyframes) {
+        auto view = name.view();
+        name_lengths.unchecked_append(static_cast<u32>(view.length_in_code_units()));
+        name_units.ensure_capacity(name_units.size() + view.length_in_code_units());
+        for (size_t index = 0; index < view.length_in_code_units(); ++index)
+            name_units.unchecked_append(static_cast<u16>(view.code_unit_at(index)));
+        keyframe_sets.unchecked_append(bit_cast<FlatPtr>(keyframe_set.ptr()));
+        published.unchecked_append(*keyframe_set);
+    }
+
+    record_tree_scope_animation_keyframes(
+        document(),
+        style_engine_tree_scope(),
+        bit_cast<FlatPtr>(as_if<DOM::ShadowRoot>(*m_node)),
+        name_lengths, name_units, keyframe_sets);
+    m_published_keyframe_sets = move(published);
+}
+
+// A shadow root's scope stops existing when the root does, and another root can be allocated at the
+// same address. Give up the row before that can happen, so neither the keyframe sets it named nor
+// the identity the cascade attributes a declaration to outlives the scope.
+//
+// The row is in the engine of the document the scope published it through, which an adopted root has
+// already left: its tree scope number names another scope in the engine of the document it joins.
+void StyleScope::unpublish_animation_keyframes(DOM::Document& publisher)
+{
+    auto* shadow_root = as_if<DOM::ShadowRoot>(*m_node);
+    if (!shadow_root || shadow_root->style_engine_tree_scope().value() == 0)
+        return;
+    if (!publisher.style_engine_tracks_tree())
+        return;
+    // A garbage collection's finalizer gets here, which must not wait for a stage that holds the engine: the engine
+    // gives the row up once it can, and the sets the row names stay alive until it has.
+    using KeyframeSets = Vector<NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet const>>;
+    auto* sets = new KeyframeSets(move(m_published_keyframe_sets));
+    style_engine_unpublish_tree_scope_animation_keyframes(
+        publisher.render_inputs_for_write().style_engine().rust_handle(), shadow_root->style_engine_tree_scope().value(),
+        bit_cast<FlatPtr>(shadow_root), sets, [](void* sets) { delete static_cast<KeyframeSets*>(sets); });
 }
 
 TreeScopeID StyleScope::style_engine_tree_scope() const
@@ -667,16 +766,52 @@ void StyleScope::invalidate_counter_style_cache()
 {
     m_needs_counter_style_cache_update = true;
 
-    // FIXME: We only need to invalidate this style scope and those belonging to descendant shadow roots (since they may
-    //        include counter styles which extend the ones defined in this scope), not all style scopes in the document.
-    m_node->document().style_scope().m_needs_counter_style_cache_update = true;
+    // Only this style scope and those whose counter style names pass on to it, which may include counter styles that
+    // extend the ones defined in this scope, can resolve differently. Every style update asks each scope for its
+    // counter style environment, and rebuilding the document's walks every user-agent sheet.
     m_node->document().for_each_shadow_root([&](DOM::ShadowRoot& shadow_root) {
-        shadow_root.style_scope().m_needs_counter_style_cache_update = true;
+        auto& scope = shadow_root.style_scope();
+        for (auto const* ancestor = scope.parent_counter_style_scope(); ancestor; ancestor = ancestor->parent_counter_style_scope()) {
+            if (ancestor == this) {
+                scope.m_needs_counter_style_cache_update = true;
+                break;
+            }
+        }
+    });
+}
+
+namespace {
+
+struct UserAgentCounterStyleRule {
+    Utf16FlyString layer_prefix;
+    CounterStyleDefinition definition;
+};
+
+}
+
+// OPTIMIZATION: The user-agent sheets are process-wide and never change, and none of their @counter-style rules sits
+//               under a condition or names a length, so the definitions they declare are the same for every document.
+//               Every document's scope registers them, which a new iframe or SVG image does in its first style
+//               update, so they are made from the rules once.
+static Vector<UserAgentCounterStyleRule> const& user_agent_counter_style_rules(StyleSheetState const& style_sheet, ComputationContext const& computation_context)
+{
+    static auto& rules_by_sheet = *new HashMap<StyleSheetState const*, Vector<UserAgentCounterStyleRule>>;
+    return rules_by_sheet.ensure(&style_sheet, [&] {
+        Vector<UserAgentCounterStyleRule> rules;
+        style_sheet.for_each_effective_rule_data(TraversalOrder::Preorder, [&](RustRuleView const& rule, Utf16View layer_prefix) {
+            if (rule.type() != RustRule::Type::CounterStyle)
+                return;
+            auto name = Utf16FlyString { rule.name() };
+            if (auto definition = CounterStyleDefinition::from_descriptors(name.view(), rule.descriptors(), computation_context); definition.has_value())
+                rules.append({ Utf16FlyString::from_utf16(layer_prefix), definition.release_value() });
+        });
+        return rules;
     });
 }
 
 void StyleScope::build_counter_style_cache()
 {
+    HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::StyleScopeCaches };
     m_is_doing_counter_style_cache_update = true;
 
     // Counter styles can be resolved before any keyframe or function lookup builds the rule cache.
@@ -887,11 +1022,14 @@ void StyleScope::build_counter_style_cache()
         .length_resolution_context = CSS::Length::ResolutionContext::for_document(document())
     };
 
+    auto const loses_to_existing_definition = [&](Utf16FlyString const& name, CounterStylePriority priority) {
+        auto existing = counter_style_priorities.get(name);
+        return existing.has_value() && (existing->origin > priority.origin || (existing->origin == priority.origin && existing->layer > priority.layer));
+    };
+
     auto collect_counter_style_definitions = [&](CSS::CascadeOrigin cascade_origin, CSS::StyleSheetState const& style_sheet) {
         if (!style_sheet.native_media_list().matches())
             return;
-        auto& style_engine = document().style_computer().style_engine();
-        auto const tree_scope = style_engine_tree_scope();
         auto const origin_priority = [&]() -> u8 {
             switch (cascade_origin) {
             case CSS::CascadeOrigin::UserAgent:
@@ -905,20 +1043,30 @@ void StyleScope::build_counter_style_cache()
             }
         }();
         auto const& rule_sheet = style_sheet.shared_compiled_style_sheet() ? style_sheet.shared_compiled_style_sheet()->contents() : style_sheet;
+        if (cascade_origin == CSS::CascadeOrigin::UserAgent) {
+            for (auto const& rule : user_agent_counter_style_rules(rule_sheet, computation_context)) {
+                auto const& name = rule.definition.name();
+                CounterStylePriority priority {
+                    .origin = origin_priority,
+                    .layer = published_layer_index(rule.layer_prefix),
+                };
+                if (loses_to_existing_definition(name, priority))
+                    continue;
+                counter_style_definitions.set(name, rule.definition);
+                counter_style_priorities.set(name, priority);
+            }
+            return;
+        }
         rule_sheet.for_each_effective_rule_data(TraversalOrder::Preorder, [&](RustRuleView const& rule, Utf16View layer_prefix) {
             if (rule.type() != RustRule::Type::CounterStyle)
                 return;
             auto name = Utf16FlyString { rule.name() };
-            auto qualified_layer_name = Utf16FlyString::from_utf16(layer_prefix);
-            auto const layer = qualified_layer_name.is_empty() ? 0 : style_engine.intern_atom(qualified_layer_name).value();
             CounterStylePriority priority {
                 .origin = origin_priority,
-                .layer = style_engine.layer_index(tree_scope, layer),
+                .layer = published_layer_index(Utf16FlyString::from_utf16(layer_prefix)),
             };
-            if (auto existing = counter_style_priorities.get(name); existing.has_value()) {
-                if (existing->origin > priority.origin || (existing->origin == priority.origin && existing->layer > priority.layer))
-                    return;
-            }
+            if (loses_to_existing_definition(name, priority))
+                return;
             if (auto const& definition = CSS::CounterStyleDefinition::from_descriptors(name.view(), rule.descriptors(), computation_context); definition.has_value()) {
                 counter_style_definitions.set(definition->name(), *definition);
                 counter_style_priorities.set(definition->name(), priority);
@@ -946,9 +1094,11 @@ void StyleScope::build_counter_style_cache()
 
         m_is_doing_counter_style_cache_update = false;
         m_needs_counter_style_cache_update = false;
+
+        publish_counter_styles();
     };
 
-    // OPTIMIZATION: The predefined counter styles are the same for every document (they all come from Default.css),
+    // OPTIMIZATION: The predefined counter styles are the same for every document (see user_agent_counter_style_rules()),
     //               and so is what a document that defines no counter style of its own registers. Every new iframe
     //               and SVG image registers them in its first style update, so they are made once.
     static auto& user_agent_registered_counter_styles = *new HashMap<Utf16FlyString, NonnullRefPtr<CSS::CounterStyle const>>;
@@ -1047,6 +1197,71 @@ void StyleScope::build_counter_style_cache()
     finish_counter_style_cache_update();
 }
 
+// The scope a counter style name this scope does not register is looked for in next, which is the
+// chain `dereference_global_tree_scoped_reference` walks.
+StyleScope* StyleScope::parent_counter_style_scope() const
+{
+    auto* shadow_root = as_if<DOM::ShadowRoot>(*m_node);
+    if (!shadow_root)
+        return nullptr;
+    auto* host = shadow_root->host();
+    if (!host)
+        return nullptr;
+    auto& root = host->root();
+    if (auto* host_shadow_root = as_if<DOM::ShadowRoot>(root)) {
+        if (host_shadow_root->uses_document_style_sheets())
+            return &root.document().style_scope();
+        return &host_shadow_root->style_scope();
+    }
+    if (auto* document = as_if<DOM::Document>(root))
+        return &document->style_scope();
+    // A detached host's node tree is rooted at an ordinary element, which carries no tree-scoped
+    // names of its own.
+    return nullptr;
+}
+
+void StyleScope::publish_counter_styles() const
+{
+    auto publish = [&](StyleScope const& scope) {
+        Vector<size_t> names;
+        Vector<Parser::ValueParserFFI::FfiRegisteredCounterStyle const*> counter_styles;
+        names.ensure_capacity(scope.m_registered_counter_styles.size());
+        counter_styles.ensure_capacity(scope.m_registered_counter_styles.size());
+        for (auto const& [name, counter_style] : scope.m_registered_counter_styles) {
+            names.unchecked_append(name.to_raw_leaked());
+            counter_styles.unchecked_append(counter_style->rust_counter_style());
+        }
+
+        auto* parent = scope.parent_counter_style_scope();
+        Parser::ValueParserFFI::rust_publish_counter_styles(
+            Layout::document_layout_arena(document()),
+            scope.style_engine_tree_scope().value(),
+            parent ? parent->style_engine_tree_scope().value() : 0,
+            parent != nullptr,
+            names.data(),
+            counter_styles.data(),
+            names.size());
+        // The style engine names the same registry on every record computed against it, so it
+        // learns the identity wherever the registry is published. A scope that has registered
+        // nothing has no identity to learn, and this runs inside a lazy cache build that a style
+        // computation can reach, so it stays out of the engine's way until there is something to
+        // say.
+        if (scope.m_counter_style_environment_identity != 0) {
+            document().render_inputs_for_write().style_engine().set_counter_style_environment_identity(
+                scope.style_engine_tree_scope().value(), scope.m_counter_style_environment_identity);
+        }
+    };
+
+    publish(*this);
+
+    // A scope whose cache has never settled registers nothing, and a name looked for in it passes
+    // straight to its own host's scope. Publishing it as empty is what puts that link in the chain
+    // the render side follows; building it here instead would run a rule cache update inside
+    // whatever pass asked for the representation.
+    for (auto* scope = parent_counter_style_scope(); scope && scope->m_needs_counter_style_cache_update; scope = scope->parent_counter_style_scope())
+        publish(*scope);
+}
+
 u64 StyleScope::counter_style_environment_identity() const
 {
     if (m_needs_counter_style_cache_update && !m_is_doing_counter_style_cache_update)
@@ -1070,13 +1285,24 @@ void StyleScope::for_each_active_css_style_sheet(Function<void(CSS::StyleSheetSt
 
 RefPtr<CSS::CounterStyle const> StyleScope::get_registered_counter_style(Utf16FlyString const& name) const
 {
-    return dereference_global_tree_scoped_reference<CSS::CounterStyle const*>([&](StyleScope const& scope) {
+    Function<Optional<CSS::CounterStyle const*>(StyleScope const&)> look_up_in_scope = [&](StyleScope const& scope) -> Optional<CSS::CounterStyle const*> {
         if (scope.m_needs_counter_style_cache_update && !scope.m_is_doing_counter_style_cache_update)
             const_cast<StyleScope&>(scope).build_counter_style_cache();
 
         return scope.m_registered_counter_styles.get(name);
-    })
-        .value_or(nullptr);
+    };
+
+    if (auto counter_style = dereference_global_tree_scoped_reference<CSS::CounterStyle const*>(look_up_in_scope); counter_style.has_value())
+        return *counter_style;
+
+    // NB: The predefined counter styles are registered only in the document's scope, which a shadow tree under a
+    //     detached host never reaches through its hosts. Look there last so those names still resolve for it.
+    auto const* outermost_scope = this;
+    while (auto const* parent = outermost_scope->parent_counter_style_scope())
+        outermost_scope = parent;
+    if (outermost_scope->m_node->is_document())
+        return nullptr;
+    return look_up_in_scope(document().style_scope()).value_or(nullptr);
 }
 
 Optional<StyleScope::FunctionDefinitionAndScope> StyleScope::get_function_definition(Utf16FlyString const& name) const
@@ -1085,12 +1311,6 @@ Optional<StyleScope::FunctionDefinitionAndScope> StyleScope::get_function_defini
         auto const get_function_definition_for_cascade_origin = [&](CSS::CascadeOrigin cascade_origin) {
             RustCompiledFunction const* cascade_origin_result = nullptr;
             u32 existing_layer_index = 0;
-            auto& style_engine = scope.document().style_computer().style_engine();
-            auto const tree_scope = scope.style_engine_tree_scope();
-            auto layer_index_of = [&](Utf16FlyString const& qualified_layer_name) {
-                auto const layer = qualified_layer_name.is_empty() ? 0 : style_engine.intern_atom(qualified_layer_name);
-                return style_engine.layer_index(tree_scope, layer.value());
-            };
 
             auto cached_rules = scope.rule_cache().function_rules_by_name.get(name);
             if (!cached_rules.has_value())
@@ -1100,7 +1320,7 @@ Optional<StyleScope::FunctionDefinitionAndScope> StyleScope::get_function_defini
                 if (cached_rule.cascade_origin != cascade_origin)
                     continue;
 
-                auto layer_index = layer_index_of(cached_rule.qualified_layer_name);
+                auto layer_index = scope.published_layer_index(cached_rule.qualified_layer_name);
                 if (!cascade_origin_result || layer_index >= existing_layer_index) {
                     cascade_origin_result = &cached_rule.rule;
                     existing_layer_index = layer_index;

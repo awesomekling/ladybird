@@ -32,6 +32,7 @@
 #include <LibWeb/CSS/PercentageOr.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/PseudoElement.h>
+#include <LibWeb/CSS/PublishedStyleRecord.h>
 #include <LibWeb/CSS/Ratio.h>
 #include <LibWeb/CSS/ResolvedTransform.h>
 #include <LibWeb/CSS/Size.h>
@@ -50,6 +51,7 @@
 #include <LibWeb/CSS/Time.h>
 #include <LibWeb/CSS/URL.h>
 #include <LibWeb/Export.h>
+#include <LibWeb/StyleDrainScopedFFI.h>
 #include <LibWeb/StyleEngineRustFFI.h>
 #include <LibWebCommon/CSS/PreferredColorScheme.h>
 
@@ -183,17 +185,6 @@ struct GridAutoFlow {
 
 struct NormalGap {
     bool operator==(NormalGap const&) const = default;
-};
-
-struct QuotesData {
-    enum class Type {
-        None,
-        Auto,
-        Specified,
-    } type;
-    Vector<Array<Utf16FlyString, 2>> strings {};
-
-    bool operator==(QuotesData const&) const = default;
 };
 
 struct Position {
@@ -561,29 +552,8 @@ struct ShadowData {
     bool operator==(ShadowData const&) const = default;
 };
 
-struct ContentData {
-    enum class Type {
-        Normal,
-        None,
-        List,
-    } type { Type::Normal };
-
-    Vector<Variant<Utf16String, NonnullRefPtr<AbstractImageStyleValue>>> data;
-    Vector<ValueComparingRefPtr<CounterStyle const>> counter_style_dependencies;
-    Optional<Utf16String> alt_text {};
-
-    bool operator==(ContentData const&) const = default;
-};
-
-struct ContentDataAndQuoteNestingLevel {
-    ContentData content_data;
-    u32 final_quote_nesting_level { 0 };
-};
-
-enum class NotifyListItemCounterRendered : u8 {
-    No,
-    Yes,
-};
+// The counter styles a `content` value names, in the order they appear in it and then in its alt text. A name that
+// resolves to no counter style is kept as a null reference, which stands for `decimal` wherever it is used.
 
 struct CounterData {
     Utf16FlyString name;
@@ -722,7 +692,7 @@ AK_ENUM_BITWISE_OPERATORS(StyleRecordDependencyFlag);
 
 // Whether a style record publishes display:none, read straight out of its box group payload. This
 // is the same value ComputedValues::display() exposes, without materializing a style record view.
-[[nodiscard]] bool style_record_display_is_none(StyleEngine const&, StyleRecordID);
+[[nodiscard]] bool style_record_display_is_none(PublishedStyleRecord const*);
 
 // The box group payload stores display values in the Rust-defined explicit
 // form; these pins keep the tag discriminants aligned with Display::Type.
@@ -807,7 +777,6 @@ public:
     // warrants that every property outside `groups_to_apply` computes to the same value in the
     // given style as it did when `base` was built.
     static constexpr u32 all_style_groups = (1u << to_underlying(StyleGroupIndex::Count)) - 1;
-    static NonnullRefPtr<ComputedValues const> create_over_base(ComputedStyleWorkingSet const&, DOM::Document const&, StyleScope const&, ColorResolutionContext, ComputedValues const& base, u32 groups_to_apply);
 
     // The style group a longhand's computed value lives in, derived from the field descriptors the
     // group payloads build from, plus explicit bindings for the bespoke-built groups. A longhand
@@ -846,16 +815,6 @@ public:
     };
     static Statistics const& statistics() { return s_statistics; }
 
-    // Shares group payloads with `previous` wherever the values compare equal. This changes no
-    // observable value, only the identity of the backing payloads, so it is safe on an otherwise
-    // immutable ComputedValues. It makes pointer-based diffing hit on the next restyle and lets a
-    // restyled element keep sharing storage across style generations. Returns true when every
-    // group ends up sharing its payload with `previous`.
-    bool adopt_identical_group_payloads(ComputedValues const& previous) const;
-    // The same question answered straight from two style records' group payload arrays, so a caller
-    // that only wants the answer does not have to materialize a ComputedValues for either record.
-    static bool layout_affecting_group_payloads_differ(void const* const* a, void const* const* b);
-
     // Returns the Rust-owned payload for direct read-only layout access. The
     // pointer is borrowed from this immutable ComputedValues instance.
     void const* style_group_payload(StyleGroupIndex) const;
@@ -892,12 +851,6 @@ public:
     ReadonlyBytes property_importance_bitmap() const LIFETIME_BOUND { return m_property_important.bytes(); }
     ReadonlyBytes property_inheritance_bitmap() const LIFETIME_BOUND { return m_property_inherited.bytes(); }
 
-    // True when every inherited longhand took its value by inheritance and no other longhand did:
-    // the element's cascade declared nothing that survives into its inherited half, and nothing
-    // explicitly inherited a property that does not inherit on its own. Such an element's inherited
-    // half is, by construction, exactly what its parent's inherited half was when this style was
-    // computed.
-    bool property_inheritance_is_standard() const;
     bool depends_on_viewport_metrics() const { return m_depends_on_viewport_metrics; }
     bool font_metrics_depend_on_viewport_metrics() const { return m_font_metrics_depend_on_viewport_metrics; }
     bool in_display_none_subtree() const { return m_in_display_none_subtree; }
@@ -906,7 +859,6 @@ public:
     bool has_pseudo_element_style(PseudoElement pseudo_element) const { return m_pseudo_element_styles & (1ull << to_underlying(pseudo_element)); }
     u64 pseudo_element_style_mask() const { return m_pseudo_element_styles; }
     ReadonlySpan<ComputedValuesFFI::FfiTableInheritanceDependentValue const> inheritance_dependent_specified_values() const { return m_inheritance_dependent_specified_values; }
-    RefPtr<StyleValue const> raw_cascaded_font_size() const;
 
     // The drive's frozen computed longhand table (a Rust ComputedLonghandTable), or null when
     // this style holds only a borrowed span or no table at all.
@@ -937,7 +889,6 @@ public:
     NonnullRefPtr<StyleValue const> computed_content() const { return m_noninherited.content_data->computed_content_value(); }
     bool content_is_normal() const { return m_noninherited.content_data->content_is_normal(); }
     bool content_uses_list_item_counter() const { return m_noninherited.content_data->content_uses_list_item_counter(); }
-    ContentDataAndQuoteNestingLevel resolved_content(DOM::AbstractElement&, u32 initial_quote_nesting_level, NotifyListItemCounterRendered) const;
     Vector<CounterData, 0> counter_increment() const { return m_noninherited.content_data->counter_increment_value(); }
     Vector<CounterData, 0> counter_reset() const { return m_noninherited.content_data->counter_reset_value(); }
     Vector<CounterData, 0> counter_set() const { return m_noninherited.content_data->counter_set_value(); }
@@ -956,11 +907,7 @@ public:
     Color text_decoration_color() const { return Color::from_bgra(m_noninherited.text_reset->text_decoration_color); }
     ReadonlySpan<ShadowData> text_shadow() const { return m_inherited.text->text_shadow_span(); }
     Positioning position() const { return static_cast<Positioning>(m_noninherited.box->position); }
-    Vector<Optional<Utf16FlyString>> transition_properties() const { return m_noninherited.animation->transition_properties_value(); }
-    Vector<Time> transition_durations() const { return m_noninherited.animation->transition_durations_value(); }
-    Vector<EasingFunction> transition_timing_functions() const { return m_noninherited.animation->transition_timing_functions_value(); }
-    Vector<Time> transition_delays() const { return m_noninherited.animation->transition_delays_value(); }
-    Vector<TransitionBehavior> transition_behaviors() const { return m_noninherited.animation->transition_behaviors_value(); }
+    BoxSizing box_sizing() const { return static_cast<BoxSizing>(m_noninherited.box->box_sizing); }
     bool transition_delay_and_duration_are_single_zero() const { return m_noninherited.animation->transition_delay_and_duration_are_single_zero_value(); }
     WhiteSpaceCollapse white_space_collapse() const { return m_inherited.text->white_space_collapse_value(); }
     FlexDirection flex_direction() const { return static_cast<FlexDirection>(m_noninherited.alignment->flex_direction); }
@@ -1026,6 +973,7 @@ public:
         return style_value_from_handle(property_id, reinterpret_cast<RustStyleValueHandle const&>(*handle));
     }
     LengthBox margin() const { return length_box(m_noninherited.surround->margin); }
+    LengthBox padding() const { return length_box(m_noninherited.surround->padding); }
     LengthBox scroll_margin() const { return length_box(m_noninherited.misc->scroll_margin); }
 
     BorderData const& border_left() const { return m_noninherited.border->border_left_value(); }
@@ -1042,15 +990,15 @@ public:
     Vector<BackgroundLayerData> mask_layers() const { return m_noninherited.mask_data->mask_layers_value(); }
 
     Color webkit_text_fill_color() const { return m_inherited.text->webkit_text_fill_color_value(); }
+    CSSPixels letter_spacing() const { return m_inherited.text->letter_spacing_value(); }
 
     ListStyleType list_style_type(StyleScope const& style_scope) const { return m_inherited.list->list_style_type_value(style_scope); }
     RefPtr<AbstractImageStyleValue const> list_style_image() const { return m_inherited.list->list_style_image_value(); }
-    bool list_style_type_depends_on_counter_style_environment() const { return m_inherited.list->list_style_type_depends_on_counter_style_environment(); }
-    bool list_style_type_uses_non_overridable_counter_style() const { return m_inherited.list->list_style_type_uses_non_overridable_counter_style(); }
 
     RefPtr<AbstractImageStyleValue const> mask_image() const { return m_noninherited.mask_data->mask_image_value(); }
     Optional<MaskReference> mask() const { return m_noninherited.mask_data->mask_value(); }
     Optional<URL> clip_path() const { return m_noninherited.mask_data->clip_path_value(); }
+    Optional<SVGPaint> fill() const { return m_inherited.svg->fill_value(); }
     Optional<SVGPaint> stroke() const { return m_inherited.svg->stroke_value(); }
     Color flood_color() const { return Gfx::Color::from_bgra(m_noninherited.svg_reset->flood_color); }
     float flood_opacity() const { return m_noninherited.svg_reset->flood_opacity; }
@@ -1176,10 +1124,7 @@ public:
         static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::InheritedList;
 
         ListStyleType list_style_type_value(StyleScope const&) const;
-        bool list_style_type_depends_on_counter_style_environment() const;
-        bool list_style_type_uses_non_overridable_counter_style() const;
         RefPtr<AbstractImageStyleValue const> list_style_image_value() const;
-        QuotesData quotes_value() const;
 
         bool operator==(InheritedListValues const& other) const
         {
@@ -1355,11 +1300,6 @@ public:
         static constexpr auto style_group_lifecycle = ComputedValuesFFI::StyleGroupLifecycle::Animation;
 
         Vector<ComputedAnimationName> animation_names_value() const;
-        Vector<Optional<Utf16FlyString>> transition_properties_value() const;
-        Vector<Time> transition_durations_value() const;
-        Vector<EasingFunction> transition_timing_functions_value() const;
-        Vector<Time> transition_delays_value() const;
-        Vector<TransitionBehavior> transition_behaviors_value() const;
         bool transition_delay_and_duration_are_single_zero_value() const { return transition_delay_and_duration_are_single_zero; }
 
         bool operator==(AnimationValues const& other) const
@@ -1724,7 +1664,6 @@ public:
 
     // Resolves the content property straight from the two groups it reads, for a caller holding a
     // style record's payloads rather than a whole style.
-    static ContentDataAndQuoteNestingLevel resolved_content(ContentValues const&, InheritedListValues const&, DOM::AbstractElement&, u32 initial_quote_nesting_level, NotifyListItemCounterRendered);
 
 private:
     struct NonInheritedValues {
@@ -1792,16 +1731,16 @@ StyleGroup const* style_group_from_payloads(void const* payloads)
     return static_cast<StyleGroup const*>(payload);
 }
 
-// A synchronous, allocation-free compatibility surface over the payloads of
-// one authoritative StyleRecord. It owns no group or metadata payload.
+// ComputedValues over the payloads of one published style record, which the view holds: it borrows nothing it does not
+// keep alive, and reads no style engine.
 class WEB_API ComputedStyleRecordView {
     AK_MAKE_NONCOPYABLE(ComputedStyleRecordView);
     AK_MAKE_NONMOVABLE(ComputedStyleRecordView);
 
 public:
     ComputedStyleRecordView() = default;
-    ComputedStyleRecordView(StyleEngineFFI::FfiStyleRecordView const&, StyleComputer const&, StyleRecordID, bool owns_style_record_pin);
-    ~ComputedStyleRecordView();
+    // An empty view for a null record.
+    explicit ComputedStyleRecordView(RefPtr<PublishedStyleRecord const>);
 
     explicit operator bool() const { return m_present; }
     ComputedValues const* operator->() const
@@ -1817,40 +1756,10 @@ public:
     }
 
 private:
+    RefPtr<PublishedStyleRecord const> m_record;
     Optional<ComputedValues> m_base_values;
     ComputedValues m_values { ComputedValues::BorrowedStyleRecord::Yes };
-    GC::Ptr<StyleComputer const> m_style_computer;
-    StyleRecordID m_style_record_identity;
-    bool m_owns_style_record_pin { false };
     bool m_present { false };
-};
-
-// The input to layout-node construction is either an authoritative style
-// record for a DOM style target or an owned style for an anonymous box.
-class LayoutStyle {
-public:
-    LayoutStyle() = default;
-    LayoutStyle(StyleRecordID style_record_identity)
-        : m_style_record_identity(style_record_identity)
-    {
-        VERIFY(style_record_identity);
-    }
-    LayoutStyle(NonnullRefPtr<ComputedValues const> values)
-        : m_values(move(values))
-    {
-    }
-    LayoutStyle(RefPtr<ComputedValues const> values)
-        : m_values(move(values))
-    {
-    }
-
-    explicit operator bool() const { return !!m_style_record_identity || m_values; }
-    [[nodiscard]] StyleRecordID style_record_identity() const { return m_style_record_identity; }
-    [[nodiscard]] RefPtr<ComputedValues const> const& values() const { return m_values; }
-
-private:
-    RefPtr<ComputedValues const> m_values;
-    StyleRecordID m_style_record_identity;
 };
 
 class ComputedValues::Mutator final {
@@ -1877,11 +1786,6 @@ public:
     void set_highlight_color_is_current_color(bool value) { m_values.m_highlight_color_is_current_color = value; }
     void set_pseudo_element_styles(u64 value) { m_values.m_pseudo_element_styles = value; }
     void set_computed_longhand_table(void const* table) { m_values.adopt_computed_longhand_table(table); }
-    void set_base_values(NonnullRefPtr<ComputedValues const> value)
-    {
-        m_values.m_base_values = move(value);
-        m_values.m_borrowed_base_values = nullptr;
-    }
     void set_animated_properties(AnimatedProperties const*);
 
     // Rust-built payloads arrive in StyleGroupIndex order carrying this reference.

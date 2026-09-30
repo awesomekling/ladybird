@@ -124,6 +124,9 @@ public:
     [[nodiscard]] bool has_valid_rule_cache() const { return m_style_cache && m_style_cache->rule_cache; }
     void invalidate_style_cache();
     void publish_cascade_layer_order(StyleSheetState* pending_attachment = nullptr);
+    [[nodiscard]] u32 published_layer_index(Utf16FlyString const& qualified_layer_name) const;
+    void publish_animation_keyframes();
+    void unpublish_animation_keyframes(DOM::Document& publisher);
     void invalidate_user_style_sheet();
 
     void for_each_stylesheet(CascadeOrigin, Function<void(CSS::StyleSheetState&)> const&) const;
@@ -162,6 +165,15 @@ public:
     StyleCache& ensure_style_cache() const;
 
     RefPtr<StyleCache> m_style_cache;
+    // In the document's scope: the cache its shadow-root scopes with no stylesheets of their own share.
+    RefPtr<StyleCache> m_sheetless_shadow_root_style_cache;
+
+    // The keyframe sets this scope last published. The style computation reads them by pointer, so
+    // the publication holds them alive even after the rule cache they came from has been
+    // invalidated and before the next style update rebuilds it. A reference to the whole cache
+    // would do as well, but it would also keep a shared sheet-set cache from being evicted once no
+    // scope uses it anymore.
+    Vector<NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet const>> m_published_keyframe_sets;
 
     RefPtr<StyleSheetState> m_user_style_sheet;
 
@@ -169,12 +181,17 @@ public:
     bool m_is_doing_counter_style_cache_update : 1 { false };
     bool m_has_published_named_layer_order : 1 { false };
     u64 m_published_layer_order_generation { 0 };
+    // The named layers of the order this scope last published, by qualified name, with their rank.
+    HashMap<Utf16FlyString, u32> m_published_layer_ranks;
     u64 m_counter_style_environment_identity { 0 };
     HashMap<Utf16FlyString, NonnullRefPtr<CSS::CounterStyle const>> m_registered_counter_styles;
 
     GC::Ref<DOM::Node> m_node;
 
 private:
+    [[nodiscard]] StyleScope* parent_counter_style_scope() const;
+    void publish_counter_styles() const;
+
     void add_sheet(StyleSheetState&, StyleEngineUpdate);
     void remove_sheet(StyleSheetState&, StyleEngineUpdate);
     void insert_sheet_in_tree_order(StyleSheetState&);

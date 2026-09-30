@@ -9,7 +9,6 @@
 #include <LibWeb/CSS/StyleValues/ImageSetStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
 #include <LibWeb/HTML/DecodedImageData.h>
-#include <LibWeb/Layout/Node.h>
 
 namespace Web::CSS {
 
@@ -36,11 +35,6 @@ GC::Ref<CSSStyleValue> AbstractImageStyleValue::reify(Utf16FlyString const&) con
 {
     // AD-HOC: There's no spec description of how to reify as a CSSImageValue.
     return CSSImageValue::create(*this);
-}
-
-void AbstractImageStyleValue::load_any_resources(Layout::NodeWithStyle const& layout_node)
-{
-    load_any_resources(const_cast<DOM::Document&>(layout_node.document()));
 }
 
 ImageStyleValue const* AbstractImageStyleValue::selected_image_style_value() const

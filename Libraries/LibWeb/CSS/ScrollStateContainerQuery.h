@@ -38,7 +38,7 @@ public:
     // Records the direction of a relative scroll of a scrolling box by the delta, which scroll-state(scrolled) reads
     // for the element whose scrolling box it is. The direction is kept whether or not the element is a query container
     // yet, so a query that starts asking later reads it too.
-    void did_scroll_relatively(Layout::Node const& scrolling_box, CSSPixelPoint delta);
+    void did_scroll_relatively(Painting::BoxSlot const& scrolling_box, CSSPixelPoint delta);
 
     enum class Snapshot : u8 {
         AllContainers,
@@ -49,6 +49,9 @@ public:
     // Snapshots the scroll state of the containers, invalidating the styles that queried a state that changed. Returns
     // whether any did.
     bool snapshot_post_layout_state(DOM::Document&, Snapshot);
+
+    // Whether any element has been queried as a scroll-state() container.
+    bool has_containers() const { return !m_containers.is_empty(); }
 
     void visit_edges(GC::Cell::Visitor&);
 

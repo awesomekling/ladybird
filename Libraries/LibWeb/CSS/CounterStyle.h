@@ -11,12 +11,17 @@
 #include <LibWeb/CSS/CounterStyleDefinition.h>
 #include <LibWeb/CSS/Enums.h>
 
+namespace Web::CSS::Parser::ValueParserFFI {
+
+struct FfiRegisteredCounterStyle;
+
+}
+
 namespace Web::CSS {
 
 // https://drafts.csswg.org/css-counter-styles-3/#counter-styles
 class CounterStyle : public RefCounted<CounterStyle> {
 public:
-    static NonnullRefPtr<CounterStyle const> decimal();
     static NonnullRefPtr<CounterStyle const> disc();
     static NonnullRefPtr<CounterStyle const> from_counter_style_definition(CounterStyleDefinition const&, StyleScope const&);
 
@@ -37,25 +42,19 @@ public:
     Optional<Utf16FlyString> const& fallback() const { return m_fallback; }
     CounterStylePad const& pad() const { return m_pad; }
 
-    Optional<Utf16String> generate_an_initial_representation_for_the_counter_value(i64 value) const;
-    bool uses_a_negative_sign() const;
+    // The representation algorithm and the descriptors it reads live in Rust; this is the handle
+    // the style scope publishes and a representation request names. It is made the first time it
+    // is asked for: a style scope rebuilding its counter styles resolves every one of them again
+    // and keeps the one it had whenever the new one equals it.
+    Parser::ValueParserFFI::FfiRegisteredCounterStyle const* rust_counter_style() const;
+
     bool representation_is_constant() const;
     bool equals(CounterStyle const&) const;
 
-    virtual ~CounterStyle() = default;
+    virtual ~CounterStyle();
 
 private:
-    CounterStyle(Utf16FlyString name, CounterStyleAlgorithm algorithm, CounterStyleNegativeSign negative_sign, Utf16FlyString prefix, Utf16FlyString suffix, Vector<CounterStyleRangeEntry> range, Optional<Utf16FlyString> fallback, CounterStylePad pad)
-        : m_name(move(name))
-        , m_algorithm(move(algorithm))
-        , m_negative_sign(move(negative_sign))
-        , m_prefix(move(prefix))
-        , m_suffix(move(suffix))
-        , m_range(move(range))
-        , m_fallback(move(fallback))
-        , m_pad(move(pad))
-    {
-    }
+    CounterStyle(Utf16FlyString name, CounterStyleAlgorithm algorithm, CounterStyleNegativeSign negative_sign, Utf16FlyString prefix, Utf16FlyString suffix, Vector<CounterStyleRangeEntry> range, Optional<Utf16FlyString> fallback, CounterStylePad pad);
 
     // Counter styles are composed of:
     // a name, to identify the style
@@ -84,8 +83,10 @@ private:
 
     // AD-HOC: We store the `pad` descriptor here as well to have everything in one place
     CounterStylePad m_pad;
+
+    mutable Parser::ValueParserFFI::FfiRegisteredCounterStyle* m_rust_counter_style { nullptr };
 };
 
-Utf16String generate_a_counter_representation(RefPtr<CounterStyle const> const& counter_style, StyleScope const& style_scope, i32 value);
+bool counter_style_representation_depends_on_value(CounterStyle const&);
 
 }

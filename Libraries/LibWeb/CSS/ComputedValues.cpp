@@ -6,7 +6,6 @@
 
 #include <AK/AnyOf.h>
 #include <AK/Utf16StringBuilder.h>
-#include <LibWeb/CSS/CSSCounterStyleRule.h>
 #include <LibWeb/CSS/ComputedStyleWorkingSet.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CountersSet.h>
@@ -678,42 +677,6 @@ void const* style_group_default_payload(size_t group_index)
     return default_payloads[group_index];
 }
 
-bool ComputedValues::property_inheritance_is_standard() const
-{
-    static auto const standard_inheritance_bitmap = [] {
-        AK::FixedBitmap<number_of_longhand_properties> bitmap { false };
-        for (auto i = to_underlying(first_longhand_property_id); i <= to_underlying(last_longhand_property_id); ++i) {
-            auto property_id = static_cast<PropertyID>(i);
-            if (is_inherited_property(property_id))
-                bitmap.set(property_bitmap_index(property_id), true);
-        }
-        return bitmap;
-    }();
-    return m_property_inherited == standard_inheritance_bitmap;
-}
-
-bool ComputedValues::adopt_identical_group_payloads(ComputedValues const& previous) const
-{
-    bool all_shared = true;
-    auto adopt = [&]<typename T>(StyleStructRef<T> const& mine, StyleStructRef<T> const& theirs) {
-        if (mine.ptr_equals(theirs))
-            return;
-        if (mine == theirs) {
-            // StyleEngine retains the previously published payload independently, so adopting an
-            // equal canonical payload changes this projection without moving the shared record.
-            const_cast<StyleStructRef<T>&>(mine) = theirs;
-            return;
-        }
-        all_shared = false;
-    };
-#define LIBWEB_ADOPT_STYLE_GROUP(name, path, sharing_name, affects_layout) adopt(path, previous.path);
-    LIBWEB_ENUMERATE_COMPUTED_VALUE_STYLE_GROUPS(LIBWEB_ADOPT_STYLE_GROUP)
-#undef LIBWEB_ADOPT_STYLE_GROUP
-    if (all_shared)
-        adopt_identical_computed_longhand_table(previous);
-    return all_shared;
-}
-
 // The same canonicalization for the computed longhand table: when this style's table names
 // value-equal data throughout, take the previous style's table so the next publication interns
 // the same pointers and keeps the style-record identity, exactly like adopted group payloads do.
@@ -727,23 +690,6 @@ void ComputedValues::adopt_identical_computed_longhand_table(ComputedValues cons
         return;
     if (ComputedValuesFFI::rust_computed_longhand_tables_equal_for_publication(table, previous_table))
         const_cast<ComputedValues&>(*this).copy_computed_longhand_table_from(previous);
-}
-
-bool ComputedValues::layout_affecting_group_payloads_differ(void const* const* a, void const* const* b)
-{
-    auto differs = [&]<typename T>() {
-        auto const* mine = static_cast<T const*>(a[T::style_group_index]);
-        auto const* theirs = static_cast<T const*>(b[T::style_group_index]);
-        return mine != theirs && !(*mine == *theirs);
-    };
-#define LIBWEB_COMPARE_STYLE_GROUP_PAYLOAD(name, path, sharing_name, affects_layout) \
-    if constexpr (affects_layout) {                                                  \
-        if (differs.template operator()<name>())                                     \
-            return true;                                                             \
-    }
-    LIBWEB_ENUMERATE_COMPUTED_VALUE_STYLE_GROUPS(LIBWEB_COMPARE_STYLE_GROUP_PAYLOAD)
-#undef LIBWEB_COMPARE_STYLE_GROUP_PAYLOAD
-    return false;
 }
 
 void const* ComputedValues::style_group_payload(StyleGroupIndex group) const
@@ -792,13 +738,11 @@ void ComputedValues::borrow_style_record_payloads(ReadonlySpan<void const*> payl
     VERIFY(index == payloads.size());
 }
 
-bool style_record_display_is_none(StyleEngine const& style_engine, StyleRecordID style_record)
+bool style_record_display_is_none(PublishedStyleRecord const* style_record)
 {
     if (!style_record)
         return false;
-    auto view = style_engine.style_record_view(style_record);
-    if (!view.present)
-        return false;
+    auto const& view = style_record->view();
     // The record's base payloads are the ones an animation overlay was layered on top of, matching
     // what ComputedValues::base_values() exposes.
     auto const* payloads = view.base_payloads ? view.base_payloads : view.payloads;
@@ -810,13 +754,13 @@ bool style_record_display_is_none(StyleEngine const& style_engine, StyleRecordID
     return display_from_ffi_display(box->display).is_none();
 }
 
-ComputedStyleRecordView::ComputedStyleRecordView(StyleEngineFFI::FfiStyleRecordView const& view, StyleComputer const& style_computer, StyleRecordID style_record_identity, bool owns_style_record_pin)
-    : m_style_computer(&style_computer)
-    , m_style_record_identity(style_record_identity)
-    , m_owns_style_record_pin(owns_style_record_pin)
+ComputedStyleRecordView::ComputedStyleRecordView(RefPtr<PublishedStyleRecord const> record)
+    : m_record(move(record))
 {
+    if (!m_record)
+        return;
+    auto const& view = m_record->view();
     VERIFY(view.present);
-    VERIFY(style_record_identity);
     VERIFY(view.payload_count == to_underlying(StyleGroupIndex::Count));
     VERIFY(view.payloads);
     VERIFY(view.base_payloads);
@@ -856,12 +800,6 @@ ComputedStyleRecordView::ComputedStyleRecordView(StyleEngineFFI::FfiStyleRecordV
             m_base_values->refresh_computed_longhand_table_views();
     }
     m_present = true;
-}
-
-ComputedStyleRecordView::~ComputedStyleRecordView()
-{
-    if (m_style_computer && m_owns_style_record_pin)
-        m_style_computer->unpin_style_record(m_style_record_identity);
 }
 
 // The table-driven build and the marshalled build must stay on one numbering with the Rust
@@ -1081,21 +1019,6 @@ ListStyleType ComputedValues::InheritedListValues::list_style_type_value(StyleSc
     };
 }
 
-bool ComputedValues::InheritedListValues::list_style_type_depends_on_counter_style_environment() const
-{
-    auto value = animation_style_value(list_style_type);
-    return value->is_counter_style() && value->as_counter_style().value().has<Utf16FlyString>();
-}
-
-bool ComputedValues::InheritedListValues::list_style_type_uses_non_overridable_counter_style() const
-{
-    auto value = animation_style_value(list_style_type);
-    return value->is_counter_style()
-        && value->as_counter_style().value().has<Utf16FlyString>()
-        && CSSCounterStyleRule::matches_non_overridable_counter_style_name(
-            value->as_counter_style().value().get<Utf16FlyString>());
-}
-
 bool marker_text_depends_on_list_item_counter_value(ListStyleType const& list_style_type)
 {
     return list_style_type.visit(
@@ -1124,27 +1047,6 @@ RefPtr<AbstractImageStyleValue const> ComputedValues::InheritedListValues::list_
     if (!value->is_abstract_image())
         return nullptr;
     return value->as_abstract_image();
-}
-
-QuotesData ComputedValues::InheritedListValues::quotes_value() const
-{
-    auto value = animation_style_value(quotes);
-    QuotesData result { .type = QuotesData::Type::Auto };
-    if (value->is_keyword()) {
-        if (value->to_keyword() == Keyword::None)
-            result.type = QuotesData::Type::None;
-        return result;
-    }
-
-    result.type = QuotesData::Type::Specified;
-    auto const& items = value->as_value_list().values();
-    VERIFY(items.size() % 2 == 0);
-    for (size_t index = 0; index < items.size(); index += 2) {
-        result.strings.empend(
-            items[index]->as_string().string_value(),
-            items[index + 1]->as_string().string_value());
-    }
-    return result;
 }
 
 NonnullRefPtr<StyleValue const> ComputedValues::ContentValues::computed_content_value() const
@@ -1475,35 +1377,6 @@ Vector<BackgroundLayerData> ComputedValues::MaskValues::mask_layers_value() cons
     return layers;
 }
 
-template<typename T, typename Mapper>
-static Vector<T> animation_keyword_items(ComputedValuesFFI::ComputedStyleValueHandle const& handle, Mapper mapper)
-{
-    Vector<T> result;
-    for (auto const& item : animation_items(handle))
-        result.append(mapper(item->to_keyword()).release_value());
-    return result;
-}
-
-static Vector<Time> animation_time_items(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
-{
-    Vector<Time> result;
-    for (auto const& item : animation_items(handle))
-        result.append(Time::from_style_value(item, {}));
-    return result;
-}
-
-static Vector<Optional<Utf16FlyString>> animation_optional_name_items(ComputedValuesFFI::ComputedStyleValueHandle const& handle)
-{
-    Vector<Optional<Utf16FlyString>> result;
-    for (auto const& item : animation_items(handle)) {
-        if (item->is_custom_ident())
-            result.append(item->as_custom_ident().custom_ident());
-        else
-            result.empend();
-    }
-    return result;
-}
-
 Vector<ComputedAnimationName> ComputedValues::AnimationValues::animation_names_value() const
 {
     auto const* value = static_cast<StyleValueFFI::StyleValueData const*>(animation_name.pointer);
@@ -1537,45 +1410,12 @@ Vector<ComputedAnimationName> ComputedValues::AnimationValues::animation_names_v
     return result;
 }
 
-Vector<Optional<Utf16FlyString>> ComputedValues::AnimationValues::transition_properties_value() const
-{
-    return animation_optional_name_items(transition_property);
-}
-
-Vector<Time> ComputedValues::AnimationValues::transition_durations_value() const
-{
-    return animation_time_items(transition_duration);
-}
-
-Vector<EasingFunction> ComputedValues::AnimationValues::transition_timing_functions_value() const
-{
-    Vector<EasingFunction> result;
-    for (auto const& item : animation_items(transition_timing_function))
-        result.append(EasingFunction::from_style_value(item));
-    return result;
-}
-
-Vector<Time> ComputedValues::AnimationValues::transition_delays_value() const
-{
-    return animation_time_items(transition_delay);
-}
-
-Vector<TransitionBehavior> ComputedValues::AnimationValues::transition_behaviors_value() const
-{
-    return animation_keyword_items<TransitionBehavior>(transition_behavior, keyword_to_transition_behavior);
-}
-
 NonnullRefPtr<ComputedValues const> ComputedValues::create(ComputedStyleWorkingSet const& computed_style, DOM::Document const& document, StyleScope const& style_scope, ColorResolutionContext color_resolution_context, ComputedValues const* inherit_parent)
 {
     return create_internal(computed_style, document, style_scope, move(color_resolution_context), inherit_parent, nullptr, all_style_groups);
 }
 
-NonnullRefPtr<ComputedValues const> ComputedValues::create_over_base(ComputedStyleWorkingSet const& computed_style, DOM::Document const& document, StyleScope const& style_scope, ColorResolutionContext color_resolution_context, ComputedValues const& base, u32 groups_to_apply)
-{
-    return create_internal(computed_style, document, style_scope, move(color_resolution_context), nullptr, &base, groups_to_apply);
-}
-
-NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyleWorkingSet const& computed_style, DOM::Document const& document, StyleScope const&, ColorResolutionContext color_resolution_context, ComputedValues const* inherit_parent, ComputedValues const* base, u32 groups_to_apply)
+NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyleWorkingSet const& computed_style, DOM::Document const& document, StyleScope const& style_scope, ColorResolutionContext color_resolution_context, ComputedValues const* inherit_parent, ComputedValues const* base, u32 groups_to_apply)
 {
     // A group outside `groups_to_apply` keeps the base's payload: its build is skipped and it counts
     // as adopted, so the guarded setters below leave it alone. The caller warrants that every
@@ -1606,29 +1446,8 @@ NonnullRefPtr<ComputedValues const> ComputedValues::create_internal(ComputedStyl
     Optional<ComputedValuesFFI::FfiLengthResolutionContext> length_context_storage;
     auto ffi_color_input = make_rust_color_resolution_input(color_resolution_context, length_context_storage);
     Optional<ComputedValuesFFI::FfiFontGroupBuildInputs> font_group_inputs;
-    if (applies(StyleGroupIndex::FontValues)) {
-        auto font_list = computed_style.computed_font_list(document.font_computer());
-        auto const& first_available_font = font_list->first_available_font();
-        auto const metrics = first_available_font.pixel_metrics();
-        auto math_shift = keyword_to_math_shift(computed_style.property(PropertyID::MathShift).to_keyword()).release_value();
-        auto math_style = keyword_to_math_style(computed_style.property(PropertyID::MathStyle).to_keyword()).release_value();
-        font_group_inputs = ComputedValuesFFI::FfiFontGroupBuildInputs {
-            .font_size_raw = computed_style.font_size().raw_value(),
-            .line_height_used_raw = computed_style.line_height(document.font_computer()).raw_value(),
-            .font_variant_emoji = to_underlying(computed_style.font_variant_emoji()),
-            .font_ascent = metrics.ascent,
-            .font_descent = metrics.descent,
-            .font_x_height = metrics.x_height,
-            .font_zero_advance = metrics.advance_of_ascii_zero,
-            .first_available_font = &first_available_font,
-            .font_cascade_list = font_list.ptr(),
-            .font_weight = computed_style.font_weight(),
-            .font_width = computed_style.font_width().value(),
-            .math_shift = to_underlying(math_shift),
-            .math_style = to_underlying(math_style),
-            .math_depth = computed_style.math_depth(),
-        };
-    }
+    if (applies(StyleGroupIndex::FontValues))
+        font_group_inputs = computed_style.font_group_build_inputs(document, style_scope.style_engine_tree_scope().value());
     ComputedValuesFFI::FfiTableGroupBuildInputs table_build_inputs {
         .color_input = &ffi_color_input,
         .used_color_scheme = static_cast<u8>(to_underlying(color_scheme)),
@@ -1835,17 +1654,6 @@ RefPtr<StyleValue const> ComputedValues::color_style_value() const
     return computed_style_value(PropertyID::Color);
 }
 
-RefPtr<StyleValue const> ComputedValues::raw_cascaded_font_size() const
-{
-    if (!m_computed_longhand_table)
-        return {};
-    auto const* data = ComputedValuesFFI::rust_computed_longhand_table_raw_cascaded_font_size(
-        static_cast<ComputedValuesFFI::ComputedLonghandTable const*>(m_computed_longhand_table));
-    if (!data)
-        return {};
-    return StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(static_cast<StyleValueFFI::StyleValueData const*>(data)));
-}
-
 RefPtr<StyleValue const> ComputedValues::background_color_style_value() const
 {
     auto const& handle = m_noninherited.background->background_color_style_value;
@@ -1888,140 +1696,6 @@ RefPtr<StyleValue const> ComputedValues::computed_style_value(PropertyID propert
         m_style_value_cache = make<HashMap<PropertyID, NonnullRefPtr<StyleValue const>>>();
     m_style_value_cache->set(property_id, value);
     return value;
-}
-
-static ContentDataAndQuoteNestingLevel resolve_content(StyleValue const& value, QuotesData const& quotes_data, DOM::AbstractElement& element_reference, u32 initial_quote_nesting_level, NotifyListItemCounterRendered notify_list_item_counter_rendered)
-{
-    auto quote_nesting_level = initial_quote_nesting_level;
-
-    auto get_quote_string = [&](bool open, auto depth) {
-        switch (quotes_data.type) {
-        case QuotesData::Type::None:
-            return Utf16FlyString {};
-        case QuotesData::Type::Auto:
-            // FIXME: "A typographically appropriate used value for quotes is automatically chosen by the UA
-            //        based on the content language of the element and/or its parent."
-            if (open)
-                return depth == 0 ? u"“"_utf16_fly_string : u"‘"_utf16_fly_string;
-            return depth == 0 ? u"”"_utf16_fly_string : u"’"_utf16_fly_string;
-        case QuotesData::Type::Specified:
-            // If the depth is greater than the number of pairs, the last pair is repeated.
-            auto& level = quotes_data.strings[min(depth, quotes_data.strings.size() - 1)];
-            return open ? level[0] : level[1];
-        }
-        VERIFY_NOT_REACHED();
-    };
-
-    if (value.is_content()) {
-        auto& content_style_value = value.as_content();
-
-        ContentData content_data;
-
-        Utf16StringBuilder pending_text;
-        bool has_pending_text = false;
-        auto append_text = [&](Utf16View const& text) {
-            pending_text.append(text);
-            has_pending_text = true;
-        };
-        auto flush_pending_text = [&] {
-            if (!has_pending_text)
-                return;
-            content_data.data.append(pending_text.to_string());
-            pending_text.clear();
-            has_pending_text = false;
-        };
-
-        for (auto const& item : content_style_value.content().values()) {
-            if (item->is_string()) {
-                append_text(item->as_string().string_value().view());
-            } else if (item->is_keyword()) {
-                switch (item->to_keyword()) {
-                case Keyword::OpenQuote:
-                    append_text(get_quote_string(true, quote_nesting_level++).view());
-                    break;
-                case Keyword::CloseQuote:
-                    // A 'close-quote' or 'no-close-quote' that would make the depth negative is in error and is ignored
-                    // (at rendering time): the depth stays at 0 and no quote mark is rendered (although the rest of the
-                    // 'content' property's value is still inserted).
-                    // - https://www.w3.org/TR/CSS21/generate.html#quotes-insert
-                    // (This is missing from the CONTENT-3 spec.)
-                    if (quote_nesting_level > 0)
-                        append_text(get_quote_string(false, --quote_nesting_level).view());
-                    break;
-                case Keyword::NoOpenQuote:
-                    quote_nesting_level++;
-                    break;
-                case Keyword::NoCloseQuote:
-                    // NOTE: See CloseQuote
-                    if (quote_nesting_level > 0)
-                        quote_nesting_level--;
-                    break;
-                default:
-                    dbgln("`{}` is not supported in `content` (yet?)", item->to_string(SerializationMode::Normal));
-                    break;
-                }
-            } else if (item->is_counter()) {
-                flush_pending_text();
-                if (notify_list_item_counter_rendered == NotifyListItemCounterRendered::Yes && item->as_counter().counter_name() == list_item_counter_name())
-                    element_reference.element().document().did_render_list_item_counter_value(element_reference.element());
-                content_data.counter_style_dependencies.append(item->as_counter().counter_style()->as_counter_style().resolve_counter_style(element_reference.style_scope()));
-                content_data.data.append(item->as_counter().resolve(element_reference));
-            } else if (item->is_image() || item->is_image_set()) {
-                // https://drafts.csswg.org/css-content-3/#typedef-content-list
-                // https://drafts.csswg.org/css-images-4/#typedef-image
-                // <content-list> accepts <image>, and image-set() is an <image>.
-                flush_pending_text();
-                content_data.data.append(NonnullRefPtr { const_cast<AbstractImageStyleValue&>(item->as_abstract_image()) });
-            } else {
-                // TODO: Implement images, and other things.
-                dbgln("`{}` is not supported in `content` (yet?)", item->to_string(SerializationMode::Normal));
-            }
-        }
-        flush_pending_text();
-        content_data.type = ContentData::Type::List;
-
-        if (auto alt_text = content_style_value.alt_text()) {
-            Utf16StringBuilder alt_text_builder;
-            for (auto const& item : alt_text->values()) {
-                if (item->is_string()) {
-                    alt_text_builder.append(item->as_string().string_value().view());
-                } else if (item->is_counter()) {
-                    if (notify_list_item_counter_rendered == NotifyListItemCounterRendered::Yes && item->as_counter().counter_name() == list_item_counter_name())
-                        element_reference.element().document().did_render_list_item_counter_value(element_reference.element());
-                    content_data.counter_style_dependencies.append(item->as_counter().counter_style()->as_counter_style().resolve_counter_style(element_reference.style_scope()));
-                    alt_text_builder.append(item->as_counter().resolve(element_reference));
-                } else {
-                    dbgln("`{}` is not supported in `content` alt-text (yet?)", item->to_string(SerializationMode::Normal));
-                }
-            }
-            content_data.alt_text = alt_text_builder.to_string();
-        }
-
-        return { move(content_data), quote_nesting_level };
-    }
-
-    switch (value.to_keyword()) {
-    case Keyword::None:
-        return { { ContentData::Type::None, {}, {} }, quote_nesting_level };
-    case Keyword::Normal:
-        return { { ContentData::Type::Normal, {}, {} }, quote_nesting_level };
-    default:
-        break;
-    }
-
-    return { {}, quote_nesting_level };
-}
-
-ContentDataAndQuoteNestingLevel ComputedValues::resolved_content(DOM::AbstractElement& element_reference, u32 initial_quote_nesting_level, NotifyListItemCounterRendered notify_list_item_counter_rendered) const
-{
-    return resolved_content(*m_noninherited.content_data, *m_inherited.list, element_reference, initial_quote_nesting_level, notify_list_item_counter_rendered);
-}
-
-ContentDataAndQuoteNestingLevel ComputedValues::resolved_content(ContentValues const& content_values, InheritedListValues const& list_values, DOM::AbstractElement& element_reference, u32 initial_quote_nesting_level, NotifyListItemCounterRendered notify_list_item_counter_rendered)
-{
-    // Read the content group's value directly, including the resource context attached to its images.
-    auto value = content_values.computed_content_value();
-    return resolve_content(value, list_values.quotes_value(), element_reference, initial_quote_nesting_level, notify_list_item_counter_rendered);
 }
 
 }

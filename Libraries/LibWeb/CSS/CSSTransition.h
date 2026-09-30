@@ -8,6 +8,7 @@
 #pragma once
 
 #include <LibWeb/Animations/Animation.h>
+#include <LibWeb/CSS/EasingFunction.h>
 #include <LibWeb/CSS/StyleValues/StyleValue.h>
 
 namespace Web::CSS {
@@ -33,6 +34,7 @@ public:
         NonnullRefPtr<StyleValue const> end_value,
         NonnullRefPtr<StyleValue const> reversing_adjusted_start_value,
         double reversing_shortening_factor,
+        EasingFunction timing_function,
         Publication = Publication::Committed);
 
     void commit_provisional_transition();
@@ -42,6 +44,8 @@ public:
 
     virtual Animations::AnimationClass animation_class() const override;
     virtual int class_specific_composite_order(GC::Ref<Animations::Animation> other) const override;
+    virtual u32 class_specific_composite_order_key() const override { return static_cast<u32>(m_transition_generation); }
+    virtual u16 class_specific_composite_order_property() const override { return to_underlying(m_transition_property); }
 
     double transition_start_time() const { return m_start_time; }
     double transition_end_time() const { return m_end_time; }
@@ -50,6 +54,11 @@ public:
     double reversing_shortening_factor() const { return m_reversing_shortening_factor; }
 
     double timing_function_output_at_time(double t) const;
+
+    // The transitions an element holds for one of its lists, which the style pass decides the
+    // element's transition step over. Published whenever the set moves or script replaces one's
+    // effect.
+    static void publish_transitions(DOM::Element&, Optional<PseudoElement>);
 
     // This is designed to be created from AnimationEffect::Phase.
     enum class Phase : u8 {
@@ -75,6 +84,7 @@ private:
         NonnullRefPtr<StyleValue const> end_value,
         NonnullRefPtr<StyleValue const> reversing_adjusted_start_value,
         double reversing_shortening_factor,
+        EasingFunction timing_function,
         Publication);
 
     virtual void visit_edges(Cell::Visitor&) override;

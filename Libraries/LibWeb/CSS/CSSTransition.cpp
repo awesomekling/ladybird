@@ -10,6 +10,7 @@
 #include <LibWeb/CSS/CSSStyleDeclaration.h>
 #include <LibWeb/CSS/CSSTransition.h>
 #include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
@@ -29,10 +30,11 @@ GC::Ref<CSSTransition> CSSTransition::start_a_transition(
     NonnullRefPtr<StyleValue const> end_value,
     NonnullRefPtr<StyleValue const> reversing_adjusted_start_value,
     double reversing_shortening_factor,
+    EasingFunction timing_function,
     Publication publication)
 {
     auto& environment = abstract_element.document().relevant_settings_object();
-    return GC::Heap::the().allocate<CSSTransition>(environment, abstract_element, property_id, transition_generation, delay, start_time, end_time, start_value, end_value, reversing_adjusted_start_value, reversing_shortening_factor, publication);
+    return GC::Heap::the().allocate<CSSTransition>(environment, abstract_element, property_id, transition_generation, delay, start_time, end_time, start_value, end_value, reversing_adjusted_start_value, reversing_shortening_factor, move(timing_function), publication);
 }
 
 Utf16FlyString const& CSSTransition::transition_property() const
@@ -99,6 +101,7 @@ CSSTransition::CSSTransition(
     NonnullRefPtr<StyleValue const> end_value,
     NonnullRefPtr<StyleValue const> reversing_adjusted_start_value,
     double reversing_shortening_factor,
+    EasingFunction timing_function,
     Publication publication)
     : Animations::Animation(environment)
     , m_transition_property(property_id)
@@ -132,7 +135,7 @@ CSSTransition::CSSTransition(
     // Timing properties may also be updated due to a style change. Any change to a CSS animation property that affects
     // timing requires rerunning the procedure to normalize specified timing.
     m_keyframe_effect->normalize_specified_timing();
-    m_keyframe_effect->set_timing_function(abstract_element.element().property_transition_attributes(abstract_element.pseudo_element(), property_id)->timing_function);
+    m_keyframe_effect->set_timing_function(move(timing_function));
 
     auto key_frame_set = adopt_ref(*new Animations::KeyframeEffect::KeyFrameSet);
     Animations::KeyframeEffect::KeyFrameSet::ResolvedKeyFrame initial_keyframe;
@@ -183,6 +186,33 @@ void CSSTransition::visit_edges(Cell::Visitor& visitor)
     Base::visit_edges(visitor);
     visitor.visit(m_cached_declaration);
     visitor.visit(m_keyframe_effect);
+}
+
+void CSSTransition::publish_transitions(DOM::Element& element, Optional<PseudoElement> pseudo_element)
+{
+    if (element.style_node_id() == 0)
+        return;
+    Vector<StyleEngineFFI::FfiPublishedTransition> transitions;
+    for (auto property_id : element.property_ids_with_existing_transitions(pseudo_element)) {
+        auto transition = element.property_transition(pseudo_element, property_id);
+        VERIFY(transition);
+        transitions.append({
+            .property_id = to_underlying(property_id),
+            .effect_identity = transition->m_keyframe_effect->animation_preparation_identity(),
+            .effect_replaced = transition->effect().ptr() != transition->m_keyframe_effect.ptr(),
+            .current_effect_identity = transition->effect() && is<Animations::KeyframeEffect>(*transition->effect())
+                ? static_cast<Animations::KeyframeEffect const&>(*transition->effect()).animation_preparation_identity()
+                : 0,
+            .end_value = transition->m_end_value->rust_style_value_data(),
+            .reversing_adjusted_start_value = transition->m_reversing_adjusted_start_value->rust_style_value_data(),
+            .reversing_shortening_factor = transition->m_reversing_shortening_factor,
+            .start_time = transition->m_start_time,
+            .end_time = transition->m_end_time,
+        });
+    }
+    auto slot = pseudo_element.has_value() ? static_cast<u8>(to_underlying(*pseudo_element) + 1) : static_cast<u8>(0);
+    StyleEngineFFI::style_engine_set_element_transitions(element.document().render_inputs_for_write().style_engine().rust_handle(),
+        element.style_node_id().value(), slot, transitions.data(), transitions.size());
 }
 
 double CSSTransition::timing_function_output_at_time(double t) const

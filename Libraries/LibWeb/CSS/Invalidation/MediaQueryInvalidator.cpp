@@ -44,12 +44,16 @@ void evaluate_media_rules_and_publish_conditions(DOM::Document& document)
 
     for (auto origin : { CascadeOrigin::UserAgent, CascadeOrigin::User }) {
         document.style_scope().for_each_stylesheet(origin, [&](CSS::StyleSheetState& style_sheet) {
+            // The evaluation records the rule conditions that flipped since the one before it; the first has none to
+            // flip from, so all of them are recorded after it.
+            bool const evaluated_before = style_sheet.has_evaluated_media_queries_for(document);
             auto changed = style_sheet.evaluate_media_queries(document);
-            record_stylesheet_rule_conditions(style_sheet, document);
+            if (!evaluated_before)
+                record_stylesheet_rule_conditions(style_sheet, document);
 
             for (auto const& entry : document.style_computer().non_author_style_sheets()) {
                 if (entry.sheet.ptr() == &style_sheet) {
-                    document.style_computer().style_engine().set_sheet_conditions_hold(
+                    document.render_inputs_for_write().style_engine().set_sheet_conditions_hold(
                         entry.sheet_id, !style_sheet.disabled() && style_sheet.native_media_list().matches());
                     break;
                 }

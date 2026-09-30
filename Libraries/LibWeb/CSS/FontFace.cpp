@@ -6,7 +6,9 @@
  */
 
 #include <AK/ByteBuffer.h>
+#include <AK/Mutex.h>
 #include <AK/ScopeGuard.h>
+#include <AK/Singleton.h>
 #include <LibCore/Promise.h>
 #include <LibGC/Heap.h>
 #include <LibGC/Weak.h>
@@ -394,14 +396,104 @@ ParsedFontFace FontFaceState::parsed_font_face() const
     };
 }
 
+// NB: Faces are created, destroyed and looked up on the document thread alone. Everything else
+//     only ever carries the number, and hands it back here through request_wanted_web_faces().
+static Singleton<HashMap<u64, FontFaceState*>> s_font_faces_by_id;
+static Atomic<u64> s_next_font_face_id { 1 };
+
 FontFaceState::FontFaceState(GC::Ref<HTML::EnvironmentSettingsObject> environment, GC::Ptr<WebIDL::Promise> font_status_promise)
-    : m_environment(environment)
+    : m_id(s_next_font_face_id.fetch_add(1, AK::MemoryOrder::memory_order_relaxed))
+    , m_environment(environment)
     , m_status(FontFaceLoadStatus::Unloaded)
     , m_font_status_promise(font_status_promise)
 {
+    s_font_faces_by_id->set(m_id, this);
 }
 
-FontFaceState::~FontFaceState() = default;
+FontFaceState::~FontFaceState()
+{
+    s_font_faces_by_id->remove(m_id);
+}
+
+RefPtr<FontFaceState> FontFaceState::with_id(u64 id)
+{
+    auto it = s_font_faces_by_id->find(id);
+    if (it == s_font_faces_by_id->end())
+        return nullptr;
+    return *it->value;
+}
+
+// The faces something wanted and could not have. A style pass records a want instead of loading
+// a face, because loading one changes the face's status, appends it to every FontFaceSet it is
+// in - under an execution context that runs author callbacks - and starts a fetch. None of that
+// may happen while a style update is running.
+struct WantedWebFaceEntry {
+    u64 face_id { 0 };
+    WantedWebFace want { WantedWebFace::Load };
+};
+
+static Singleton<Mutex> s_wanted_web_faces_mutex;
+static Singleton<Vector<WantedWebFaceEntry>> s_wanted_web_faces;
+
+void note_wanted_web_face(u64 face_id, WantedWebFace want)
+{
+    MutexLocker locker { *s_wanted_web_faces_mutex };
+    for (auto& wanted : *s_wanted_web_faces) {
+        if (wanted.face_id != face_id)
+            continue;
+        if (to_underlying(want) > to_underlying(wanted.want))
+            wanted.want = want;
+        return;
+    }
+    s_wanted_web_faces->append({ face_id, want });
+}
+
+// A style update opens and closes this scope on the document thread. A cascade entry built for
+// that update asks whether it is open from wherever it is looked up, which is why it is atomic.
+static Atomic<u32> s_deferred_web_face_load_depth { 0 };
+
+void begin_deferred_web_face_loads()
+{
+    s_deferred_web_face_load_depth.fetch_add(1, AK::MemoryOrder::memory_order_acq_rel);
+}
+
+void end_deferred_web_face_loads()
+{
+    auto previous_depth = s_deferred_web_face_load_depth.fetch_sub(1, AK::MemoryOrder::memory_order_acq_rel);
+    VERIFY(previous_depth > 0);
+    if (previous_depth != 1)
+        return;
+    (void)request_wanted_web_faces();
+}
+
+bool web_face_loads_are_deferred()
+{
+    return s_deferred_web_face_load_depth.load(AK::MemoryOrder::memory_order_acquire) != 0;
+}
+
+size_t request_wanted_web_faces()
+{
+    if (web_face_loads_are_deferred())
+        return 0;
+
+    Vector<WantedWebFaceEntry> wanted;
+    {
+        MutexLocker locker { *s_wanted_web_faces_mutex };
+        wanted = move(*s_wanted_web_faces);
+    }
+    size_t requested = 0;
+    for (auto const& entry : wanted) {
+        auto face = FontFaceState::with_id(entry.face_id);
+        if (!face)
+            continue;
+        if (entry.want == WantedWebFace::Render)
+            (void)face->resolve_for_rendering();
+        else
+            face->load_for_style();
+        ++requested;
+    }
+    return requested;
+}
 
 bool FontFaceState::should_be_registered_with_font_computer() const
 {
@@ -522,11 +614,21 @@ RefPtr<Gfx::FontCascadeList const> FontFaceState::font_with_point_size(float poi
             return Gfx::PendingFontState::Failed; }, [weak_face = make_weak_ptr(), point_size, variations, shape_features]() -> RefPtr<Gfx::Font const> {
             if (weak_face && weak_face->m_parsed_font && !weak_face->m_font_display_failed)
                 return weak_face->m_parsed_font->font(point_size, variations, shape_features);
-            return {}; });
+            return {}; }, [weak_face = make_weak_ptr()] {
+            if (weak_face)
+                return weak_face->rendering_state_without_requesting();
+            return Gfx::PendingFontState::Failed; });
     }
     if (font_list->is_empty())
         return {};
     return font_list;
+}
+
+RefPtr<Gfx::Font const> FontFaceState::font_for_rendering(float point_size, Gfx::FontVariationSettings const& variations, Gfx::ShapeFeatures const& shape_features) const
+{
+    if (!m_parsed_font || m_font_display_failed)
+        return {};
+    return m_parsed_font->font(point_size, variations, shape_features);
 }
 
 // https://drafts.csswg.org/css-fonts-4/#font-display-timeline
@@ -574,6 +676,67 @@ void FontFaceState::invalidate_font_display()
         font_computer->did_load_font(m_family);
 }
 
+namespace {
+
+struct FontDisplayDeadlines {
+    i64 block_period { 0 };
+    Optional<i64> failure_period_start;
+};
+
+// INTEROP: Use WebKit's timeouts: 3 seconds for auto/block, 100 milliseconds for fallback/optional,
+//          and a further 3 seconds of swapping for fallback. Blink also uses no block period for swap.
+FontDisplayDeadlines font_display_deadlines(FontDisplay font_display)
+{
+    switch (font_display) {
+    case FontDisplay::Auto:
+    case FontDisplay::Block:
+        return { .block_period = 3000, .failure_period_start = {} };
+    case FontDisplay::Swap:
+        return {};
+    case FontDisplay::Fallback:
+        return { .block_period = 100, .failure_period_start = 3100 };
+    case FontDisplay::Optional:
+        return { .block_period = 100, .failure_period_start = 100 };
+    }
+    VERIFY_NOT_REACHED();
+}
+
+}
+
+// https://drafts.csswg.org/css-fonts-4/#font-display-timeline
+// What resolve_for_rendering() would answer, without any of what it does to get there: no fetch,
+// no download timer, no load-event delayer. A frozen cascade records this so that a render pass
+// can pick the right fallback for a face still on its timeline without entering the document.
+Gfx::PendingFontState FontFaceState::rendering_state_without_requesting() const
+{
+    if (m_font_display_failed || m_status == FontFaceLoadStatus::Error)
+        return Gfx::PendingFontState::Failed;
+    if (m_status == FontFaceLoadStatus::Loaded)
+        return Gfx::PendingFontState::Visible;
+
+    if (m_font_download_timer_start.has_value() || m_font_download_completed) {
+        // The timeline is already running, and the download timer keeps the period current.
+        switch (m_font_display_period) {
+        case FontDisplayPeriod::Block:
+            return Gfx::PendingFontState::Invisible;
+        case FontDisplayPeriod::Swap:
+            return Gfx::PendingFontState::Visible;
+        case FontDisplayPeriod::Failure:
+            return Gfx::PendingFontState::Failed;
+        }
+        VERIFY_NOT_REACHED();
+    }
+
+    // The timer has not started. Answer with the period the first use would put this face in.
+    auto deadlines = font_display_deadlines(m_font_display);
+    auto elapsed = m_font_display_time_for_testing.value_or(0);
+    if (deadlines.failure_period_start.has_value() && elapsed >= *deadlines.failure_period_start)
+        return Gfx::PendingFontState::Failed;
+    if (elapsed < deadlines.block_period)
+        return Gfx::PendingFontState::Invisible;
+    return Gfx::PendingFontState::Visible;
+}
+
 // https://drafts.csswg.org/css-fonts-4/#font-display-desc
 void FontFaceState::update_font_display_period()
 {
@@ -582,26 +745,7 @@ void FontFaceState::update_font_display_period()
     if (!m_font_download_timer_start.has_value() || m_font_download_completed || m_status == FontFaceLoadStatus::Loaded || m_status == FontFaceLoadStatus::Error)
         return;
 
-    // INTEROP: Use WebKit's timeouts: 3 seconds for auto/block, 100 milliseconds for fallback/optional,
-    //          and a further 3 seconds of swapping for fallback. Blink also uses no block period for swap.
-    i64 block_period = 0;
-    Optional<i64> failure_period_start;
-    switch (m_font_display) {
-    case FontDisplay::Auto:
-    case FontDisplay::Block:
-        block_period = 3000;
-        break;
-    case FontDisplay::Swap:
-        break;
-    case FontDisplay::Fallback:
-        block_period = 100;
-        failure_period_start = 3100;
-        break;
-    case FontDisplay::Optional:
-        block_period = 100;
-        failure_period_start = 100;
-        break;
-    }
+    auto [block_period, failure_period_start] = font_display_deadlines(m_font_display);
 
     auto elapsed = font_download_elapsed_time();
     auto previous_period = m_font_display_period;
@@ -658,6 +802,9 @@ void FontFaceState::set_font_display_time_for_testing(u32 milliseconds)
 {
     m_font_display_time_for_testing = milliseconds;
     update_font_display_period();
+    // Moving the face along its timeline changes the state the published table records for it,
+    // even when the current display period does not change.
+    invalidate_font_display();
 }
 
 // https://drafts.csswg.org/css-font-loading/#dom-fontface-family
@@ -1039,6 +1186,11 @@ void FontFaceState::load_for_style()
         if (font.m_font_download_timer)
             font.m_font_download_timer->stop();
         font.m_parsed_font = maybe_typeface;
+        // The published table has to answer with this typeface from here on, not from the
+        // font-loading task below: a style computed in between would otherwise still see a
+        // pending face and resolve font-relative lengths against the fallback.
+        if (auto font_computer = font.font_computer(); font_computer.has_value())
+            font_computer->did_parse_font_face(font.matching_key());
         HTML::queue_global_task(HTML::Task::Source::FontLoading, font.task_global_object(), GC::create_function(GC::Heap::the(), [font_root, maybe_typeface] {
             font_root->elements().first()->did_load(maybe_typeface);
         }));

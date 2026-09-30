@@ -9,7 +9,9 @@
 #include <LibWeb/CSS/CustomPropertyRegistration.h>
 #include <LibWeb/CSS/StyleValues/StyleValue.h>
 #include <LibWeb/ComputedValuesRustFFI.h>
+#include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Element.h>
 
 namespace Web::CSS {
 
@@ -91,7 +93,7 @@ NonnullRefPtr<CustomPropertyData> CustomPropertyData::create(
 
 NonnullRefPtr<CustomPropertyData> CustomPropertyData::create_animation_overlay(
     OrderedHashMap<Utf16FlyString, StyleProperty> animated_values,
-    RefPtr<CustomPropertyData const> base)
+    RefPtr<CustomPropertyData const> base, DOM::AbstractElement const& owner)
 {
     Vector<ComputedValuesFFI::FfiCustomPropertyStoreEntry> entries;
     entries.ensure_capacity(animated_values.size());
@@ -109,8 +111,37 @@ NonnullRefPtr<CustomPropertyData> CustomPropertyData::create_animation_overlay(
     u8 ancestor_count = base ? base->m_ancestor_count + 1 : 0;
     auto inheritance_parent = base;
     auto data = adopt_ref(*new CustomPropertyData(move(animated_values), move(base), move(inheritance_parent), ancestor_count, declared_count, rust_store));
-    data->m_is_animation_overlay = true;
+    data->m_animation_owner = owner.element().unique_id();
+    data->m_animation_pseudo_element = owner.pseudo_element();
     return data;
+}
+
+NonnullRefPtr<CustomPropertyData> CustomPropertyData::view_animation_overlay(void const* store, u64 identity,
+    RefPtr<CustomPropertyData const> base, DOM::AbstractElement const& owner)
+{
+    OrderedHashMap<Utf16FlyString, StyleProperty> animated_values;
+    ComputedValuesFFI::rust_custom_property_store_for_each_own_entry(store, &animated_values, [](void* context, size_t name_raw, bool important, void const* data) {
+        auto& animated_values = *static_cast<OrderedHashMap<Utf16FlyString, StyleProperty>*>(context);
+        animated_values.set(Utf16FlyString::from_raw(name_raw), StyleProperty {
+                                                                    .important = important ? Important::Yes : Important::No,
+                                                                    .property_id = PropertyID::Custom,
+                                                                    .value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(static_cast<StyleValueFFI::StyleValueData const*>(data))),
+                                                                });
+    });
+    auto declared_count = animated_values.size();
+    u8 ancestor_count = base ? base->m_ancestor_count + 1 : 0;
+    auto inheritance_parent = base;
+    auto data = adopt_ref(*new CustomPropertyData(move(animated_values), move(base), move(inheritance_parent), ancestor_count, declared_count,
+        ComputedValuesFFI::rust_custom_property_store_retain(store), identity));
+    data->m_animation_owner = owner.element().unique_id();
+    data->m_animation_pseudo_element = owner.pseudo_element();
+    return data;
+}
+
+bool CustomPropertyData::is_animation_overlay_for(DOM::AbstractElement const& element) const
+{
+    return m_animation_owner.has_value() && *m_animation_owner == element.element().unique_id()
+        && m_animation_pseudo_element == element.pseudo_element();
 }
 
 StyleProperty const* CustomPropertyData::get(Utf16FlyString const& name) const
@@ -122,28 +153,44 @@ StyleProperty const* CustomPropertyData::get(Utf16FlyString const& name) const
     return nullptr;
 }
 
+NonnullRefPtr<CustomPropertyData> CustomPropertyData::from_rust_store(void const* store, RefPtr<CustomPropertyData const> parent, u64 identity, bool effective_entries)
+{
+    OrderedHashMap<Utf16FlyString, StyleProperty> own_values;
+    auto visit = [](void* context, size_t name_raw, bool important, void const* data) {
+        auto& own_values = *static_cast<OrderedHashMap<Utf16FlyString, StyleProperty>*>(context);
+        own_values.set(Utf16FlyString::from_raw(name_raw), StyleProperty {
+                                                               .important = important ? Important::Yes : Important::No,
+                                                               .property_id = PropertyID::Custom,
+                                                               .value = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(static_cast<StyleValueFFI::StyleValueData const*>(data))),
+                                                           });
+    };
+    ComputedValuesFFI::rust_custom_property_store_for_each_own_entry(store, &own_values, visit);
+    auto declared_count = own_values.size();
+    if (effective_entries) {
+        ComputedValuesFFI::rust_custom_property_store_for_each_effective_entry(store, &own_values, visit);
+        auto const* flattened = ComputedValuesFFI::rust_custom_property_store_flatten(store);
+        ComputedValuesFFI::rust_custom_property_store_destroy(store);
+        return adopt_ref(*new CustomPropertyData(move(own_values), nullptr, nullptr, 0, declared_count, flattened, identity));
+    }
+    return create(move(own_values), move(parent), store, identity);
+}
+
 RefPtr<CustomPropertyData const> CustomPropertyData::inheritable_impl(RefPtr<CustomPropertyData const> inheritable_parent, AK::Function<Optional<CustomPropertyRegistration const&>(Utf16FlyString const&)> get_custom_property_registration) const
 {
-    OrderedHashMap<Utf16FlyString, StyleProperty> inheritable_own_values;
-
-    for (auto const& [name, property] : m_own_values) {
+    Vector<size_t> excluded;
+    for (auto const& name : m_own_values.keys()) {
         auto registration = get_custom_property_registration(name);
-
         if (registration.has_value() && !registration->inherit)
-            continue;
-
-        inheritable_own_values.set(name, property);
+            excluded.append(name.to_raw_leaked());
     }
-
-    // Filtering only non-inherited properties leaves the parent's environment unchanged.
-    // Preserve its identity instead of inserting an empty layer into the chain.
-    if (inheritable_own_values.is_empty())
-        return inheritable_parent;
-
-    if (inheritable_own_values.size() == m_own_values.size() && inheritable_parent.ptr() == m_parent.ptr())
-        return this;
-
-    return CustomPropertyData::create(move(inheritable_own_values), move(inheritable_parent));
+    auto const* parent_store = inheritable_parent ? inheritable_parent->rust_store() : nullptr;
+    auto const* store = ComputedValuesFFI::rust_custom_property_store_inheritable_layer(m_rust_store, parent_store, excluded.data(), excluded.size());
+    if (store == m_rust_store || store == parent_store) {
+        if (store)
+            ComputedValuesFFI::rust_custom_property_store_destroy(store);
+        return store == m_rust_store ? RefPtr<CustomPropertyData const>(this) : inheritable_parent;
+    }
+    return from_rust_store(store, move(inheritable_parent));
 }
 
 bool CustomPropertyData::declares_same_names(CustomPropertyData const& other) const
@@ -213,4 +260,19 @@ bool CustomPropertyData::is_empty() const
     return m_own_values.is_empty() && (!m_parent || m_parent->is_empty());
 }
 
+}
+
+// The style engine retains an element's custom-property environment so that a row inheriting from
+// that element does not have to walk to it. The reference is taken and given up on the document
+// thread, by the engine's serial installer; a sealed pass only ever reads the pointer back out.
+extern "C" void web_css_custom_property_data_reference(void const* data)
+{
+    if (data)
+        static_cast<Web::CSS::CustomPropertyData const*>(data)->ref();
+}
+
+extern "C" void web_css_custom_property_data_unreference(void const* data)
+{
+    if (data)
+        static_cast<Web::CSS::CustomPropertyData const*>(data)->unref();
 }

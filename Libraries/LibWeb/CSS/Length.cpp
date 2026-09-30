@@ -20,7 +20,6 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxViews.h>
 
 namespace Web::CSS {
@@ -158,8 +157,8 @@ double Length::container_relative_length_to_px_without_rounding(ResolutionContex
             return viewport_length.to_double();
         }
 
-        auto const* layout_node = query_container->unsafe_layout_node();
-        if (!layout_node || !Painting::has_committed_box(*layout_node)) {
+        auto container_box = Painting::BoxSlot::bound_to(*query_container);
+        if (!Painting::has_committed_box(container_box)) {
             // A running partial relayout pass reports layout as up to date, but a container
             // with no paintable yet still needs the post-layout evaluation, which routes the
             // follow-up pass to the full layout path that resolves the container's size.
@@ -168,7 +167,7 @@ double Length::container_relative_length_to_px_without_rounding(ResolutionContex
             return 0.0;
         }
 
-        auto container_length = physical_axis == ContainerRelativeAxis::Width ? Painting::content_width(*layout_node) : Painting::content_height(*layout_node);
+        auto container_length = physical_axis == ContainerRelativeAxis::Width ? Painting::content_width(container_box) : Painting::content_height(container_box);
         return container_length.to_double();
     };
 
@@ -246,43 +245,9 @@ Length::ResolutionContext Length::ResolutionContext::for_document(DOM::Document 
     };
 }
 
-Length::ResolutionContext Length::ResolutionContext::for_layout_node(Layout::NodeWithStyle const& node)
-{
-    Layout::NodeWithStyle const* root_layout_node;
-    DOM::Element const* subject_element = nullptr;
-
-    if (is<DOM::Document>(node.dom_node())) {
-        root_layout_node = &node;
-    } else {
-        auto const* root_element = node.document().document_element();
-        VERIFY(root_element);
-        // NB: Called during CSS length resolution, which may happen during style recalculation.
-        VERIFY(root_element->unsafe_layout_node());
-        root_layout_node = root_element->unsafe_layout_node();
-    }
-
-    if (auto const* dom_node = node.dom_node(); dom_node && is<DOM::Element>(*dom_node))
-        subject_element = &as<DOM::Element>(*dom_node);
-
-    return Length::ResolutionContext {
-        .viewport_rect = node.navigable()->viewport_rect(),
-        .font_metrics = { node.font_size(), node.first_available_font().pixel_metrics(), node.line_height() },
-        .root_font_metrics = { root_layout_node->font_size(), root_layout_node->first_available_font().pixel_metrics(), node.line_height() },
-        .subject_inline_axis_is_horizontal = inline_axis_is_horizontal(node.writing_mode()),
-        .subject_element = subject_element,
-    };
-}
-
 CSSPixels Length::to_px(ResolutionContext const& context) const
 {
     return CSSPixels::nearest_value_for(to_px_without_rounding(context));
-}
-
-CSSPixels Length::to_px_slow_case(Layout::NodeWithStyle const& layout_node) const
-{
-    if (!layout_node.document().browsing_context())
-        return 0;
-    return to_px(ResolutionContext::for_layout_node(layout_node));
 }
 
 void Length::serialize(StringBuilder& builder, SerializationMode serialization_mode) const
