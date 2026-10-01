@@ -202,3 +202,35 @@ pub(crate) struct ForcedReadAnswer { style: Option<OwnerStyleTransactionView>, l
 
 The waits are cheap (tens of µs), and the owner's style and layout (1378 ms/it in sync windows) are the time. One job
 per read is the structure that later lets main's install run beside the owner's layout instead of between it.
+
+## 5. After the typed entry (`force_read`)
+
+Done: a layout update the main thread waits for mints one `ForcedRead` at `layout_arena_begin_forced_read`
+(`ScriptForcedRead` for the reasons a script API names, on the read's first pass; the host's otherwise). The offered
+frame holds it until the update's first style transaction or the frame's first job spends it on
+`render_owner::force_read`. Every other style or layout job spends a named `FrameJobPermit` or `StyleJobPermit`, and
+`ToOwner::Style`/`ToOwner::Layout` carry a `SpentWait` only `render_owner` makes, so no other path sends one. Wait counts
+are unchanged (200 reads per page, after a change): `offsetWidth` and `getBoundingClientRect()` cost 2 waits per read,
+`Style+Layout` (the one `force_read`) plus an engine ask. A clean `getComputedStyle()` costs 0.
+
+What still waits outside `force_read`, in the order to fold it in:
+
+1. **The geometry read's engine ask.** `Document::update_layout_if_needed_for_node` →
+   `StyleEngine::defer_pending_transaction_for_geometry_read` asks the owner (`LockstepProof::engine_door`) before any
+   update starts: 1 wait per read after a change. To fold it, mint the read there, before the ask, and make "defer the
+   pending transaction if it is paint-only, or else run style and layout" one `ForcedReadJob`.
+2. **Style-only reads.** `CSS::update_style_for_element` (getComputedStyle of a property that needs no layout,
+   `computedStyleMap()`) is not a layout update. Its `Boundary(HasDeferredElementStyleInput)` asks spend `engine_door`,
+   and its transactions spend `StyleJobPermit::of_style_update`. To fold them, mint the read at
+   `Document::update_style_for_element` into the same per-document slot the offered frame uses, and send "the style of
+   this element, current" as a `ForcedReadJob` (§2).
+3. **Paint preparation** after a frame that laid nothing out (`Document::prepare_for_rendering` → `run_paint_pass_of`
+   with `LockstepProof::host_paint_step`): fold into the frame job as §2 says.
+4. **Second jobs that the types now show:** `FrameJobPermit::after_style` (the ride was declined: a tree build,
+   renumbers or top-layer changes pending, or no render half), `for_next_round` (another wave, a root only the document
+   picks), and `LayoutPassSubmission::WaitAgain` passes. These are §1's ordering dependencies.
+5. **The drain's engine asks** (`TakeSettledAnimationPlan`, `SampleInstalledRecords`, ...), which spend `engine_door`
+   in the middle of main's install.
+
+Once 1–3 are folded in, `ToOwner::Ask` and `ToOwner::Paint` can carry `SpentWait` too, and `wait_for_owner` can become
+private to `render_owner`.
