@@ -805,10 +805,94 @@ u64 Document::layout_commit_generation() const
     return arena ? Layout::RustFFI::layout_arena_layout_commit_generation(arena) : 0;
 }
 
+// Whether a script API names the reason: a read of render state for it is then the script call's forced read, and
+// otherwise the host's own.
+static bool reason_is_script_api(UpdateLayoutReason reason)
+{
+    switch (reason) {
+    case UpdateLayoutReason::DocumentElementFromPoint:
+    case UpdateLayoutReason::DocumentElementsFromPoint:
+    case UpdateLayoutReason::DocumentCaretPositionFromPoint:
+    case UpdateLayoutReason::DocumentFindMatchingText:
+    case UpdateLayoutReason::DocumentSetDesignMode:
+    case UpdateLayoutReason::ElementCheckVisibility:
+    case UpdateLayoutReason::ElementClientHeight:
+    case UpdateLayoutReason::ElementClientWidth:
+    case UpdateLayoutReason::ElementGetClientRects:
+    case UpdateLayoutReason::ElementIsPotentiallyScrollable:
+    case UpdateLayoutReason::ElementScroll:
+    case UpdateLayoutReason::ElementScrollHeight:
+    case UpdateLayoutReason::ElementScrollIntoView:
+    case UpdateLayoutReason::ElementScrollLeft:
+    case UpdateLayoutReason::ElementScrollTop:
+    case UpdateLayoutReason::ElementScrollWidth:
+    case UpdateLayoutReason::ElementSetScrollLeft:
+    case UpdateLayoutReason::ElementSetScrollTop:
+    case UpdateLayoutReason::HTMLElementGetTheTextSteps:
+    case UpdateLayoutReason::HTMLElementOffsetHeight:
+    case UpdateLayoutReason::HTMLElementOffsetLeft:
+    case UpdateLayoutReason::HTMLElementOffsetParent:
+    case UpdateLayoutReason::HTMLElementOffsetTop:
+    case UpdateLayoutReason::HTMLElementOffsetWidth:
+    case UpdateLayoutReason::HTMLElementScrollParent:
+    case UpdateLayoutReason::HTMLImageElementHeight:
+    case UpdateLayoutReason::HTMLImageElementWidth:
+    case UpdateLayoutReason::HTMLImageElementX:
+    case UpdateLayoutReason::HTMLImageElementY:
+    case UpdateLayoutReason::HTMLInputElementHeight:
+    case UpdateLayoutReason::HTMLInputElementWidth:
+    case UpdateLayoutReason::InternalsLayoutTest:
+    case UpdateLayoutReason::InternalsHitTest:
+    case UpdateLayoutReason::MediaQueryListMatches:
+    case UpdateLayoutReason::NavigableSelectedText:
+    case UpdateLayoutReason::RangeGetClientRects:
+    case UpdateLayoutReason::ResolvedCSSStyleDeclarationProperty:
+    case UpdateLayoutReason::SVGGraphicsElementGetBBox:
+    case UpdateLayoutReason::SVGGraphicsElementGetScreenCTM:
+    case UpdateLayoutReason::SVGLengthValue:
+    case UpdateLayoutReason::SVGPathLength:
+    case UpdateLayoutReason::WindowScroll:
+        return true;
+    case UpdateLayoutReason::AutoScrollSelection:
+    case UpdateLayoutReason::ChildDocumentStyleUpdate:
+    case UpdateLayoutReason::CursorLineNavigation:
+    case UpdateLayoutReason::Debugging:
+    case UpdateLayoutReason::DocumentReadinessComplete:
+    case UpdateLayoutReason::DumpDisplayList:
+    case UpdateLayoutReason::EventHandlerDispatchChromeWidgetEvent:
+    case UpdateLayoutReason::EventHandlerHandleDragAndDrop:
+    case UpdateLayoutReason::EventHandlerHandleKeyDown:
+    case UpdateLayoutReason::EventHandlerHandleMouseDown:
+    case UpdateLayoutReason::EventHandlerHandleMouseMove:
+    case UpdateLayoutReason::EventHandlerHandleMouseUp:
+    case UpdateLayoutReason::EventHandlerHandleMouseWheel:
+    case UpdateLayoutReason::EventHandlerRunActivationBehavior:
+    case UpdateLayoutReason::EventHandlerShowContextMenu:
+    case UpdateLayoutReason::FontFaceSetReady:
+    case UpdateLayoutReason::HTMLEventLoopRenderingUpdate:
+    case UpdateLayoutReason::HTMLLabelElementActivationBehavior:
+    case UpdateLayoutReason::InspectAccessibilityTree:
+    case UpdateLayoutReason::InspectDOMTree:
+    case UpdateLayoutReason::InspectDevToolsLayoutData:
+    case UpdateLayoutReason::InputCaretRect:
+    case UpdateLayoutReason::NavigableViewportScroll:
+    case UpdateLayoutReason::NodeNameOrDescription:
+    case UpdateLayoutReason::SVGDecodedImageDataRender:
+    case UpdateLayoutReason::ScrollCursorIntoView:
+    case UpdateLayoutReason::ProcessScreenshot:
+    case UpdateLayoutReason::ViewTransitionCapture:
+        return false;
+    }
+    VERIFY_NOT_REACHED();
+}
+
 Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
     : m_document(document)
     , m_reason(reason)
 {
+    // The read waits for the render owner as one forced read: a scope inside one already begun belongs to it.
+    Layout::RustFFI::render_owner_begin_forced_read(m_document.render_document_id(), reason_is_script_api(reason));
+
     // A read of render state waits for the frame in flight before it asks anything, and the
     // cleanliness check below already asks the style engine.
     m_document.join_frame_in_flight();
@@ -839,6 +923,7 @@ Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
 
 Document::JoinScope::~JoinScope()
 {
+    Layout::RustFFI::render_owner_end_forced_read(m_document.render_document_id());
     --m_document.m_join_depth;
     if (m_is_nested)
         return;

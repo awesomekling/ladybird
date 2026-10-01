@@ -143,18 +143,116 @@ impl LockstepProof {
         Self::new()
     }
 
-    /// A layout update the host waits for on its own account, for no script API call: an event's dispatch, a child
+    /// A read of render state the host makes on its own account, for no script API call: an event's dispatch, a child
     /// document's style update, an inspection, a screenshot. It is spent as a script's read is, on [`force_read`].
     pub(crate) const fn host_reads_layout() -> Self {
         Self::new()
     }
+
+    /// A layout update of a read whose first wait was spent already: another pass for an image that arrived or a
+    /// scroll-state snapshot, or a second update the read's call runs.
+    pub(crate) const fn read_lays_out_again() -> Self {
+        Self::new()
+    }
 }
 
-/// What a layout update the document thread waits for spends on its one job, [`force_read`]: the read of the script API
-/// call it runs for, or the host's own. The update's first style or layout job takes it.
+/// What a read of render state the document thread waits for spends on its one job, [`force_read`]: the read of the
+/// script API call it runs for, or the host's own. [`render_owner_begin_forced_read`] begins it, and its first engine
+/// question, style transaction or layout job takes it.
 pub(crate) enum ForcedRead {
     Script(ScriptForcedRead),
     Host(LockstepProof),
+    /// The read asked the style engine first, which spent its read: the job after the question is the read's second
+    /// wait, which the type shows.
+    AfterAsk(AskedFirst),
+}
+
+/// What an engine question that spent a forced read leaves the read's next job: only [`ask_engine_in_read`] makes one.
+pub(crate) struct AskedFirst(());
+
+/// A forced read the document thread began for a document: how many scopes of the read are open, and the read until a
+/// job takes it.
+struct BegunRead {
+    document: DocumentId,
+    scopes: u32,
+    read: Option<ForcedRead>,
+}
+
+thread_local! {
+    /// On a document thread, the forced reads it began.
+    static BEGUN_READS: RefCell<Vec<BegunRead>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Begins a read of `document`'s render state that the document thread waits for, for a script API call if `by_script`
+/// and for the host's own read otherwise. A scope begun inside the document's open read belongs to that read.
+///
+/// # Safety
+///
+/// On the document thread, with a [`render_owner_end_forced_read`] for each call. `by_script` only for a scope a script
+/// API call opens.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn render_owner_begin_forced_read(document: DocumentId, by_script: bool) {
+    if !document.is_valid() {
+        return;
+    }
+    BEGUN_READS.with_borrow_mut(|reads| {
+        if let Some(begun) = reads.iter_mut().find(|begun| begun.document == document) {
+            begun.scopes += 1;
+            return;
+        }
+        let read = if by_script {
+            // SAFETY: Guaranteed by the caller.
+            ForcedRead::Script(unsafe { ScriptForcedRead::at_script_entry() })
+        } else {
+            ForcedRead::Host(LockstepProof::host_reads_layout())
+        };
+        reads.push(BegunRead {
+            document,
+            scopes: 1,
+            read: Some(read),
+        });
+    });
+}
+
+/// Ends a scope of the read of `document`'s render state the document thread began: the outermost drops the read if no
+/// job took it.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_owner_end_forced_read(document: DocumentId) {
+    BEGUN_READS.with_borrow_mut(|reads| {
+        let Some(index) = reads.iter().position(|begun| begun.document == document) else {
+            return;
+        };
+        reads[index].scopes -= 1;
+        if reads[index].scopes == 0 {
+            reads.swap_remove(index);
+        }
+    });
+}
+
+/// Takes the read of `document`'s render state the document thread began, where no job took it yet.
+pub(crate) fn take_begun_read(document: DocumentId) -> Option<ForcedRead> {
+    BEGUN_READS.with_borrow_mut(|reads| {
+        reads
+            .iter_mut()
+            .find(|begun| begun.document == document)
+            .and_then(|begun| begun.read.take())
+    })
+}
+
+/// Asks the owner the engine query `query` about `document`, as [`ask_engine`] does. A question the document thread asks
+/// in a read it began spends the read, on [`force_read`], and leaves the read's next job an [`AskedFirst`]; any other
+/// passes through an engine's door.
+pub(crate) fn ask_engine_in_read(document: DocumentId, query: Query) -> Answer {
+    let Some(read) = take_begun_read(document) else {
+        return ask_engine(document, query, LockstepProof::engine_door());
+    };
+    let answer = force_read(read, document, EngineQuestion(query));
+    BEGUN_READS.with_borrow_mut(|reads| {
+        if let Some(begun) = reads.iter_mut().find(|begun| begun.document == document) {
+            begun.read = Some(ForcedRead::AfterAsk(AskedFirst(())));
+        }
+    });
+    answer
 }
 
 /// The right to send the owner a job of a layout frame that is not its forced read's one job, and wait for it. Only
@@ -200,8 +298,8 @@ impl StyleJobPermit {
         }
     }
 
-    /// A transaction no forced read spent its read on: a style wave after an update's first, or a style update that
-    /// runs outside a layout update.
+    /// A transaction no forced read spent its read on: a style wave after a read's first, or a style update that no
+    /// read waits for.
     pub(crate) const fn of_style_update() -> Self {
         Self::new()
     }
@@ -1725,8 +1823,9 @@ pub(crate) struct StyleRoundAnswer {
     pub(crate) layout: Result<crate::layout::update_layout::OwnerFrameJobAnswer, FrameJobPermit>,
 }
 
-/// The one job of a forced read, which [`force_read`] sends: its first style transaction, or, where the read ran no
-/// style, its layout frame's first job. Only this module calls `send`, as only it makes a [`SpentWait`].
+/// The one job of a forced read, which [`force_read`] sends: its first question to the style engine, its first style
+/// transaction, or, where the read ran no style, its layout frame's first job. Only this module calls `send`, as only
+/// it makes a [`SpentWait`].
 pub(crate) trait ForcedReadJob {
     type Answer;
     fn send(self, document: DocumentId, spent: SpentWait) -> Self::Answer;
@@ -1741,6 +1840,18 @@ impl ForcedReadJob for StyleRound {
             view,
             layout: layout.ok_or_else(FrameJobPermit::after_style),
         }
+    }
+}
+
+/// A forced read's question to the style engine, asked before the read's style runs (whether a geometry read may defer
+/// the pending transaction, whether an element owes a style input).
+struct EngineQuestion(Query);
+
+impl ForcedReadJob for EngineQuestion {
+    type Answer = Answer;
+
+    fn send(self, document: DocumentId, spent: SpentWait) -> Answer {
+        ask_engine(document, self.0, spent)
     }
 }
 

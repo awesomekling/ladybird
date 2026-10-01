@@ -1921,18 +1921,13 @@ fn take_offered_frame(arena_handle: *mut c_void) -> Option<OfferedFrame> {
     })
 }
 
-/// Offers the style transaction the document takes next the first round of the frame of the forced read `read`, whose
-/// layout update the document thread runs, if `may_ride`.
+/// Offers the style transaction the document takes next the first round of the frame of the forced read whose layout
+/// update the document thread runs, if `may_ride`.
 ///
 /// # Safety
 ///
 /// As for [`update_layout`], before the update's first style runs.
-unsafe fn offer_first_round(
-    main_thread: &crate::stage::MainThread,
-    arena_handle: *mut c_void,
-    read: crate::render_owner::ForcedRead,
-    may_ride: bool,
-) {
+unsafe fn offer_first_round(main_thread: &crate::stage::MainThread, arena_handle: *mut c_void, may_ride: bool) {
     let inputs = FrameInputs {
         host: layout_update_host(main_thread),
         arena_handle,
@@ -1941,6 +1936,9 @@ unsafe fn offer_first_round(
     };
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { super::ArenaHandle::document_of(arena_handle) };
+    let read = crate::render_owner::take_begun_read(document).unwrap_or(crate::render_owner::ForcedRead::Host(
+        crate::render_owner::LockstepProof::read_lays_out_again(),
+    ));
     let stale = take_offered_frame(arena_handle);
     debug_assert!(stale.is_none(), "a layout update offers one frame");
     OFFERED_FRAMES.with_borrow_mut(|frames| {
@@ -1999,9 +1997,9 @@ unsafe fn ready_ride(main_thread: &crate::stage::MainThread, arena_handle: *mut 
 }
 
 /// Runs the style transaction `transaction` that the document whose arena `arena_handle` names takes, on the owner, and
-/// waits for its view. The first transaction of a forced read's update spends the read, on [`crate::render_owner::force_read`],
-/// with the frame's first job riding it where the document readied that and `may_ride`; any other transaction spends
-/// a [`crate::render_owner::StyleJobPermit`].
+/// waits for its view. A forced read's first transaction spends the read, on [`crate::render_owner::force_read`]: in a
+/// layout update, with the frame's first job riding it where the document readied that and `may_ride`. Any other
+/// transaction spends a [`crate::render_owner::StyleJobPermit`].
 ///
 /// # Safety
 ///
@@ -2013,11 +2011,23 @@ pub(crate) unsafe fn run_style_transaction(
     may_ride: bool,
 ) -> crate::css::style::bridge::OwnerStyleTransactionView {
     let Some(OfferedFrame { frame, query, ride }) = take_offered_frame(arena_handle) else {
-        return crate::render_owner::run_style_transaction(
-            crate::render_owner::StyleJobPermit::of_style_update(),
+        // A style read's first transaction spends the read.
+        let Some(read) = crate::render_owner::take_begun_read(document) else {
+            return crate::render_owner::run_style_transaction(
+                crate::render_owner::StyleJobPermit::of_style_update(),
+                document,
+                transaction,
+            );
+        };
+        return crate::render_owner::force_read(
+            read,
             document,
-            transaction,
-        );
+            crate::render_owner::StyleRound {
+                transaction,
+                then_layout: None,
+            },
+        )
+        .view;
     };
     let (read, then_layout) = match ride {
         Ride::Offered(read) | Ride::Held(read) => (read, None),

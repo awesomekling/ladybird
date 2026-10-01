@@ -2309,7 +2309,7 @@ pub unsafe extern "C" fn style_engine_has_deferred_element_style_input(engine: S
     }) {
         return owes;
     }
-    crate::css::style::owner_calls::ask(
+    crate::css::style::owner_calls::ask_in_read(
         engine,
         ENTRY,
         crate::css::style::owner_calls::StyleQuery::Boundary(BoundaryRead::HasDeferredElementStyleInput { node }),

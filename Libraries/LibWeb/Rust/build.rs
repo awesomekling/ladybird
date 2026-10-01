@@ -685,7 +685,8 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
     // The operations the main thread hands the render owner instead of entering the engine: a write it sends as a
     // change, a read it asks as a query, each a variant of its own. A read the main thread answers from what the engine
     // left in its home ("owner": "home") has a hand-written entry, which asks the query only where the home cannot
-    // answer; one the main thread answers by itself ("owner": "main") has a hand-written entry and no query.
+    // answer; one the main thread answers by itself ("owner": "main") has a hand-written entry and no query. A query a
+    // read of render state asks before its style runs ("owner": "read") spends the read the document thread began.
     let mut owner_writes = String::from(
         "/// A generated boundary write the main thread sends the render owner as a change, which the owner applies to the \
          document's engine.\n#[derive(Debug)]\npub(crate) enum BoundaryWrite {\n",
@@ -786,7 +787,7 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
         match owner {
             None => {}
             Some("change") if return_kind == "void" && receiver != "const" => {}
-            Some("query" | "home" | "main") if return_kind != "void" => {}
+            Some("query" | "read" | "home" | "main") if return_kind != "void" => {}
             Some(other) => return Err(format!("{event}: unknown or mismatched owner kind {other}").into()),
         }
         if owner.is_some() != ffi.is_some() {
@@ -896,6 +897,7 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
                 )?;
             } else {
                 let handle = if receiver == "const" { "engine" } else { "engine.home()" };
+                let ask = if owner == "read" { "ask_in_read" } else { "ask" };
                 let conversion = match return_kind {
                     "bool" => "is",
                     "u32" | "sheet_id" | "style_atom" | "style_node" | "tree_scope_id" | "style_rule_id" => "u32",
@@ -904,7 +906,7 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
                 };
                 writeln!(
                     rust,
-                    "        crate::css::style::owner_calls::ask({handle}, \"{ffi}\", crate::css::style::owner_calls::StyleQuery::Boundary(BoundaryRead::{variant})).{conversion}()\n    }})\n}}\n"
+                    "        crate::css::style::owner_calls::{ask}({handle}, \"{ffi}\", crate::css::style::owner_calls::StyleQuery::Boundary(BoundaryRead::{variant})).{conversion}()\n    }})\n}}\n"
                 )?;
             }
         }

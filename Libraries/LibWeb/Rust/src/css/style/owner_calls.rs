@@ -994,7 +994,19 @@ pub(crate) fn send(engine: StyleEngineInputHandle, change: EngineChange) {
 /// sent before. `entry` names the door the main thread took.
 pub(crate) fn ask(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
     engine.bring_home(entry);
-    ask_document(engine.document(), entry, Question::Style(query))
+    ask_document(engine.document(), entry, Question::Style(query), through_engine_door)
+}
+
+/// Asks the owner `query` as [`ask`] does, for a read of render state the document thread waits for: a question in a
+/// read it began spends the read ([`crate::render_owner::ask_engine_in_read`]).
+pub(crate) fn ask_in_read(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
+    engine.bring_home(entry);
+    ask_document(
+        engine.document(),
+        entry,
+        Question::Style(query),
+        crate::render_owner::ask_engine_in_read,
+    )
 }
 
 /// Leaves the change that gives up the `@keyframes` row of a shadow root's scope, from a garbage collection's
@@ -1016,16 +1028,21 @@ pub(crate) fn unpublish_tree_scope_keyframes_from_finalizer(
 /// Asks the owner of `engine`'s document the DevTools read `query`, as [`ask`] asks a style read.
 pub(crate) fn ask_devtools(engine: StyleEngineHandle, entry: &'static str, query: DevToolsStyleQuery) -> StyleAnswer {
     engine.bring_home(entry);
-    ask_document(engine.document(), entry, Question::DevTools(query))
+    ask_document(engine.document(), entry, Question::DevTools(query), through_engine_door)
 }
 
-fn ask_document(document: DocumentId, entry: &'static str, query: Question) -> StyleAnswer {
+fn through_engine_door(document: DocumentId, query: Query) -> Answer {
+    crate::render_owner::ask_engine(document, query, crate::render_owner::LockstepProof::engine_door())
+}
+
+fn ask_document(
+    document: DocumentId,
+    entry: &'static str,
+    query: Question,
+    ask_engine: fn(DocumentId, Query) -> Answer,
+) -> StyleAnswer {
     let mut cell = StyleQueryCell::asking(query);
-    let answered = crate::render_owner::ask_engine(
-        document,
-        Query::Engine(cell.for_owner()),
-        crate::render_owner::LockstepProof::engine_door(),
-    );
+    let answered = ask_engine(document, Query::Engine(cell.for_owner()));
     let StyleQueryCell { query, answer, retired } = cell;
     // What the owner retired is released here, on the main thread.
     drop(retired);

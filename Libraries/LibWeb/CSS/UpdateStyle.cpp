@@ -2075,14 +2075,16 @@ bool Document::has_submitted_style_update() const
 
 bool Document::update_style_for_element(AbstractElement const& abstract_element)
 {
-    join_frame_in_flight();
-    update_selection_style_observability();
-    flush_throttled_animation_style_update_for_node(abstract_element.element());
-    return CSS::update_style_for_element(*this, abstract_element, StyleUpdateMode::Normal);
+    return update_style_for_element(abstract_element, StyleUpdateMode::Normal);
 }
 
 bool Document::update_style_for_element(AbstractElement const& abstract_element, StyleUpdateMode mode)
 {
+    // A script API reads the element's style: its waits for the render owner are one forced read.
+    Layout::RustFFI::render_owner_begin_forced_read(render_document_id(), true);
+    ScopeGuard end_forced_read = [&] {
+        Layout::RustFFI::render_owner_end_forced_read(render_document_id());
+    };
     join_frame_in_flight();
     update_selection_style_observability();
     flush_throttled_animation_style_update_for_node(abstract_element.element());
