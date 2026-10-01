@@ -6667,10 +6667,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     // The first job of the layout frame of the forced read the document takes the transaction for rides it, where the
     // document readied one: the owner lays the document out right after the transaction, where the owner applies the
     // batch to the layout nodes itself, so the host's install leaves nothing the layout reads.
-    let riding = render_half
-        .as_ref()
-        .and_then(|_| crate::layout::update_layout::take_readied_ride(layout_arena));
-    let rides = riding.is_some();
+    let may_ride = render_half.is_some();
     let transaction = OwnerStyleTransaction::Whole {
         root,
         computation_inputs,
@@ -6678,14 +6675,15 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         render_half,
     };
     // This thread reaches the engine again only once the owner has finished the transaction.
-    let crate::render_owner::StyleJobAnswer {
-        view: OwnerStyleTransactionView(view, retired, applied, _),
-        layout,
-    } = crate::render_owner::run_style_transaction(engine.home().document(), transaction, riding);
-    if rides {
-        // SAFETY: This is the document thread's FFI entry, right after the transaction the job rode.
-        unsafe { crate::layout::update_layout::settle_ride(layout_arena, layout) };
-    }
+    // SAFETY: This is the document thread's FFI entry, with the document's arena or null.
+    let OwnerStyleTransactionView(view, retired, applied, _) = unsafe {
+        crate::layout::update_layout::run_style_transaction(
+            layout_arena,
+            engine.home().document(),
+            transaction,
+            may_ride,
+        )
+    };
     // Font cascade lists and custom-property data are the document thread's to give up.
     crate::css::ffi_stats::release_deferred_font_cascade_lists();
     drop(retired);
@@ -7196,10 +7194,11 @@ pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
         host_named_atoms_beside_pass,
     };
     // This thread reaches the engine again only once the owner has finished the transaction.
-    let crate::render_owner::StyleJobAnswer {
-        view: OwnerStyleTransactionView(view, retired, applied, _),
-        ..
-    } = crate::render_owner::run_style_transaction(engine.home().document(), transaction, None);
+    let OwnerStyleTransactionView(view, retired, applied, _) = crate::render_owner::run_style_transaction(
+        crate::render_owner::StyleJobPermit::finishing_submitted_pass(),
+        engine.home().document(),
+        transaction,
+    );
     debug_assert!(
         applied.is_none(),
         "finishing a submitted transaction applies no batch on the owner"

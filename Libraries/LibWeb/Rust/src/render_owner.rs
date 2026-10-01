@@ -65,10 +65,10 @@ impl DocumentId {
 
 /// The one wait of a script API call that needs a current answer (getComputedStyle, an element's geometry, hit testing,
 /// innerText and the like). The host entry the API calls mints it, and the wait takes it by value, so the call waits for
-/// the owner once with it: it is neither `Clone` nor `Copy`, and stays on the document thread. Internal code
-/// (drains, painting, event dispatch) holds none: it reads the rows the owner published last
-/// ([`crate::layout::row_reads::FrameRows`]) and what it sent ahead of them, and waits for the owner otherwise only with
-/// a [`LockstepProof`].
+/// the owner once with it: it is neither `Clone` nor `Copy`, and stays on the document thread. A call that lays the
+/// document out spends it on [`force_read`], the one job of its update. Internal code (drains, painting, event
+/// dispatch) holds none: it reads the rows the owner published last ([`crate::layout::row_reads::FrameRows`]) and what
+/// it sent ahead of them, and waits for the owner otherwise only with a [`LockstepProof`] or a job's permit.
 pub(crate) struct ScriptForcedRead {
     _not_send: std::marker::PhantomData<*const ()>,
 }
@@ -143,23 +143,93 @@ impl LockstepProof {
         Self::new()
     }
 
-    /// A job of a style or layout update.
-    pub(crate) const fn layout_update() -> Self {
+    /// A layout update the host waits for on its own account, for no script API call: an event's dispatch, a child
+    /// document's style update, an inspection, a screenshot. It is spent as a script's read is, on [`force_read`].
+    pub(crate) const fn host_reads_layout() -> Self {
         Self::new()
     }
 }
+
+/// What a layout update the document thread waits for spends on its one job, [`force_read`]: the read of the script API
+/// call it runs for, or the host's own. The update's first style or layout job takes it.
+pub(crate) enum ForcedRead {
+    Script(ScriptForcedRead),
+    Host(LockstepProof),
+}
+
+/// The right to send the owner a job of a layout frame that is not its forced read's one job, and wait for it. Only
+/// these constructors mint one, so every extra job of a frame says why it is one.
+pub(crate) struct FrameJobPermit {
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+impl FrameJobPermit {
+    const fn new() -> Self {
+        Self {
+            _not_send: std::marker::PhantomData,
+        }
+    }
+
+    /// The first job of a rendering update's frame, which no forced read waits for.
+    pub(crate) const fn of_rendering_update() -> Self {
+        Self::new()
+    }
+
+    /// A job after one that ended with another round the owner does not start itself: the round has style to run, or
+    /// a tree the document roots.
+    pub(crate) const fn for_next_round() -> Self {
+        Self::new()
+    }
+
+    /// The first job of a frame whose forced read a style transaction spent without running the job: only
+    /// [`force_read`]'s answer holds one.
+    const fn after_style() -> Self {
+        Self::new()
+    }
+}
+
+/// The right to send the owner a style transaction that is not a forced read's one job, and wait for it.
+pub(crate) struct StyleJobPermit {
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+impl StyleJobPermit {
+    const fn new() -> Self {
+        Self {
+            _not_send: std::marker::PhantomData,
+        }
+    }
+
+    /// A transaction no forced read spent its read on: a style wave after an update's first, or a style update that
+    /// runs outside a layout update.
+    pub(crate) const fn of_style_update() -> Self {
+        Self::new()
+    }
+
+    /// The finish of the transaction whose pass a rendering update submitted, once the update's frame is back.
+    pub(crate) const fn finishing_submitted_pass() -> Self {
+        Self::new()
+    }
+}
+
+/// What a style or layout job's message carries to show that a typed entry of this module ([`force_read`],
+/// [`run_frame_job`], [`run_style_transaction`]) spent the wait for it. Only this module makes one, so nothing outside
+/// it sends such a job.
+pub(crate) struct SpentWait(());
 
 mod sealed_wait {
     pub trait Sealed {}
     impl Sealed for super::ScriptForcedRead {}
     impl Sealed for super::LockstepProof {}
+    impl Sealed for super::SpentWait {}
 }
 
-/// What lets the main thread wait for the owner, taken by value by every wait: a script's forced read, or a
-/// [`LockstepProof`].
+/// What lets the main thread wait for the owner, taken by value by every wait: a script's forced read, a
+/// [`LockstepProof`], or the [`SpentWait`] of a layout update's job, which only this module makes.
 pub(crate) trait OwnerWait: sealed_wait::Sealed {}
 impl OwnerWait for ScriptForcedRead {}
 impl OwnerWait for LockstepProof {}
+impl OwnerWait for SpentWait {}
 
 /// The number of a change within its document's stream. The first change a document sends is 1; 0 names the point
 /// before any change.
@@ -933,6 +1003,8 @@ pub(crate) enum ToOwner {
         document: DocumentId,
         job: Box<crate::layout::update_layout::OwnerFrameJob>,
         reply: crate::stage_thread::OwnerReplyTo<crate::layout::update_layout::OwnerFrameJobAnswer>,
+        /// What shows that [`force_read`] or [`run_frame_job`] sent the job.
+        _spent: SpentWait,
     },
     /// Runs a paint preparation pass over the render state of `document` for the document thread, which waits for it.
     Paint {
@@ -948,6 +1020,8 @@ pub(crate) enum ToOwner {
         transaction: Box<crate::css::style::bridge::OwnerStyleTransaction>,
         then_layout: Option<Box<crate::layout::update_layout::OwnerFrameJob>>,
         reply: crate::stage_thread::OwnerReplyTo<StyleJobAnswer>,
+        /// What shows that [`force_read`] or [`run_style_transaction`] sent the transaction.
+        _spent: SpentWait,
     },
     /// Answers `query` about `document` after the changes sent before it. The document thread waits.
     Ask {
@@ -1141,8 +1215,11 @@ fn handle_message(owner: &Owner, message: ToOwner) {
             transaction,
             then_layout,
             reply,
+            ..
         } => reply.answer(|| run_style_job_on_owner(owner, document, transaction, then_layout)),
-        ToOwner::Layout { document, job, reply } => {
+        ToOwner::Layout {
+            document, job, reply, ..
+        } => {
             // The state's borrow ends before the job runs, which may reach another document's state. The job finds
             // the arena inside its answer, so that a panic there answers the waiting document thread.
             reply.answer(|| {
@@ -1629,8 +1706,97 @@ pub extern "C" fn render_owner_generated_content_accessible_text(
 /// What the owner answers a style transaction with: the transaction's view, and the answer of the layout frame's job
 /// that rode it, where the transaction let the owner run it.
 pub(crate) struct StyleJobAnswer {
+    view: crate::css::style::bridge::OwnerStyleTransactionView,
+    layout: Option<crate::layout::update_layout::OwnerFrameJobAnswer>,
+}
+
+/// A forced read's first style transaction, as its one job, with the layout frame's first job where the document
+/// readied it to ride the transaction.
+pub(crate) struct StyleRound {
+    pub(crate) transaction: crate::css::style::bridge::OwnerStyleTransaction,
+    pub(crate) then_layout: Option<Box<crate::layout::update_layout::OwnerFrameJob>>,
+}
+
+/// What the owner answers a [`StyleRound`] with: the transaction's view, and the answer of the frame's first job where
+/// it rode the transaction and ran. Where it did not, the frame sends the job on its own with the permit that takes its
+/// place: the read's second wait, which the type shows.
+pub(crate) struct StyleRoundAnswer {
     pub(crate) view: crate::css::style::bridge::OwnerStyleTransactionView,
-    pub(crate) layout: Option<crate::layout::update_layout::OwnerFrameJobAnswer>,
+    pub(crate) layout: Result<crate::layout::update_layout::OwnerFrameJobAnswer, FrameJobPermit>,
+}
+
+/// The one job of a forced read, which [`force_read`] sends: its first style transaction, or, where the read ran no
+/// style, its layout frame's first job. Only this module calls `send`, as only it makes a [`SpentWait`].
+pub(crate) trait ForcedReadJob {
+    type Answer;
+    fn send(self, document: DocumentId, spent: SpentWait) -> Self::Answer;
+}
+
+impl ForcedReadJob for StyleRound {
+    type Answer = StyleRoundAnswer;
+
+    fn send(self, document: DocumentId, spent: SpentWait) -> StyleRoundAnswer {
+        let StyleJobAnswer { view, layout } = send_style_job(document, self.transaction, self.then_layout, spent);
+        StyleRoundAnswer {
+            view,
+            layout: layout.ok_or_else(FrameJobPermit::after_style),
+        }
+    }
+}
+
+impl ForcedReadJob for Box<crate::layout::update_layout::OwnerFrameJob> {
+    type Answer = crate::layout::update_layout::OwnerFrameJobAnswer;
+
+    fn send(self, document: DocumentId, spent: SpentWait) -> Self::Answer {
+        send_frame_job(document, self, spent)
+    }
+}
+
+/// The one wait of a forced read of `document`: spends `read`, sends the owner `job`, and waits for its answer. Every
+/// other style or layout job spends a permit that says why it is one ([`run_frame_job`], [`run_style_transaction`]).
+pub(crate) fn force_read<J: ForcedReadJob>(_read: ForcedRead, document: DocumentId, job: J) -> J::Answer {
+    job.send(document, SpentWait(()))
+}
+
+/// Runs `job`, a layout frame's job that is not its forced read's one job, on the owner that holds `document`'s render
+/// state, spending `permit`, and waits for its answer.
+pub(crate) fn run_frame_job(
+    _permit: FrameJobPermit,
+    document: DocumentId,
+    job: Box<crate::layout::update_layout::OwnerFrameJob>,
+) -> crate::layout::update_layout::OwnerFrameJobAnswer {
+    send_frame_job(document, job, SpentWait(()))
+}
+
+/// Runs the style transaction `transaction` of `document` that is not a forced read's one job, which the calling
+/// document thread takes, on the owner, spending `permit`, and waits for its view.
+pub(crate) fn run_style_transaction(
+    _permit: StyleJobPermit,
+    document: DocumentId,
+    transaction: crate::css::style::bridge::OwnerStyleTransaction,
+) -> crate::css::style::bridge::OwnerStyleTransactionView {
+    send_style_job(document, transaction, None, SpentWait(())).view
+}
+
+/// Sends the layout frame's job `job` to the owner that holds `document`'s render state, and waits for its answer.
+/// Where the calling thread is the owner, or the job would queue behind a run a test holds, it runs right here, as the
+/// owner.
+fn send_frame_job(
+    document: DocumentId,
+    job: Box<crate::layout::update_layout::OwnerFrameJob>,
+    spent: SpentWait,
+) -> crate::layout::update_layout::OwnerFrameJobAnswer {
+    let job = std::cell::Cell::new(Some(job));
+    crate::stage_thread::wait_for_owner(
+        SpentWait(()),
+        |reply| ToOwner::Layout {
+            document,
+            job: job.take().expect("a job is sent once"),
+            reply,
+            _spent: spent,
+        },
+        |owner| job.take().expect("a job runs once").run_here(owner),
+    )
 }
 
 /// Runs the style transaction `transaction` of `document`, which the calling document thread takes, on the owner, and
@@ -1638,20 +1804,22 @@ pub(crate) struct StyleJobAnswer {
 /// (see [`ToOwner::Style`]). The owner serves it between the units of whatever it runs. Where the calling thread holds
 /// the document's render state, it is the owner (a unit the owner runs may take a transaction), and runs the
 /// transaction as the owner does one it is sent.
-pub(crate) fn run_style_transaction(
+fn send_style_job(
     document: DocumentId,
     transaction: crate::css::style::bridge::OwnerStyleTransaction,
     then_layout: Option<Box<crate::layout::update_layout::OwnerFrameJob>>,
+    spent: SpentWait,
 ) -> StyleJobAnswer {
     let transaction = Box::new(transaction);
     if STATES.with_borrow(|states| states.contains_key(&document)) {
         return run_style_job_on_owner(&Owner::here(), document, transaction, then_layout);
     }
-    let ran = crate::stage_thread::wait_for_owner_thread(LockstepProof::layout_update(), |reply| ToOwner::Style {
+    let ran = crate::stage_thread::wait_for_owner_thread(SpentWait(()), |reply| ToOwner::Style {
         document,
         transaction,
         then_layout,
         reply,
+        _spent: spent,
     });
     ran.unwrap_or_else(|| {
         debug_assert!(false, "the style transaction of document {document:?} has no owner");

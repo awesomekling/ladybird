@@ -538,6 +538,9 @@ public:
     void update_layout(UpdateLayoutReason, ThrottledAnimationSamplingScope);
     enum class LayoutPassSubmission : u8 {
         Wait,
+        // A pass a read runs again for what its first pass left (an image provider that arrived, a scroll-state
+        // snapshot): the host's own wait, not the read's.
+        WaitAgain,
         MaySubmit,
     };
     // Returns true if the update's full layout pass was submitted to run beside the main thread. The update then ends

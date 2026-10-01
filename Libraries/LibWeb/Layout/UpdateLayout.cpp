@@ -226,6 +226,87 @@ void Document::take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffec
     end_layout_update_on_document_side(*this);
 }
 
+// Whether a script API names the reason: its update's one wait for the render owner is then the script call's forced
+// read, and otherwise the host's own.
+static bool reason_is_script_api(UpdateLayoutReason reason)
+{
+    switch (reason) {
+    case UpdateLayoutReason::DocumentElementFromPoint:
+    case UpdateLayoutReason::DocumentElementsFromPoint:
+    case UpdateLayoutReason::DocumentCaretPositionFromPoint:
+    case UpdateLayoutReason::DocumentFindMatchingText:
+    case UpdateLayoutReason::DocumentSetDesignMode:
+    case UpdateLayoutReason::ElementCheckVisibility:
+    case UpdateLayoutReason::ElementClientHeight:
+    case UpdateLayoutReason::ElementClientWidth:
+    case UpdateLayoutReason::ElementGetClientRects:
+    case UpdateLayoutReason::ElementIsPotentiallyScrollable:
+    case UpdateLayoutReason::ElementScroll:
+    case UpdateLayoutReason::ElementScrollHeight:
+    case UpdateLayoutReason::ElementScrollIntoView:
+    case UpdateLayoutReason::ElementScrollLeft:
+    case UpdateLayoutReason::ElementScrollTop:
+    case UpdateLayoutReason::ElementScrollWidth:
+    case UpdateLayoutReason::ElementSetScrollLeft:
+    case UpdateLayoutReason::ElementSetScrollTop:
+    case UpdateLayoutReason::HTMLElementGetTheTextSteps:
+    case UpdateLayoutReason::HTMLElementOffsetHeight:
+    case UpdateLayoutReason::HTMLElementOffsetLeft:
+    case UpdateLayoutReason::HTMLElementOffsetParent:
+    case UpdateLayoutReason::HTMLElementOffsetTop:
+    case UpdateLayoutReason::HTMLElementOffsetWidth:
+    case UpdateLayoutReason::HTMLElementScrollParent:
+    case UpdateLayoutReason::HTMLImageElementHeight:
+    case UpdateLayoutReason::HTMLImageElementWidth:
+    case UpdateLayoutReason::HTMLImageElementX:
+    case UpdateLayoutReason::HTMLImageElementY:
+    case UpdateLayoutReason::HTMLInputElementHeight:
+    case UpdateLayoutReason::HTMLInputElementWidth:
+    case UpdateLayoutReason::InternalsLayoutTest:
+    case UpdateLayoutReason::InternalsHitTest:
+    case UpdateLayoutReason::MediaQueryListMatches:
+    case UpdateLayoutReason::NavigableSelectedText:
+    case UpdateLayoutReason::RangeGetClientRects:
+    case UpdateLayoutReason::ResolvedCSSStyleDeclarationProperty:
+    case UpdateLayoutReason::SVGGraphicsElementGetBBox:
+    case UpdateLayoutReason::SVGGraphicsElementGetScreenCTM:
+    case UpdateLayoutReason::SVGLengthValue:
+    case UpdateLayoutReason::SVGPathLength:
+    case UpdateLayoutReason::WindowScroll:
+        return true;
+    case UpdateLayoutReason::AutoScrollSelection:
+    case UpdateLayoutReason::ChildDocumentStyleUpdate:
+    case UpdateLayoutReason::CursorLineNavigation:
+    case UpdateLayoutReason::Debugging:
+    case UpdateLayoutReason::DocumentReadinessComplete:
+    case UpdateLayoutReason::DumpDisplayList:
+    case UpdateLayoutReason::EventHandlerDispatchChromeWidgetEvent:
+    case UpdateLayoutReason::EventHandlerHandleDragAndDrop:
+    case UpdateLayoutReason::EventHandlerHandleKeyDown:
+    case UpdateLayoutReason::EventHandlerHandleMouseDown:
+    case UpdateLayoutReason::EventHandlerHandleMouseMove:
+    case UpdateLayoutReason::EventHandlerHandleMouseUp:
+    case UpdateLayoutReason::EventHandlerHandleMouseWheel:
+    case UpdateLayoutReason::EventHandlerRunActivationBehavior:
+    case UpdateLayoutReason::EventHandlerShowContextMenu:
+    case UpdateLayoutReason::FontFaceSetReady:
+    case UpdateLayoutReason::HTMLEventLoopRenderingUpdate:
+    case UpdateLayoutReason::HTMLLabelElementActivationBehavior:
+    case UpdateLayoutReason::InspectAccessibilityTree:
+    case UpdateLayoutReason::InspectDOMTree:
+    case UpdateLayoutReason::InspectDevToolsLayoutData:
+    case UpdateLayoutReason::InputCaretRect:
+    case UpdateLayoutReason::NavigableViewportScroll:
+    case UpdateLayoutReason::NodeNameOrDescription:
+    case UpdateLayoutReason::SVGDecodedImageDataRender:
+    case UpdateLayoutReason::ScrollCursorIntoView:
+    case UpdateLayoutReason::ProcessScreenshot:
+    case UpdateLayoutReason::ViewTransitionCapture:
+        return false;
+    }
+    VERIFY_NOT_REACHED();
+}
+
 void Document::update_layout(UpdateLayoutReason reason)
 {
     update_layout(reason, ThrottledAnimationSamplingScope::Document);
@@ -250,22 +331,22 @@ void Document::update_layout(UpdateLayoutReason reason, ThrottledAnimationSampli
     // An image box that owns its image's provider is handed it once the frame that built the box is over, and the
     // frame lays it out without an image. If the image was already there, the box lays out again with it before the
     // read goes on. Only a pass that builds another such box can leave one behind again, so this settles.
-    auto update_style_and_layout = [&] {
-        update_style_and_layout_once(reason, animation_sampling_scope);
+    auto update_style_and_layout = [&](LayoutPassSubmission pass_submission) {
+        update_style_and_layout_once(reason, animation_sampling_scope, pass_submission);
         while (exchange(m_owed_image_provider_arrived_with_image, false)) {
             join_scope.note_extra_pass();
-            update_style_and_layout_once(reason, animation_sampling_scope);
+            update_style_and_layout_once(reason, animation_sampling_scope, LayoutPassSubmission::WaitAgain);
         }
     };
 
-    update_style_and_layout();
+    update_style_and_layout(LayoutPassSubmission::Wait);
 
     // AD-HOC: A scroll-state() query against a container that has not been snapshotted yet reads no state. Like other
     //         engines, take such a container's first snapshot as soon as its layout is known, so that the style it
     //         decides is right before the next rendering update. Later changes of its state wait for that update.
     while (layout_is_up_to_date() && m_scroll_state_query_containers.snapshot_post_layout_state(*this, CSS::ScrollStateQueryContainers::Snapshot::NewContainersOnly)) {
         join_scope.note_extra_pass();
-        update_style_and_layout();
+        update_style_and_layout(LayoutPassSubmission::WaitAgain);
     }
 }
 
@@ -294,7 +375,7 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     // document thread for, and such work cannot take in a frame in flight. So a frame in flight that holds one of them
     // is taken in before this document's frame starts. A style update the main thread waits for lays them out only if
     // one of them has style or layout work to do; a submitted one may find work that a task beside it leaves them.
-    if (pass_submission != LayoutPassSubmission::Wait || !CSS::embedding_document_chain_has_no_pending_style_or_layout_work(*this)) {
+    if (pass_submission == LayoutPassSubmission::MaySubmit || !CSS::embedding_document_chain_has_no_pending_style_or_layout_work(*this)) {
         for (auto container = container_document(); container; container = container->container_document())
             container->join_frame_in_flight();
     }
@@ -315,14 +396,17 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     // NB: The update, and the epochs begun above, end as the frame's end is taken in (take_in_layout_frame_effects):
     //     before layout_arena_update_layout returns, or once a submitted pass's frame is taken back.
 
-    bool const may_submit_pass = pass_submission != LayoutPassSubmission::Wait;
-    // An update the main thread waits for offers the style transaction of its first round the round's layout: the
-    // render owner lays the document out right after the transaction, in the same job, where the transaction leaves
-    // nothing the layout reads. A round that renumbers list items or takes in top layer changes does that after its
-    // style, as ever.
-    if (!may_submit_pass && reason != UpdateLayoutReason::InspectDevToolsLayoutData && !m_created_for_appropriate_template_contents
-        && m_list_owners_pending_item_renumber.is_empty() && !render_inputs().has_pending_top_layer_change())
-        Layout::RustFFI::layout_arena_offer_first_round(arena);
+    bool const may_submit_pass = pass_submission == LayoutPassSubmission::MaySubmit;
+    // An update the main thread waits for is a forced read, whose one wait for the render owner the update's first job
+    // spends. It offers the style transaction of its first round the round's layout: the render owner lays the document
+    // out right after the transaction, in the same job, where the transaction leaves nothing the layout reads. A round
+    // that renumbers list items or takes in top layer changes does that after its style, as ever.
+    if (!may_submit_pass) {
+        auto const may_ride = reason != UpdateLayoutReason::InspectDevToolsLayoutData && !m_created_for_appropriate_template_contents
+            && m_list_owners_pending_item_renumber.is_empty() && !render_inputs().has_pending_top_layer_change();
+        auto const by_script = reason_is_script_api(reason) && pass_submission == LayoutPassSubmission::Wait;
+        Layout::RustFFI::layout_arena_begin_forced_read(arena, by_script, may_ride);
+    }
     // The update's first round's style runs here, ahead of the update.
     update_style();
 

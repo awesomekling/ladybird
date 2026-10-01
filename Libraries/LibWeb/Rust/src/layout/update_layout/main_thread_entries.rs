@@ -73,21 +73,30 @@ unsafe extern "C" fn layout_arena_update_layout(
     })
 }
 
-/// Offers the style transaction the document takes next the first round of the frame of the forced read whose layout
-/// update it runs: the frame's first job rides the transaction, and the owner runs it right after it, in the same
-/// message, where the transaction lets it.
+/// Begins the forced read whose layout update the document thread runs, for a script API call if `by_script` and for
+/// the host's own read otherwise: mints the read, the update's one wait
+/// for the owner, which the frame the document offers its next style transaction holds until the update's first style
+/// transaction or the frame's first job spends it. Where `may_ride`, the frame's first job rides that transaction, and
+/// the owner runs it right after it, in the same message, where the transaction lets it.
 ///
 /// # Safety
 ///
 /// `arena` must be a live handle with a registered layout update host, used on the document thread between
-/// `layout_arena_begin_update_layout` and `layout_arena_update_layout`, before the update's first style runs.
+/// `layout_arena_begin_update_layout` and `layout_arena_update_layout` of an update that submits no pass, before the
+/// update's first style runs. `by_script` only for the update of a script API call, once per call.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_offer_first_round(arena: *mut c_void) {
+unsafe extern "C" fn layout_arena_begin_forced_read(arena: *mut c_void, by_script: bool, may_ride: bool) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let read = if by_script {
+        // SAFETY: Guaranteed by the caller.
+        crate::render_owner::ForcedRead::Script(unsafe { crate::render_owner::ScriptForcedRead::at_script_entry() })
+    } else {
+        crate::render_owner::ForcedRead::Host(crate::render_owner::LockstepProof::host_reads_layout())
+    };
     abort_on_panic(|| {
         // SAFETY: Guaranteed by the entry point's contract.
-        unsafe { offer_first_round(&main_thread, arena) }
+        unsafe { offer_first_round(&main_thread, arena, read, may_ride) }
     });
 }
 
@@ -96,7 +105,7 @@ unsafe extern "C" fn layout_arena_offer_first_round(arena: *mut c_void) {
 ///
 /// # Safety
 ///
-/// As for [`layout_arena_offer_first_round`], right before the document takes a style transaction whose batch the owner
+/// As for [`layout_arena_begin_forced_read`], right before the document takes a style transaction whose batch the owner
 /// applies to the layout nodes itself.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_ready_ride(arena: *mut c_void) {
