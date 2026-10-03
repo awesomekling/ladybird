@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    @keyframes grow {
+        from {
+            width: 10px;
+        }
+        to {
+            width: 30px;
+        }
+    }
+    #box {
+        width: 10px;
+        height: 10px;
+    }
+</style>
+<div id="box"></div>
+<script>
+    // A garbage collection beside a frame in flight finalizes shadow roots whose style scopes published @keyframes,
+    // while the style pass in flight holds the document's style engine. The finalizers do not wait for the frame: the
+    // engine gives the scopes up once the frame is taken in, and the keyframes left resolve as before.
+    function attachHost(keyframes) {
+        const host = document.createElement("div");
+        host.attachShadow({ mode: "open" }).innerHTML =
+            `<style>@keyframes grow { ${keyframes} } p { animation: grow 1s linear -0.5s paused; }</style><p>shadow</p>`;
+        document.body.appendChild(host);
+        return host;
+    }
+
+    asyncTest(async done => {
+        await twoFrames();
+        let hosts = [];
+        const roots = [];
+        for (let i = 0; i < 20; ++i) {
+            const host = attachHost("from { width: 100px; } to { width: 200px; }");
+            hosts.push(host);
+            roots.push(new WeakRef(host.shadowRoot));
+        }
+        document.body.offsetWidth;
+        await twoFrames();
+        for (const host of hosts)
+            host.remove();
+        hosts = null;
+        await twoFrames();
+
+        const result = await whileRecordingInFlight(() => {
+            box.style.height = "20px";
+        }, state => {
+            internals.gc();
+            return {
+                state,
+                collected: roots.every(root => root.deref() === undefined),
+                afterCollection: internals.frameSchedulerState(),
+            };
+        });
+        println(`state in the next task: ${result.state}`);
+        println(`the shadow roots were collected: ${result.collected}`);
+        println(`state after the collection: ${result.afterCollection}`);
+
+        await twoFrames();
+        box.style.animation = "grow 1s linear -0.5s paused";
+        println(`the document's keyframes animate the box: ${getComputedStyle(box).width}`);
+        const host = attachHost("from { width: 300px; } to { width: 400px; }");
+        println(`a new scope's keyframes animate its element: ${getComputedStyle(host.shadowRoot.querySelector("p")).width}`);
+        done();
+    });
+</script>
