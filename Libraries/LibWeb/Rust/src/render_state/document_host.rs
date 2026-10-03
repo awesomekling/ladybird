@@ -233,7 +233,10 @@ impl DocumentHost {
             previous.is_none(),
             "one style transaction of a document flies at a time"
         );
-        *self.flown_round.borrow_mut() = round;
+        if let Some((round, rows)) = round {
+            *self.flown_round.borrow_mut() = Some(round);
+            *self.rows.borrow_mut() = Some(Rc::new(rows));
+        }
         Frame::Here(UnsafeCell::new(state))
     }
 
