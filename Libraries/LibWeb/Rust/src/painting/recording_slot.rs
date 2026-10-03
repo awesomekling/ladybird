@@ -80,7 +80,7 @@ impl RecordingJob {
     /// Records the frame with `inputs` on the Paint thread beside the host, which `_license` shows nothing needs
     /// before the event loop's next task.
     pub(crate) fn fly(self, inputs: RecordingInputs, _license: FlightLicense) -> InFlight<RecordingAnswer> {
-        crate::stage_thread::paint_thread().submit(move || self.run(&inputs))
+        crate::stage_thread::paint_thread().submit(move |_| self.run(&inputs))
     }
 
     /// Records the frame with `inputs`. It takes no main thread token, so nothing it calls can reach
@@ -441,7 +441,7 @@ mod tests {
     /// A flight of the slot's recorder state that answers it back with a recording pending.
     fn flight_of(slot: &mut RecordingSlot, publishes_recording: bool) -> InFlight<RecordingAnswer> {
         let recorder = slot.take_recorder();
-        crate::stage_thread::paint_thread().submit(move || RecordingAnswer {
+        crate::stage_thread::paint_thread().submit(move |_| RecordingAnswer {
             recorder,
             pending: pending(publishes_recording),
             trace: None,
