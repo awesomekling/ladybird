@@ -104,6 +104,18 @@ void InvalidationJournal::note_paint_facts(NodeIdentity identity, Painting::Pain
     drain_if_layout_is_reading();
 }
 
+void InvalidationJournal::note_box_image_changed(Layout::Node& box, Painting::PaintFactsFamily families, InvalidateDisplayList invalidate_display_list)
+{
+    m_entries.append(Entry {
+        .box = box,
+        .invalidate_display_list = invalidate_display_list,
+        .needs_repaint = invalidate_display_list != InvalidateDisplayList::No,
+        .stale_paint_facts = families,
+    });
+    m_document->request_frame_for_pending_repaint({});
+    drain_if_layout_is_reading();
+}
+
 void InvalidationJournal::forget(CSS::StyleNodeID style_node)
 {
     // A drain holds the generation it writes through outside the index, where forgetting cannot reach it, so an
@@ -139,8 +151,8 @@ void InvalidationJournal::drain()
 
         if (auto* arena = m_document->layout_node_arena_if_created()) {
             for (auto const& entry : entries) {
-                // A node whose box went away between the mark and here has nothing left to mark.
-                auto* layout_node = entry.identity.bound_layout_node(*arena);
+                // A node whose box went away between the mark and here has nothing left to mark, nor has a box that did.
+                auto* layout_node = entry.box ? entry.box.ptr() : entry.identity.bound_layout_node(*arena);
                 if (!layout_node)
                     continue;
                 // The tree update goes first, so that a rebuild it escalates to an ancestor is known before the

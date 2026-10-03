@@ -211,6 +211,7 @@
 #include <LibWeb/IntersectionObserver/IntersectionObserver.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/Layout/RenderDocument.h>
 #include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Layout/TreeBuilder.h>
 #include <LibWeb/Layout/Viewport.h>
@@ -1560,6 +1561,8 @@ Layout::Node* Document::layout_root_if_live() const
 
 void Document::tear_down_layout_tree()
 {
+    // The teardown is the host's own read of the render state: a frame in flight lands first.
+    Layout::ForcedReadScope read { *this, false };
     auto* layout_root = layout_root_if_live();
     if (layout_root)
         layout_root->prepare_subtree_for_detach_from_layout_tree();
@@ -1991,7 +1994,9 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
     if (!node.is_connected())
         return;
 
-    // NB: Whether the read finds style or layout pending is asked behind the style transaction that flew.
+    // NB: Whether the read finds style or layout pending is asked behind the style transaction that flew, which lands
+    //     for the read.
+    Layout::ForcedReadScope read { style_computer().style_engine().render_document().host(), reason_is_script_api(reason) };
     drain_flown_style_transaction();
 
     if (reason != UpdateLayoutReason::HTMLEventLoopRenderingUpdate)
@@ -2183,8 +2188,7 @@ bool Document::layout_is_up_to_date() const
     // Without an arena there is no layout root either, so there is a tree to build.
     if (!m_layout_node_arena)
         return false;
-    return Layout::RustFFI::render_state_layout_is_up_to_date(m_layout_node_arena->host(),
-        needs_layout_tree_update() || child_needs_layout_tree_update());
+    return Layout::RustFFI::render_state_layout_is_up_to_date(m_layout_node_arena->host(), style_node_id().value());
 }
 
 void Document::update_style_computer_viewport_rect()
@@ -2259,6 +2263,8 @@ void Document::invalidate_style_for_viewport_change()
     // The viewport is one of the document's published inputs, and the style engine drives a record
     // that read it again once it moves, so the readers are rows the engine settles. They are still
     // named here: what moved is in none of their winners.
+    // Which records read the viewport is the viewport change's own read of the render state.
+    Layout::ForcedReadScope read { *this, false };
     auto& style_engine = style_computer().style_engine();
     for (auto style_node : style_engine.viewport_dependent_style_nodes()) {
         auto element = style_computer().element_for_style_node(style_node.value());
@@ -2393,6 +2399,8 @@ void Document::flush_throttled_animation_style_update()
 
 void Document::flush_throttled_animation_style_update_for_node(Node const& node)
 {
+    // What the flush finds pending is its own read of the render state.
+    Layout::ForcedReadScope read { *this, false };
     // Only an animation that can skip a per-frame style update has anything for this read to catch
     // up on. Sampling and painting record whether any can, as do reads after a visibility or layout
     // tree change, and the document-wide flush above already trusts that record, so walking every
@@ -9970,6 +9978,8 @@ void Document::note_svg_paint_resources_changed()
 {
     if (!m_layout_node_arena)
         return;
+    // Whether a row enrolled a resource is the note's own read of the render state.
+    Layout::ForcedReadScope read { m_layout_node_arena->host(), false };
     if (Layout::RustFFI::render_state_note_svg_paint_resources_changed(m_layout_node_arena->host()))
         set_needs_accumulated_visual_contexts_update(true);
 }

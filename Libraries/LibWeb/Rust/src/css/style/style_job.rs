@@ -23,8 +23,7 @@ use crate::css::style_compute::FfiLengthResolutionContext;
 use crate::painting::ffi::FfiFlightBlocker;
 use crate::painting::recording_slot::FlightLicense;
 use crate::render_state::{
-    DocumentHost, DocumentId, RenderJob, RenderMessage, ReplyTo, SpentWait, StyleJobPermit, TaskBoundary, fly,
-    force_read, force_read_flown_style, run_job,
+    DocumentHost, RenderJob, RenderMessage, ReplyTo, SpentWait, StyleJobPermit, TaskBoundary, fly, force_read, run_job,
 };
 use std::ffi::c_void;
 use std::sync::Arc;
@@ -204,9 +203,8 @@ impl RenderJob for StyleJob {
     type Permit = StyleJobPermit;
     const IS_STYLE: bool = true;
 
-    fn message(self, document: DocumentId, reply: ReplyTo<'_, StyleJobAnswer>, spent: SpentWait) -> RenderMessage<'_> {
+    fn message(self, reply: ReplyTo<'_, StyleJobAnswer>, spent: SpentWait) -> RenderMessage<'_> {
         RenderMessage::Style {
-            document,
             job: self,
             reply,
             _spent: spent,
@@ -318,11 +316,9 @@ pub unsafe extern "C" fn style_engine_take_flown_style_transaction(
     assert!(!host.is_null(), "document host is null");
     // SAFETY: Guaranteed by the caller.
     let host = unsafe { &*host };
-    let answer = host.begin_style_drain();
-    // A read that joins the transaction spends itself on it, as on the first job it would have sent.
-    if let Some(read) = host.take_unstyled_read() {
-        force_read_flown_style(read, host);
-    }
+    // A read the host began spends itself on the transaction, as on the first job it would have sent, taking the frame
+    // in where it still flies.
+    let answer = host.begin_style_drain(host.take_unstyled_read());
     host.keep_style_transaction(answer).0.view()
 }
 
@@ -350,7 +346,7 @@ pub unsafe extern "C" fn style_engine_style_transaction_flies(host: *const Docum
     assert!(!host.is_null(), "document host is null");
     let boundary = TaskBoundary::at_event_loop_entry(&TAKES_FINISHED_STYLE_IN);
     // SAFETY: Guaranteed by the caller.
-    unsafe { &*host }.style_flies(&boundary)
+    unsafe { &*host }.frame_still_flies(&boundary)
 }
 
 /// The entry the event loop calls between two tasks to take a document's style transaction in where it has landed.

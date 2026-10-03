@@ -2211,7 +2211,7 @@ fn collect_native_custom_declarations(
         .collect()
 }
 
-fn register_element_declared_properties(
+pub(super) fn register_element_declared_properties(
     engine: &mut StyleEngine,
     node: StyleNodeID,
     kind: FfiElementDeclarationKind,
@@ -2253,22 +2253,21 @@ pub unsafe extern "C" fn style_engine_set_element_inline_style_properties(
     node: u32,
     block: *const c_void,
 ) -> bool {
+    use crate::css::declaration_block::DeclarationBlock;
+    use crate::css::property_metadata::property_defines_a_css_transition;
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return false;
+    };
     // SAFETY: Guaranteed by the caller.
-    let host = unsafe { document_host(host) };
-    with_engine(host, |engine| {
-        let Some(node) = StyleNodeID::from_raw(node) else {
-            return false;
-        };
-        let block = unsafe { block.cast::<crate::css::declaration_block::DeclarationBlock>().as_ref() };
-        let data = block.map(|block| block.data());
-        register_element_declared_properties(
-            engine,
-            node,
-            FfiElementDeclarationKind::InlineStyle,
-            data.as_ref().map_or(&[], |data| data.properties.as_slice()),
-            data.as_ref().map_or(&[], |data| data.custom_properties.as_slice()),
-        )
-    })
+    let data = unsafe { block.cast::<DeclarationBlock>().as_ref() }.map(DeclarationBlock::data);
+    let has_transitions = data.as_ref().is_some_and(|data| {
+        data.properties
+            .iter()
+            .any(|declaration| property_defines_a_css_transition(declaration.property_id))
+    });
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::engine_calls::queue(host, super::engine_calls::EngineWrite::InlineStyle { node, data }) };
+    has_transitions
 }
 
 /// Registers borrowed presentation hints and returns whether they can define transitions.

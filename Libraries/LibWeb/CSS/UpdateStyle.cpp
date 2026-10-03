@@ -1393,6 +1393,8 @@ void Document::drain_style_transaction_that_flew()
 
 void Document::update_style()
 {
+    // The host's own read: the style transaction that flew lands for it.
+    Layout::ForcedReadScope read { style_computer().style_engine().render_document().host(), false };
     drain_flown_style_transaction();
     update_selection_style_observability();
     CSS::update_style(*this);
@@ -1415,11 +1417,7 @@ bool Document::update_style_for_element(AbstractElement const& abstract_element)
 bool Document::update_style_for_element(AbstractElement const& abstract_element, StyleUpdateMode mode)
 {
     // A script API reads the element's style: its waits for the render state are one forced read.
-    auto* host = style_computer().style_engine().render_document().host();
-    Layout::RustFFI::document_host_begin_forced_read(host, true);
-    ScopeGuard end_forced_read = [&] {
-        Layout::RustFFI::document_host_end_forced_read(host);
-    };
+    Layout::ForcedReadScope read { style_computer().style_engine().render_document().host(), true };
     drain_flown_style_transaction();
     update_selection_style_observability();
     flush_throttled_animation_style_update_for_node(abstract_element.element());

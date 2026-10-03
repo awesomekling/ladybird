@@ -68,12 +68,10 @@ impl crate::render_state::RenderJob for LayoutRoundJob {
 
     fn message(
         self,
-        document: crate::render_state::DocumentId,
         reply: crate::render_state::ReplyTo<'_, LayoutRoundAnswer>,
         spent: crate::render_state::SpentWait,
     ) -> crate::render_state::RenderMessage<'_> {
         crate::render_state::RenderMessage::LayoutRound {
-            document,
             job: self,
             reply,
             _spent: spent,

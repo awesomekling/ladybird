@@ -297,10 +297,7 @@ NodeWithStyle::ImageObserver::~ImageObserver()
 void NodeWithStyle::ImageObserver::image_style_value_did_update(CSS::ImageStyleValue&)
 {
     VERIFY(m_owner);
-
     Painting::push_layer_image_paint_facts(*m_owner);
-    if (Painting::has_committed_box(*m_owner))
-        Painting::set_needs_repaint(*m_owner, InvalidateDisplayList::PaintCommands);
 }
 
 NodeWithStyle::~NodeWithStyle()

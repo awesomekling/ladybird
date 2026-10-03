@@ -38,6 +38,7 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/RenderDocument.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxModelMetrics.h>
 #include <LibWeb/Painting/BoxViews.h>
@@ -704,6 +705,9 @@ static Optional<Layout::NodeWithStyle*> prepare_computed_style_and_layout_for_pr
 {
     if (!element_exposes_computed_style(abstract_element.element()))
         return {};
+
+    // The script API's read of the render state.
+    Layout::ForcedReadScope read { abstract_element.document(), true };
 
     // NB: We grab the layout node before deciding whether update_layout() is needed.
     //     For properties that don't need layout or a layout node (the else branch below),

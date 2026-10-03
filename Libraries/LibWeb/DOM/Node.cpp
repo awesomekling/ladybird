@@ -88,6 +88,7 @@
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/Layout/RenderDocument.h>
 #include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Layout/TreeBuilderRustFFI.h>
 #include <LibWeb/MathML/MathMLElement.h>
@@ -1120,10 +1121,15 @@ void Node::insert_nodes_before(ReadonlySpan<GC::Ref<Node>> nodes, GC::Ptr<Node> 
 
     auto is_boxless_style_element = (is_html_style_element() || is_svg_style_element()) && !has_layout_box();
     if (is_connected() && !is_boxless_style_element) {
-        // NB: Called during DOM insertion, layout is not up to date.
-        if (auto* element = as_if<Element>(*this); element && element->has_style() && CSS::display_from_ffi_display(element->style_group<CSS::ComputedValues::BoxValues>()->display).is_contents() && parent_element()) {
+        // NB: Called during DOM insertion, layout is not up to date. The read of this element's style is the
+        //     insertion's own read of the render state.
+        auto is_display_contents = [&] {
+            Layout::ForcedReadScope read { document(), false };
+            auto* element = as_if<Element>(*this);
+            return element && element->has_style() && CSS::display_from_ffi_display(element->style_group<CSS::ComputedValues::BoxValues>()->display).is_contents();
+        };
+        if (parent_element() && is_display_contents())
             parent_element()->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBeforeWithDisplayContents);
-        }
         set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBefore);
         for (auto& inserted_node : nodes) {
             auto inserted_subtree_already_needs_layout_tree_update = inserted_node->needs_layout_tree_update() || inserted_node->child_needs_layout_tree_update();
@@ -1303,8 +1309,11 @@ static bool node_contributes_to_layout_tree(Node const& node)
         return true;
 
     auto const* element = as_if<Element>(node);
-    return element && element->has_style()
-        && CSS::display_from_ffi_display(element->style_group<CSS::ComputedValues::BoxValues>()->display).is_contents();
+    if (!element || !element->has_style())
+        return false;
+    // The read of the element's style is the mutation's own read of the render state.
+    Layout::ForcedReadScope read { node.document(), false };
+    return CSS::display_from_ffi_display(element->style_group<CSS::ComputedValues::BoxValues>()->display).is_contents();
 }
 
 // Which kind of box a detached child is. DOM removal reads it from the child's style; a style
@@ -1499,6 +1508,8 @@ bool Node::schedule_list_item_renumber_for_removal()
     auto* element = as_if<Element>(*this);
     if (!element)
         return false;
+    // The removal reads the element's style as its own read of the render state.
+    Layout::ForcedReadScope read { document(), false };
     auto style = element->computed_style();
     // A removed list item can renumber the list-item counter for its list owner's whole list. Removing the final item
     // from a forward counter does not change any surviving counter value.
@@ -1573,6 +1584,8 @@ void Node::detach_remaining_layout_nodes_for_removal()
     auto* arena = document().layout_node_arena_if_created();
     if (!arena)
         return;
+    // The removal pays what detaching the boxes owes the host as it goes, which is its own read of the render state.
+    Layout::ForcedReadScope read { arena->host(), false };
     for_each_shadow_including_inclusive_descendant([&](Node& node) {
         // The node's boxes, its pseudo-elements' and its top layer placement, are found by the node's StyleNodeID.
         Layout::RustFFI::render_state_detach_remaining_rows_for_removal(arena->host(), Layout::Node::style_node_of(&node).value());
@@ -2104,6 +2117,8 @@ WebIDL::ExceptionOr<void> Node::move_node(Node& new_parent, Node* child)
         }
     }
     if (is_connected()) {
+        // The read of the moved subtree's marks is the move's own read of the render state.
+        Layout::ForcedReadScope read { document(), false };
         auto moved_subtree_already_needs_layout_tree_update = needs_layout_tree_update() || child_needs_layout_tree_update();
         set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBefore);
         new_parent.set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBefore);
@@ -2618,7 +2633,11 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
     //     incremental changes cannot narrow it again. The arena folds both, and answers whether
     //     this mark was a transition, which is what the widenings below hang off.
     auto* marks = value ? document().layout_node_arena().host() : layout_tree_update_marks_of(document());
-    if (!marks || !Layout::RustFFI::render_state_merge_layout_tree_update_mark(marks, identity.value(), value, reuse_reason))
+    if (!marks)
+        return;
+    // The mark is folded into those already there as the mark's own read of the render state.
+    Layout::ForcedReadScope read { marks, false };
+    if (!Layout::RustFFI::render_state_merge_layout_tree_update_mark(marks, identity.value(), value, reuse_reason))
         return;
 
     if constexpr (UPDATE_LAYOUT_DEBUG) {

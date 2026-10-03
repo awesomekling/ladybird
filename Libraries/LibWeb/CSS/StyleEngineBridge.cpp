@@ -237,6 +237,8 @@ StyleAtomID StyleEngine::intern_atom(Utf16FlyString const& name)
         Utf16FlyString::unref_raw(raw);
         return atom.release_value();
     }
+    // The engine owns the atom table, so a new atom is the host's own read of the render state.
+    Layout::ForcedReadScope read { host(), false };
     auto atom = StyleAtomID { StyleEngineFFI::style_engine_intern_atom(host(), raw) };
     m_atoms.set(raw, atom);
     return atom;

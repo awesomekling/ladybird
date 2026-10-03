@@ -44,6 +44,7 @@
 #include <LibWeb/HTML/NavigableContainer.h>
 #include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
+#include <LibWeb/Layout/RenderDocument.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/SVG/SVGGraphicsElement.h>
@@ -1962,6 +1963,8 @@ bool stop_sharing_compiled_style_sheet(StyleSheetState& sheet)
 // position it holds there.
 static void record_style_rule_inserted_in(u64 identity, bool changes_environment, StyleSheetState& sheet, DOM::Document& document)
 {
+    // The edit compiles into the document's style engine as its own read of the render state.
+    Layout::ForcedReadScope read { document, false };
     document.flush_deferred_style_change_event();
     auto& style_computer = document.style_computer();
     auto sheet_id = style_computer.style_engine_sheet_id_for(sheet);
@@ -2025,6 +2028,8 @@ void record_style_rule_removed(StyleSheetState& sheet_it_left, RustRule const& r
     if (stop_sharing_compiled_style_sheet(sheet_it_left))
         return;
     for_each_document_with_engine_copy(sheet_it_left, [&](DOM::Document& document) {
+        // The edit compiles into the document's style engine as its own read of the render state.
+        Layout::ForcedReadScope read { document, false };
         document.flush_deferred_style_change_event();
         auto& style_computer = document.style_computer();
         struct RemovalContext {
@@ -2066,6 +2071,8 @@ void record_style_rule_selector_changed(CSSStyleRule& rule)
         return;
 
     for_each_document_with_engine_copy(*sheet, [&](DOM::Document& document) {
+        // The edit compiles into the document's style engine as its own read of the render state.
+        Layout::ForcedReadScope read { document, false };
         document.flush_deferred_style_change_event();
         auto& style_computer = document.style_computer();
         auto sheet_id = style_computer.style_engine_sheet_id_for(*sheet);
@@ -2090,6 +2097,8 @@ void record_style_rule_declarations_changed(RustRule const& rule, StyleSheetStat
         return;
 
     for_each_document_with_engine_copy(*sheet, [&](DOM::Document& document) {
+        // The edit compiles into the document's style engine as its own read of the render state.
+        Layout::ForcedReadScope read { document, false };
         document.flush_deferred_style_change_event();
         struct ChangeContext {
             GC::Ref<DOM::Document> document;
@@ -2113,6 +2122,8 @@ void record_stylesheet_rules_replaced(StyleSheetState& sheet)
     if (stop_sharing_compiled_style_sheet(sheet))
         return;
     for_each_document_with_engine_copy(sheet, [&](DOM::Document& document) {
+        // The edit compiles into the document's style engine as its own read of the render state.
+        Layout::ForcedReadScope read { document, false };
         document.flush_deferred_style_change_event();
         auto& style_computer = document.style_computer();
         auto sheet_id = style_computer.style_engine_sheet_id_for(sheet);
@@ -2128,6 +2139,8 @@ void record_stylesheet_rules_replaced(StyleSheetState& sheet)
 
 void record_stylesheet_attached(StyleSheetState& sheet, DOM::Node& document_or_shadow_root, StyleSheetState* before)
 {
+    // The attachment compiles into the document's style engine as its own read of the render state.
+    Layout::ForcedReadScope read { document_or_shadow_root.document(), false };
     document_or_shadow_root.document().flush_deferred_style_change_event();
     // The attachment may compile the sheet's rules into a shared snapshot, whose native sheet they then name.
     document_or_shadow_root.document().note_style_sheet_set_change();
@@ -2304,6 +2317,8 @@ void record_stylesheet_rule_conditions(StyleSheetState& sheet, DOM::Document& do
     // Imported rules inherit the conditions of every enclosing import. Starting at an imported
     // sheet would lose those gates and could re-enable rules beneath a non-matching import.
     MediaEnvironmentSnapshot environment { document };
+    // The rules' conditions are published as the host's own read of the render state.
+    Layout::ForcedReadScope read { document, false };
     Parser::ValueParserFFI::rust_style_sheet_publish_conditions(
         engine_sheet->native_sheet().handle(), style_computer.style_engine().host(), environment.ffi_environment());
 }

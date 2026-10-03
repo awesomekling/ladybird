@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! What the host keeps of a document's render state.
+//! What the host keeps of a document's render state, and the frame that owns the state.
 
 use super::questions::Question;
+use super::wait::{HostRead, force_read_flown_style};
 use super::{
-    ArenaChange, ChangeQueue, CommittedRows, CreatedState, DocumentId, ForcedRead, LockstepProof, NoFrameInFlight,
-    QueuedChanges, RenderMessage, RenderWait, ScriptForcedRead, ask, send, wait_for_render_state,
+    ArenaChange, ChangeQueue, CommittedRows, ForcedRead, Landing, NoFrameInFlight, RenderState, RenderWait,
+    ScriptForcedRead, on_render_side,
 };
 use crate::css::style::bridge::FfiDeviceClass;
 use crate::css::style::style_job::{FfiFlownStyleDrain, StyleJobAnswer};
@@ -21,18 +22,20 @@ use crate::painting::recording_slot::RecordingSlot;
 use crate::painting::visual_animation::VisualAnimation;
 use crate::render_state::TaskBoundary;
 use crate::stage_thread::InFlight;
-use std::cell::{Cell, OnceCell, RefCell, RefMut};
+use std::cell::{Cell, RefCell, RefMut, UnsafeCell};
 use std::rc::Rc;
-use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-/// The host's side of one document's render state: the document's name, the host tables the host answers layout
-/// through, and what the document keeps of its display list recordings, which are made on the host's thread from the
-/// frame the render state publishes. The host's document owns it, and it lives on the host's thread.
+/// The host's side of one document's render state: the frame that owns the state, the host tables the host answers
+/// layout through, and what the document keeps of its display list recordings, which are made on the host's thread
+/// from the frame the render state publishes. The host's document owns it, and it lives on the host's thread.
 ///
 /// The host's entries call into each other, so it is only ever shared: everything a call may change sits in a cell, and
 /// the rows are handed out by reference count, so a call that publishes them again frees none an outer call still reads.
 pub struct DocumentHost {
-    document: DocumentId,
+    /// The document's render state, here or flying.
+    frame: RefCell<Frame>,
     host_tables: HostTables,
     recording: RefCell<RecordingSlot>,
     /// The rows the render state published last, which the host reads between messages.
@@ -42,10 +45,8 @@ pub struct DocumentHost {
     /// The absolute rects the host's reads of the rows computed, kept for as long as the geometry they were computed
     /// from stays.
     absolute_rects: RefCell<AbsoluteRectMemo>,
-    /// What the host keeps of the document's render state once it is made: the arena, whose rows version tells the host
-    /// whether the rows it has still read as the arena's after a change the host applied where it is, the style engine
-    /// the host's style entries reach, and whether any element has had random base values.
-    state: OnceCell<CreatedState>,
+    /// The flag the render state raises once any element has random base values, and never lowers.
+    element_random_base_values_exist: Arc<AtomicBool>,
     /// The compositor animations the document's effects published in the current update pass, which the host hands
     /// the render state as the pass ends.
     compositor_animations: RefCell<Vec<VisualAnimation>>,
@@ -53,18 +54,25 @@ pub struct DocumentHost {
     forced_read: RefCell<BegunRead>,
     /// The writes the host queued that the render state has not applied yet, in the order the host made them.
     changes: ChangeQueue,
-    /// The style transaction the host let fly beside it, until the host has drained its reactions.
-    style_flight: RefCell<Option<StyleFlight>>,
+    /// The style transaction that flew with the frame, from its landing until the host has drained its reactions.
+    flown_style: RefCell<Option<FlownStyle>>,
     /// How the host's document drains the style transaction that flew, until a drain begins. The document drains it
     /// only where it has not begun to.
     flown_style_drain: Cell<Option<FfiFlownStyleDrain>>,
 }
 
-/// A style transaction of the host's document that runs beside the host, has landed, or whose reactions the host
-/// drains. The style writes the host queued beside it reach the render state only behind its drain.
-enum StyleFlight {
-    /// The transaction flies with the buffer of the writes it took, which the host's queue gets back once it lands.
-    Flying(InFlight<(StyleJobAnswer, Vec<ArenaChange>)>),
+/// Where a document's render state is: here, where the host lends it to the messages it waits for, or flying, moved
+/// into the job of a frame that runs beside the host. Only a forced read, which may wait, or a task boundary, which
+/// waits for nothing, takes a flying frame in again.
+enum Frame {
+    /// The state is here, lent to the host's questions and messages (see [`DocumentHost::with_state`]).
+    Here(UnsafeCell<RenderState>),
+    Flying(InFlight<Landing>),
+}
+
+/// A style transaction that flew with the frame and has landed, or whose reactions the host drains. The style writes the
+/// host queued beside it reach the render state only behind its drain.
+enum FlownStyle {
     Landed(StyleJobAnswer),
     /// The host drains the transaction's reactions, holding the writes it queued beside the transaction until the drain
     /// ends.
@@ -80,31 +88,27 @@ struct BegunRead {
 }
 
 impl DocumentHost {
-    fn new(document: DocumentId) -> Self {
+    fn new(state: RenderState) -> Self {
         Self {
-            document,
+            element_random_base_values_exist: state.engine_ref().element_random_base_values_exist(),
+            frame: RefCell::new(Frame::Here(UnsafeCell::new(state))),
             host_tables: HostTables::default(),
             recording: RefCell::default(),
             rows: RefCell::default(),
             style_transaction: RefCell::default(),
             absolute_rects: RefCell::default(),
-            state: OnceCell::new(),
             compositor_animations: RefCell::default(),
             forced_read: RefCell::default(),
             changes: ChangeQueue::default(),
-            style_flight: RefCell::default(),
+            flown_style: RefCell::default(),
             flown_style_drain: Cell::new(None),
         }
     }
 
-    /// A host with no render state, for a unit test.
+    /// A host with a render state, for a unit test.
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
-        Self::new(DocumentId::default())
-    }
-
-    pub(crate) fn document(&self) -> DocumentId {
-        self.document
+        Self::new(RenderState::new(FfiDeviceClass::ForegroundDesktop))
     }
 
     pub(crate) fn host_tables(&self) -> &HostTables {
@@ -118,12 +122,17 @@ impl DocumentHost {
         self.changes.push(change);
     }
 
-    /// Lends the writes the host queued to `apply`, for the render side to apply ahead of the host's next message, once
-    /// the frame in flight has landed. A style write queued beside a style transaction that flew stays queued, behind the
-    /// drain of the transaction's reactions, which it is the next transaction's input to.
-    pub(super) fn drain_queued_changes(&self, apply: impl FnOnce(QueuedChanges<'_>)) {
-        let landed = self.take_frame_in();
-        self.changes.drain(landed, self.document, self.has_flown_style(), apply);
+    /// Takes the frame in flight in with `read`, or the read the host began, and lends the writes the host queued to
+    /// `apply`, for the render state to apply ahead of the host's next message or question. A style write queued beside
+    /// a style transaction that flew stays queued, behind the drain of the transaction's reactions, which it is the next
+    /// transaction's input to.
+    pub(super) fn drain_queued_changes<R>(
+        &self,
+        read: Option<ForcedRead>,
+        apply: impl FnOnce(std::vec::Drain<'_, ArenaChange>) -> R,
+    ) -> R {
+        let landed = self.take_frame_in(read);
+        self.changes.drain(landed, self.has_flown_style(), apply)
     }
 
     /// Takes the writes the host queued, for a style transaction that flies with them to the render side.
@@ -135,70 +144,95 @@ impl DocumentHost {
         self.changes.take()
     }
 
-    /// Lets `flight`, a style transaction of the document's, fly beside the host until the host drains its reactions with
-    /// `drain`.
-    pub(super) fn let_style_fly(
-        &self,
-        flight: InFlight<(StyleJobAnswer, Vec<ArenaChange>)>,
-        drain: FfiFlownStyleDrain,
-    ) {
-        self.flown_style_drain.set(Some(drain));
-        let previous = self.style_flight.borrow_mut().replace(StyleFlight::Flying(flight));
-        debug_assert!(
-            previous.is_none(),
-            "one style transaction of a document flies at a time"
-        );
+    /// Runs `reach` on the document's render state, which the host has here: only [`Self::drain_queued_changes`] takes a
+    /// flying frame in, so every reach of the state comes after it. The frame neither flies nor lands while the reach
+    /// runs. A host callback the reach makes may reach the state again, as a layout round's read of an element's style
+    /// does, which reaches the same state.
+    pub(super) fn with_state<R>(&self, reach: impl FnOnce(&mut RenderState) -> R) -> R {
+        let frame = self.frame.borrow();
+        let Frame::Here(state) = &*frame else {
+            panic!("the host reaches its document's render state only once the frame is taken in");
+        };
+        // SAFETY: The state stays here while the frame is borrowed. A reach inside this one comes from a host callback
+        // this reach makes, which reaches the state only between this reach's own uses of it.
+        reach(unsafe { &mut *state.get() })
     }
 
-    /// Takes the frame in flight in, waiting for it to land: the host reaches the document's render state, where it
-    /// is or with a message, only behind it. A frame in flight unsettles the host's queue, so a question the host
+    /// Moves the document's render state into the job `flight` submits with it, and lets the frame fly beside the host
+    /// until the host drains the reactions of the style transaction it flies with, with `drain`.
+    pub(super) fn let_frame_fly(
+        &self,
+        drain: FfiFlownStyleDrain,
+        flight: impl FnOnce(RenderState) -> InFlight<Landing>,
+    ) {
+        self.flown_style_drain.set(Some(drain));
+        replace_frame(&mut self.frame.borrow_mut(), |frame| match frame {
+            Frame::Here(state) => Frame::Flying(flight(state.into_inner())),
+            Frame::Flying(_) => panic!("one frame of a document flies at a time"),
+        });
+    }
+
+    /// Takes the frame in flight in, where one flies, waiting for it to land, spending `read`, or the read the host
+    /// began: only a forced read waits for a frame. A frame in flight unsettles the host's queue, so a question the host
     /// answers in place comes here only where the queue is not settled.
     #[inline]
-    fn take_frame_in(&self) -> NoFrameInFlight {
-        if matches!(*self.style_flight.borrow(), Some(StyleFlight::Flying(_))) {
-            self.land_flying_style();
+    fn take_frame_in(&self, read: Option<ForcedRead>) -> NoFrameInFlight {
+        if self.frame_flies() {
+            self.land_flying_frame(read);
         }
         NoFrameInFlight(())
     }
 
-    /// Waits for the style transaction that flies to land, and takes it in.
     #[cold]
-    fn land_flying_style(&self) {
-        let mut flight = self.style_flight.borrow_mut();
-        let Some(StyleFlight::Flying(flying)) = flight.take() else {
-            unreachable!("a style transaction flies");
-        };
-        let (answer, buffer) = flying.join(LockstepProof::for_reason(&HOST_REACHES_FRAME_IN_FLIGHT));
-        self.changes.give_back(buffer);
-        *flight = Some(StyleFlight::Landed(answer));
+    fn land_flying_frame(&self, read: Option<ForcedRead>) {
+        let read = read
+            .or_else(|| self.take_forced_read())
+            .expect("the host takes a frame in flight in only in a read it began");
+        force_read_flown_style(read, self);
     }
 
-    /// Whether the document's style transaction still flies, where it has not landed: one that has is taken in. The
-    /// event loop asks between two tasks, so this never waits.
-    pub(crate) fn style_flies(&self, boundary: &TaskBoundary) -> bool {
-        let mut flight = self.style_flight.borrow_mut();
-        let Some(StyleFlight::Flying(flying)) = flight.take_if(|flight| matches!(flight, StyleFlight::Flying(_)))
-        else {
-            return false;
-        };
-        let (landed, flies) = match flying.try_take(boundary) {
-            Ok((answer, buffer)) => {
-                self.changes.give_back(buffer);
-                (StyleFlight::Landed(answer), false)
-            }
-            Err(flying) => (StyleFlight::Flying(flying), true),
-        };
-        *flight = Some(landed);
-        flies
+    /// Lands the frame in flight, waiting for it, spending `read`: the render state is here again, and the style
+    /// transaction that flew with it waits to be drained.
+    pub(super) fn land(&self, read: ForcedRead) {
+        replace_frame(&mut self.frame.borrow_mut(), |frame| match frame {
+            Frame::Flying(flight) => self.landed(flight.join(read)),
+            here @ Frame::Here(_) => here,
+        });
+    }
+
+    fn landed(&self, Landing { state, style, changes }: Landing) -> Frame {
+        self.changes.give_back(changes);
+        let previous = self.flown_style.borrow_mut().replace(FlownStyle::Landed(style));
+        debug_assert!(
+            previous.is_none(),
+            "one style transaction of a document flies at a time"
+        );
+        Frame::Here(UnsafeCell::new(state))
+    }
+
+    /// Whether the document's frame flies.
+    pub(crate) fn frame_flies(&self) -> bool {
+        matches!(*self.frame.borrow(), Frame::Flying(_))
+    }
+
+    /// Whether the document's frame still flies, where it has not landed: one that has is taken in. The event loop asks
+    /// between two tasks, so this never waits.
+    pub(crate) fn frame_still_flies(&self, boundary: &TaskBoundary) -> bool {
+        let mut frame = self.frame.borrow_mut();
+        replace_frame(&mut frame, |frame| match frame {
+            Frame::Flying(flight) => match flight.try_take(boundary) {
+                Ok(landing) => self.landed(landing),
+                Err(flight) => Frame::Flying(flight),
+            },
+            here @ Frame::Here(_) => here,
+        });
+        matches!(*frame, Frame::Flying(_))
     }
 
     /// Whether the host let a style transaction fly whose reactions it has not begun to drain.
     #[inline]
     pub(crate) fn has_flown_style(&self) -> bool {
-        matches!(
-            *self.style_flight.borrow(),
-            Some(StyleFlight::Flying(_) | StyleFlight::Landed(_))
-        )
+        self.frame_flies() || matches!(*self.flown_style.borrow(), Some(FlownStyle::Landed(_)))
     }
 
     /// Has the document drain the style transaction that flew, where it has not begun to, for a write to the document's
@@ -211,46 +245,42 @@ impl DocumentHost {
         }
     }
 
-    /// Takes what the style transaction the host let fly answered, waiting for it to land, for the host to drain its
-    /// reactions. The writes the host queued beside the transaction wait for the drain to end.
-    pub(crate) fn begin_style_drain(&self) -> StyleJobAnswer {
+    /// Takes what the style transaction that flew answered, for the host to drain its reactions, once `read`, or the
+    /// read the host began, took the frame in. The writes the host queued beside the transaction wait for the drain to
+    /// end.
+    pub(crate) fn begin_style_drain(&self, read: Option<ForcedRead>) -> StyleJobAnswer {
         self.flown_style_drain.set(None);
-        self.take_frame_in();
-        let mut flight = self.style_flight.borrow_mut();
-        let Some(StyleFlight::Landed(answer)) = flight.take() else {
+        self.take_frame_in(read);
+        let mut flown = self.flown_style.borrow_mut();
+        let Some(FlownStyle::Landed(answer)) = flown.take() else {
             panic!("the host drains a style transaction that flew and has landed");
         };
-        *flight = Some(StyleFlight::Draining(self.changes.hold_style_writes()));
+        *flown = Some(FlownStyle::Draining(self.changes.hold_style_writes()));
         answer
     }
 
     /// Ends the drain of the style transaction that flew: the writes the host queued beside it are queued again, behind
     /// what the drain wrote.
     pub(crate) fn end_style_drain(&self) {
-        let Some(StyleFlight::Draining(beside)) = self.style_flight.borrow_mut().take() else {
+        let Some(FlownStyle::Draining(beside)) = self.flown_style.borrow_mut().take() else {
             panic!("the host ends the drain it began");
         };
         self.changes.requeue(beside);
     }
 
     /// Applies the writes the host queued to the document's render state, where the host is, for a read the host
-    /// answers itself, once the frame in flight has landed. Only a read that spends a wait may: the render side waits
-    /// for the host meanwhile. A settled queue has neither, which is all the read tests.
+    /// answers itself, taking the frame in flight in first with `wait` where it is a forced read. A settled queue has
+    /// neither, which is all the read tests.
     #[inline]
-    fn apply_queued_changes(&self, _wait: &impl RenderWait) {
+    fn apply_queued_changes(&self, wait: impl RenderWait) {
         if !self.changes.is_settled() {
-            self.settle_queued_changes();
+            self.settle_queued_changes(wait.into_forced_read());
         }
     }
 
     #[inline(never)]
-    fn settle_queued_changes(&self) {
-        let state = self.created_state();
-        self.drain_queued_changes(|changes| {
-            // SAFETY: The state keeps its arena and engine where they are until it is destroyed, and nothing on the
-            // render side reaches them while the host waits.
-            unsafe { changes.apply((*state.arena.as_ptr()).arena_mut(), state.engine) };
-        });
+    fn settle_queued_changes(&self, read: Option<ForcedRead>) {
+        self.drain_queued_changes(read, |changes| self.with_state(|state| state.apply(changes)));
     }
 
     /// Begins a read of the document's render state that the host waits for, for a script API call where `by_script`
@@ -264,7 +294,7 @@ impl DocumentHost {
         begun.read = Some(if by_script {
             ForcedRead::Script(ScriptForcedRead::at_script_entry(&FORCED_READ_SCOPE))
         } else {
-            ForcedRead::Host(LockstepProof::for_reason(&HOST_READS_LAYOUT))
+            ForcedRead::Host(HostRead::begun())
         });
     }
 
@@ -303,37 +333,26 @@ impl DocumentHost {
 
     /// Whether some element may have random base values to keep, which only then is worth asking the render state.
     pub(crate) fn element_random_base_values_may_exist(&self) -> bool {
-        self.state
-            .get()
-            .is_some_and(|state| state.element_random_base_values_exist.load(Ordering::Relaxed))
+        self.element_random_base_values_exist.load(Ordering::Relaxed)
     }
 
     /// The arena of the document's render state, for a unit test that writes it directly.
     #[cfg(test)]
     pub(crate) fn arena_for_test(&self) -> *mut crate::layout::LayoutNodeArena {
-        self.created_state().arena.as_ptr().cast()
+        self.with_state(|state| std::ptr::from_mut(state.arena.arena_mut()))
     }
 
     /// Answers `question` from the document's render state as of every write the host queued, where the host is,
     /// spending `wait`.
-    pub(super) fn answer_in_place<Q: Question>(&self, wait: &impl RenderWait, question: Q) -> Q::Answer {
+    pub(super) fn answer_in_place<Q: Question>(&self, wait: impl RenderWait, question: Q) -> Q::Answer {
         self.apply_queued_changes(wait);
-        let state = self.created_state();
-        // SAFETY: The state keeps its arena and engine where they are until it is destroyed, and nothing on the render
-        // side reaches them while the host runs.
-        unsafe { question.answer((*state.arena.as_ptr()).arena_mut(), state.engine) }
-    }
-
-    fn created_state(&self) -> &CreatedState {
-        self.state
-            .get()
-            .expect("the host of a live document has a render state")
+        self.with_state(|state| state.answer(question))
     }
 
     /// The rows the render state published last, unless the host wrote them since, or none were published yet.
     #[cfg(test)]
     pub(crate) fn rows(&self) -> Option<Rc<RowSnapshot>> {
-        self.apply_queued_changes(&ScriptForcedRead::for_test());
+        self.apply_queued_changes(ScriptForcedRead::for_test());
         self.rows
             .borrow()
             .clone()
@@ -343,10 +362,7 @@ impl DocumentHost {
     /// Whether `rows` read as the arena does now, once the writes the host queued are applied. The arena's rows version
     /// moves with every write to the rows, queued or direct, and with nothing else.
     fn still_reads_as_arena(&self, rows: &RowSnapshot) -> bool {
-        // SAFETY: The arena lives as long as the document's render state, which outlives its host's reads.
-        self.state
-            .get()
-            .is_none_or(|state| rows.reads_as(unsafe { state.arena.as_ref() }.arena().rows_version()))
+        self.with_state(|state| rows.reads_as(state.arena.arena().rows_version()))
     }
 
     /// The rows as of every change the host queued, which the render state publishes again first where the ones the
@@ -359,7 +375,7 @@ impl DocumentHost {
     /// the rows it has where no write since changed them, as installing a style does not, and otherwise from rows the
     /// render state publishes again first, spending `wait`.
     pub(crate) fn row_identities(&self, wait: impl RenderWait) -> RowIdentities {
-        self.apply_queued_changes(&wait);
+        self.apply_queued_changes(wait);
         if let Some(rows) = self
             .rows
             .borrow()
@@ -368,16 +384,13 @@ impl DocumentHost {
         {
             return RowIdentities::of(Rc::clone(rows));
         }
-        RowIdentities::of(self.rows_as_of_writes(wait, false))
+        RowIdentities::of(self.rows_here(false))
     }
 
     /// Whether what each row of `rows` is, and the row each node is bound to, read as the arena's do now (see
     /// [`Self::still_reads_as_arena`]).
     fn identities_still_read_as_arena(&self, rows: &RowSnapshot) -> bool {
-        // SAFETY: The arena lives as long as the document's render state, which outlives its host's reads.
-        self.state
-            .get()
-            .is_none_or(|state| rows.reads_identity_as(unsafe { state.arena.as_ref() }.arena().rows_identity_version()))
+        self.with_state(|state| rows.reads_identity_as(state.arena.arena().rows_identity_version()))
     }
 
     /// Like [`Self::fresh_rows`], with every row's scrollable overflow measured, as a read of overflow needs.
@@ -398,13 +411,18 @@ impl DocumentHost {
     }
 
     fn rows_as_of_writes(&self, wait: impl RenderWait, measure_overflow: bool) -> Rc<RowSnapshot> {
-        self.apply_queued_changes(&wait);
+        self.apply_queued_changes(wait);
+        self.rows_here(measure_overflow)
+    }
+
+    /// The rows as of the render state here, which has applied every write the host queued.
+    fn rows_here(&self, measure_overflow: bool) -> Rc<RowSnapshot> {
         let usable =
             |rows: &RowSnapshot| self.still_reads_as_arena(rows) && (!measure_overflow || rows.overflow_is_measured());
         if let Some(rows) = self.rows.borrow().as_ref().filter(|rows| usable(rows)) {
             return Rc::clone(rows);
         }
-        let rows = Rc::new(ask(wait, self, CommittedRows { measure_overflow }));
+        let rows = Rc::new(self.with_state(|state| state.answer(CommittedRows { measure_overflow })));
         *self.rows.borrow_mut() = Some(Rc::clone(&rows));
         rows
     }
@@ -459,17 +477,8 @@ pub extern "C" fn document_host_create(device_class: u8) -> *mut DocumentHost {
         0 => FfiDeviceClass::ForegroundDesktop,
         _ => panic!("unknown device class {device_class}"),
     };
-    let document = DocumentId::mint();
-    let host = Box::new(DocumentHost::new(document));
-    let created = wait_for_render_state(LockstepProof::for_reason(&NEW_DOCUMENT), &host, |reply| {
-        RenderMessage::Create {
-            document,
-            device_class,
-            reply,
-        }
-    });
-    assert!(host.state.set(created).is_ok(), "a document has one render state");
-    Box::into_raw(host)
+    let state = on_render_side(move || RenderState::new(device_class));
+    Box::into_raw(Box::new(DocumentHost::new(state)))
 }
 
 /// A document host with a render state, for a unit test, which destroys both when it is dropped.
@@ -489,7 +498,7 @@ impl TestHost {
     /// The style engine of the host's document, which the test reaches between the host's calls.
     pub(crate) fn engine(&self) -> crate::css::style::StyleEngineHandle {
         // SAFETY: The host lives until the test host is dropped.
-        unsafe { &*self.0 }.created_state().engine
+        unsafe { &*self.0 }.with_state(|state| state.engine)
     }
 }
 
@@ -501,13 +510,6 @@ impl Drop for TestHost {
     }
 }
 
-/// The reason a new document's host waits for its render state: it keeps where the state's arena and style engine are.
-pub(crate) struct NewDocument {
-    _private: (),
-}
-
-const NEW_DOCUMENT: NewDocument = NewDocument { _private: () };
-
 /// Marks the scope of a read of a document's render state that a script API call begins, which mints the call's
 /// forced read.
 pub(crate) struct ForcedReadScope {
@@ -515,22 +517,6 @@ pub(crate) struct ForcedReadScope {
 }
 
 const FORCED_READ_SCOPE: ForcedReadScope = ForcedReadScope { _private: () };
-
-/// The reason the host waits for its document's frame in flight: it reaches the document's render state, which the
-/// frame's job holds until it lands.
-pub(crate) struct HostReachesFrameInFlight {
-    _private: (),
-}
-
-const HOST_REACHES_FRAME_IN_FLIGHT: HostReachesFrameInFlight = HostReachesFrameInFlight { _private: () };
-
-/// The reason the host waits for its document's render state in a read of its own, for no script API call: an event's
-/// dispatch, a child document's style update, an inspection, a rendering update.
-pub(crate) struct HostReadsLayout {
-    _private: (),
-}
-
-const HOST_READS_LAYOUT: HostReadsLayout = HostReadsLayout { _private: () };
 
 /// Begins a read of the render state of `host`'s document that the host waits for, for a script API call where
 /// `by_script` and for the host's own read otherwise. The read's first style or layout job spends it.
@@ -569,16 +555,36 @@ pub unsafe extern "C" fn document_host_destroy(host: *mut DocumentHost) {
     assert!(!host.is_null(), "document host is null");
     // SAFETY: Guaranteed by the caller.
     let host = unsafe { Box::from_raw(host) };
-    // The render state goes first: freeing its rows may still answer to the host.
-    send(
-        &host,
-        RenderMessage::Destroy {
-            document: host.document,
-        },
-    );
+    // The document's teardown is the host's own read: a frame in flight lands first, and what it brought back for the
+    // host goes unpaid, as the host made nothing of it yet.
+    host.take_frame_in(Some(ForcedRead::Host(HostRead::begun())));
+    let DocumentHost { frame, host_tables, .. } = *host;
+    let Frame::Here(state) = frame.into_inner() else {
+        unreachable!("the frame was taken in above");
+    };
+    let state = state.into_inner();
+    on_render_side(move || state.retire());
     assert_eq!(
-        host.host_tables.shells.borrow().len(),
+        host_tables.shells.borrow().len(),
         0,
         "document host destroyed with layout nodes"
     );
+}
+
+/// Replaces `frame` with what `turn` makes of it. A frame that cannot be turned leaves the document without a render
+/// state, which nothing can go on over.
+fn replace_frame(frame: &mut Frame, turn: impl FnOnce(Frame) -> Frame) {
+    struct Abort;
+    impl Drop for Abort {
+        fn drop(&mut self) {
+            super::render_state_died();
+        }
+    }
+    let abort = Abort;
+    // SAFETY: The frame is read out once, and written back before anything reads it again: a panic in between aborts.
+    unsafe {
+        let turned = turn(std::ptr::read(frame));
+        std::ptr::write(frame, turned);
+    }
+    std::mem::forget(abort);
 }

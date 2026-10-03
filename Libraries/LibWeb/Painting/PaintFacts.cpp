@@ -258,15 +258,20 @@ static void note_box_paint_facts(Layout::Node const& layout_node, PaintFactsFami
         apply_paint_facts(layout_node, families);
 }
 
-void push_layer_image_paint_facts(Layout::NodeWithStyle const& layout_node)
+void push_layer_image_paint_facts(Layout::NodeWithStyle& layout_node)
 {
-    note_box_paint_facts(layout_node, PaintFactsFamily::LayerImages);
+    layout_node.document().invalidation_journal().note_box_image_changed(layout_node, PaintFactsFamily::LayerImages, InvalidateDisplayList::PaintCommands);
 }
 
-void push_replaced_image_paint_facts(Layout::Node const& layout_node)
+void push_replaced_image_paint_facts(Layout::Node& layout_node)
 {
     if (paints_replaced_image_from_facts(layout_node))
-        note_box_paint_facts(layout_node, PaintFactsFamily::ReplacedImage);
+        layout_node.document().invalidation_journal().note_box_image_changed(layout_node, PaintFactsFamily::ReplacedImage, InvalidateDisplayList::No);
+}
+
+void push_replaced_image_paint_facts(DOM::Element const& element)
+{
+    note_paint_facts(element, PaintFactsFamily::ReplacedImage);
 }
 
 void push_video_paint_facts(HTML::HTMLVideoElement const& video_element)

@@ -143,12 +143,11 @@ const HOST_PAINT_STEP: HostPaintStep = HostPaintStep { _private: () };
 
 /// Runs `pass` on the render state of `host`'s document, and answers what it answered.
 pub(crate) fn run(host: &DocumentHost, pass: PaintPass) -> PaintPassAnswer {
-    let document = host.document();
     if pass.rewrites_rows() {
         host.let_go_of_rows();
     }
     wait_for_render_state(LockstepProof::for_reason(&HOST_PAINT_STEP), host, |reply| {
-        RenderMessage::Paint { document, pass, reply }
+        RenderMessage::Paint { pass, reply }
     })
 }
 

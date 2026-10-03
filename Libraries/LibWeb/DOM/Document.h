@@ -202,6 +202,7 @@ enum class UpdateLayoutReason {
 }
 
 [[nodiscard]] Utf16View to_string(UpdateLayoutReason);
+[[nodiscard]] bool reason_is_script_api(UpdateLayoutReason);
 
 #define ENUMERATE_PARTIAL_RELAYOUT_ESCAPE_REASONS(X) \
     X(AnchorNamesUnregisteredByElementRemoval)       \

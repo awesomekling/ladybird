@@ -108,9 +108,22 @@ void Document::update_layout(UpdateLayoutReason reason)
     update_layout(reason, ThrottledAnimationSamplingScope::Document);
 }
 
+}
+
+namespace Web::Layout {
+
+ForcedReadScope::ForcedReadScope(DOM::Document const& document, bool by_script)
+    : ForcedReadScope(document.style_computer().style_engine().render_document().host(), by_script)
+{
+}
+
+}
+
+namespace Web::DOM {
+
 // Whether a script API names the reason: a read of render state for it is then the script call's forced read, and
 // otherwise the host's own.
-static bool reason_is_script_api(UpdateLayoutReason reason)
+bool reason_is_script_api(UpdateLayoutReason reason)
 {
     switch (reason) {
     case UpdateLayoutReason::DocumentElementFromPoint:
@@ -193,11 +206,7 @@ void Document::update_layout(UpdateLayoutReason reason, ThrottledAnimationSampli
 {
     // The update's waits for the render state are one read, which its first style or layout job spends. An update
     // inside a read already begun for this document belongs to that read.
-    auto* host = style_computer().style_engine().render_document().host();
-    Layout::RustFFI::document_host_begin_forced_read(host, reason_is_script_api(reason));
-    ScopeGuard end_forced_read = [&] {
-        Layout::RustFFI::document_host_end_forced_read(host);
-    };
+    Layout::ForcedReadScope read { style_computer().style_engine().render_document().host(), reason_is_script_api(reason) };
     drain_flown_style_transaction();
 
     // An image box that owns its image's provider is handed it once the layout update that built the box is over, and

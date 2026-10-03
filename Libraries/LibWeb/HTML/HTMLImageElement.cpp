@@ -47,9 +47,11 @@
 #include <LibWeb/HTML/SupportedImageTypes.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Layout/Box.h>
+#include <LibWeb/Layout/RenderDocument.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/PaintFacts.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/Platform/ImageCodecPlugin.h>
 #include <LibWeb/SVG/SVGDecodedImageData.h>
@@ -132,6 +134,8 @@ void HTMLImageElement::set_needs_layout_update_or_repaint_after_image_data_chang
     CSS::record_element_replaced_content_input(*this);
     update_alt_text_shadow_tree();
 
+    // Which box the image has is the host's own read of the render state.
+    Layout::ForcedReadScope read { document(), false };
     auto layout_node = unsafe_layout_node();
     auto* image_box = layout_node && layout_node->kind() == Layout::RustFFI::NodeKind::ImageBox ? static_cast<Layout::Box*>(layout_node) : nullptr;
 
@@ -145,21 +149,16 @@ void HTMLImageElement::set_needs_layout_update_or_repaint_after_image_data_chang
     }
 
     if (!image_box || image_element_dimensions_may_depend_on_intrinsic_size(*image_box)) {
-        image_provider_contents_changed();
+        Painting::push_replaced_image_paint_facts(*this);
         set_needs_layout_update(reason);
         return;
     }
 
     reset_intrinsic_size_caches_after_image_data_change(*image_box);
-    image_provider_contents_changed();
+    Painting::push_replaced_image_paint_facts(*this);
 }
 
 GC_DEFINE_ALLOCATOR(HTMLImageElement);
-
-Layout::Node const* HTMLImageElement::image_provider_layout_node() const
-{
-    return unsafe_layout_node();
-}
 
 static GC::Ref<DOM::Event> create_event_for_element(HTMLElement& element, Utf16FlyString const& event_name)
 {
@@ -1634,7 +1633,7 @@ void HTMLImageElement::decoded_image_data_did_update()
 {
     // An SVG image works out its natural size again after it redraws itself or changes color scheme.
     CSS::record_element_replaced_content_input(*this);
-    image_provider_contents_changed();
+    Painting::push_replaced_image_paint_facts(*this);
 }
 
 bool HTMLImageElement::is_image_pending() const

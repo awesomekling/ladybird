@@ -60,6 +60,11 @@ pub(crate) enum EngineWrite {
     TextData { node: u32, data: ak::Utf16String },
     /// The language an element resolves to, and the tag a `:lang()` range compares against.
     ElementLanguage { node: u32, language: u32, text: Box<[u16]> },
+    /// An element's inline declaration block, or none.
+    InlineStyle {
+        node: StyleNodeID,
+        data: Option<std::sync::Arc<crate::css::declaration_block::DeclarationBlockData>>,
+    },
 }
 
 /// An input transaction the host recorded, owned.
@@ -116,6 +121,15 @@ impl EngineWrite {
                 }
             }
             Self::ElementLanguage { node, language, text } => set_element_language(engine, node, language, &text),
+            Self::InlineStyle { node, data } => {
+                super::bridge::register_element_declared_properties(
+                    engine,
+                    node,
+                    super::bridge::FfiElementDeclarationKind::InlineStyle,
+                    data.as_ref().map_or(&[], |data| data.properties.as_slice()),
+                    data.as_ref().map_or(&[], |data| data.custom_properties.as_slice()),
+                );
+            }
         }
     }
 }
@@ -229,7 +243,7 @@ impl EngineWrite {
 /// # Safety
 ///
 /// `host` must be a live document host, on the document's thread.
-unsafe fn queue(host: *const DocumentHost, write: EngineWrite) {
+pub(super) unsafe fn queue(host: *const DocumentHost, write: EngineWrite) {
     assert!(!host.is_null(), "document host is null");
     // SAFETY: Guaranteed by the caller.
     unsafe { &*host }.queue_change(ArenaChange::Engine(write));
