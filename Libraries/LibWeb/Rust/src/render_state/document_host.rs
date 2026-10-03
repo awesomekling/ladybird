@@ -14,8 +14,8 @@ use super::{
 };
 use crate::css::style::bridge::FfiDeviceClass;
 use crate::css::style::style_job::{FfiFlownStyleDrain, StyleJobAnswer};
-use crate::layout::HostTables;
 use crate::layout::row_reads::{RowIdentities, RowSnapshot};
+use crate::layout::{FlownRound, HostTables, SealedRound};
 use crate::painting::paint_read::PaintSource;
 use crate::painting::record::recorder_state::AbsoluteRectMemo;
 use crate::painting::recording_slot::RecordingSlot;
@@ -59,6 +59,10 @@ pub struct DocumentHost {
     /// How the host's document drains the style transaction that flew, until a drain begins. The document drains it
     /// only where it has not begun to.
     flown_style_drain: Cell<Option<FfiFlownStyleDrain>>,
+    /// The first layout round of a rendering update, sealed until the frame flies with it.
+    sealed_round: RefCell<Option<SealedRound>>,
+    /// The layout round that flew with the frame, from its landing until the host's next layout update pays it.
+    flown_round: RefCell<Option<FlownRound>>,
 }
 
 /// Where a document's render state is: here, where the host lends it to the messages it waits for, or flying, moved
@@ -102,6 +106,8 @@ impl DocumentHost {
             changes: ChangeQueue::default(),
             flown_style: RefCell::default(),
             flown_style_drain: Cell::new(None),
+            sealed_round: RefCell::default(),
+            flown_round: RefCell::default(),
         }
     }
 
@@ -200,18 +206,46 @@ impl DocumentHost {
         });
     }
 
-    fn landed(&self, Landing { state, style, changes }: Landing) -> Frame {
+    fn landed(
+        &self,
+        Landing {
+            state,
+            style,
+            round,
+            changes,
+        }: Landing,
+    ) -> Frame {
         self.changes.give_back(changes);
         let previous = self.flown_style.borrow_mut().replace(FlownStyle::Landed(style));
         debug_assert!(
             previous.is_none(),
             "one style transaction of a document flies at a time"
         );
+        *self.flown_round.borrow_mut() = round;
         Frame::Here(UnsafeCell::new(state))
     }
 
-    /// Whether the document's frame flies.
-    pub(crate) fn frame_flies(&self) -> bool {
+    /// Seals `round`, the first layout round of a rendering update, for the frame the update lets fly next.
+    pub(crate) fn seal_round(&self, round: SealedRound) {
+        *self.sealed_round.borrow_mut() = Some(round);
+    }
+
+    /// Takes the round the host sealed, for the frame that flies with it.
+    pub(crate) fn take_sealed_round(&self) -> Option<SealedRound> {
+        self.sealed_round.borrow_mut().take()
+    }
+
+    /// Takes what the layout round that flew owes the host, for the layout update that pays it.
+    pub(crate) fn take_flown_round(&self) -> Option<FlownRound> {
+        self.flown_round.borrow_mut().take()
+    }
+
+    /// Whether the document's layout waits for a frame: one that flies, or a round that flew and is not paid yet.
+    pub(crate) fn layout_waits_for_frame(&self) -> bool {
+        self.frame_flies() || self.flown_round.borrow().is_some()
+    }
+
+    fn frame_flies(&self) -> bool {
         matches!(*self.frame.borrow(), Frame::Flying(_))
     }
 

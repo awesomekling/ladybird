@@ -103,5 +103,5 @@ use std::ffi::c_void;
 pub(crate) use style_values::StyleValues;
 pub(crate) use tree_builder::MainThreadFfiEntry as TreeBuildMainThreadFfiEntry;
 pub(crate) use update_layout::MainThreadFfiEntry as UpdateMainThreadFfiEntry;
-pub(crate) use update_layout::{LayoutRoundAnswer, LayoutRoundJob, LayoutUpdateReads};
+pub(crate) use update_layout::{FlownRound, LayoutRoundAnswer, LayoutRoundJob, LayoutUpdateReads, SealedRound};
 pub(crate) use used_values::{FfiCssPixelPoint, FfiCssPixelRect, FfiCssPixelSize, SizeConstraint, UsedValues};

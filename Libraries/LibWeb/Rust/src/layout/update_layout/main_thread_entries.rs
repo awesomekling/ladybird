@@ -44,3 +44,24 @@ pub unsafe extern "C" fn render_state_update_layout(host: *const DocumentHost, i
             .attach_owed_image_resources(&main_thread, host);
     });
 }
+
+/// Seals the first round of the layout of a rendering update whose style is about to fly, as of the document's facts
+/// now, where the document needs one: the frame runs it after its style.
+///
+/// # Safety
+///
+/// As for [`render_state_update_layout`], with no layout update running.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn render_state_seal_first_layout_round(
+    host: *const DocumentHost,
+    inputs: *const FfiLayoutUpdateInputs,
+) {
+    assert!(!host.is_null(), "document host is null");
+    assert!(!inputs.is_null());
+    // SAFETY: Guaranteed by the caller.
+    let host = unsafe { &*host };
+    // SAFETY: Guaranteed by the entry point's contract.
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, host) };
+    // SAFETY: Guaranteed by the entry point's contract.
+    abort_on_panic(|| unsafe { seal_first_round(&main_thread, host, &*inputs) });
+}

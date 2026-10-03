@@ -973,6 +973,8 @@ bool StyleEngine::let_style_transaction_fly(StyleNodeID root, Layout::RustFFI::F
         .drain = [](void* document) { static_cast<DOM::Document*>(document)->drain_flown_style_transaction(); },
         .document = &m_style_computer->document(),
     };
+    // The frame the transaction flies in runs the first round of the update's layout after it.
+    m_style_computer->document().seal_first_layout_round();
     if (StyleEngineFFI::style_engine_let_style_transaction_fly(m_render_document->host(), root.value(), lent.inputs, blocker, drain))
         return true;
     m_style_computer->end_style_record_view_epoch();
