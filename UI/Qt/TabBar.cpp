@@ -1410,7 +1410,15 @@ void TabBar::update_tab_button_geometry()
 
     if (tab_layout() == TabLayout::Horizontal) {
         for (int index = 0; index < count(); ++index) {
-            prepare_button(tabButton(index, QTabBar::LeftSide), false);
+            auto* left_button = tabButton(index, QTabBar::LeftSide);
+            prepare_button(left_button, false);
+            // NB: The style puts a tab's left button 1pt inside the tab's pill, where its icon looks flush against the
+            //     pill's edge. Give it 2pt.
+            if (left_button) {
+                auto x = qRound(horizontal_tab_card_shape_rect(QRectF(tabRect(index))).left()) + 2;
+                if (left_button->x() != x)
+                    left_button->move(x, left_button->y());
+            }
             auto* close_button = tabButton(index, QTabBar::RightSide);
             prepare_button(close_button, false);
             if (!close_button)
