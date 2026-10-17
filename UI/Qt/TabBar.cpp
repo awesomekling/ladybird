@@ -2166,7 +2166,9 @@ void TabWidget::rebuild_layout_for_horizontal_tabs()
 {
     m_tab_bar_row->setMinimumHeight(HORIZONTAL_TAB_STRIP_HEIGHT);
     m_tab_bar_row_layout->setSpacing(0);
-    m_tab_bar_row_layout->setContentsMargins(12, 2, 4, 1);
+    // NB: With native macOS window controls, the new tab button ends the row, and this right margin centers it
+    //     over the hamburger button in the toolbar below.
+    m_tab_bar_row_layout->setContentsMargins(12, 2, use_native_macos_window_controls() ? 11 : 4, 1);
 
     m_new_tab_button->setText({});
     set_dynamic_property_if_needed(*m_new_tab_button, VERTICAL_TABS_EXPANDED_PROPERTY, false);
@@ -2178,12 +2180,12 @@ void TabWidget::rebuild_layout_for_horizontal_tabs()
     if constexpr (use_native_macos_window_controls()) {
         m_tab_bar_row_layout->addWidget(m_window_controls, 0, Qt::AlignVCenter);
         m_tab_bar_row_layout->addWidget(m_tab_bar);
-        m_tab_bar_row_layout->addWidget(m_new_tab_button, 0, Qt::AlignVCenter);
         m_tab_bar_row_layout->addStretch(1);
+        m_tab_bar_row_layout->addWidget(m_new_tab_button, 0, Qt::AlignTop);
     } else {
         m_tab_bar_row_layout->addWidget(m_tab_bar);
-        m_tab_bar_row_layout->addWidget(m_new_tab_button, 0, Qt::AlignVCenter);
         m_tab_bar_row_layout->addStretch(1);
+        m_tab_bar_row_layout->addWidget(m_new_tab_button, 0, Qt::AlignTop);
         m_tab_bar_row_layout->addWidget(m_window_controls);
     }
 }
