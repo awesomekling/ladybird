@@ -829,6 +829,9 @@ void BrowserWindow::update_window_title(QString const& title)
         ? "%1 - Ladybird (Private Browsing)"
         : "%1 - Ladybird";
     setWindowTitle(QString(format).arg(title));
+#if defined(AK_OS_MACOS)
+    reapply_appkit_window_control_offsets(*this);
+#endif
 }
 
 void BrowserWindow::tab_title_changed(int index, QString const& title)
