@@ -16,4 +16,8 @@ namespace Ladybird {
 // that's never been shown, Qt's default 100x30 — until the user selects the page.
 void size_hidden_page_like(QWidget& page, QWidget const& current);
 
+// Moves the native windows of a widget's descendants to where the widgets are. Qt leaves them behind when it moves or
+// resizes a widget that has no native window of its own, or one that is hidden.
+void move_native_descendants_along(QWidget&);
+
 }
