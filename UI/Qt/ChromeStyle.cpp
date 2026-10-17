@@ -120,7 +120,9 @@ QColor chrome_background(QPalette const& palette)
 {
     auto window = chrome_window(palette);
     auto dark = is_dark(palette);
-    return mix(window, material_color_anchors(dark).background, dark ? 0.34 : 0.68);
+    if (dark)
+        return mix(window, QColor(17, 20, 25), 0.70);
+    return mix(window, material_color_anchors(dark).background, 0.68);
 }
 
 QColor chrome_surface(QPalette const& palette)
@@ -172,14 +174,16 @@ QColor chrome_control_border(QPalette const& palette)
     return mix(chrome_border(palette), material_color_anchors(dark).border, 0.18);
 }
 
+// The active tab is lifted toward a cool slate rather than plain white, to match the tint of the dark chrome.
+static constexpr QColor active_tab_tint { 150, 165, 180 };
+
 QColor chrome_active_tab_surface_top(QPalette const& palette)
 {
     auto dark = is_dark(palette);
     if (!dark)
         return QColor(255, 255, 255);
 
-    auto background = chrome_background(palette);
-    return mix(background, QColor(255, 255, 255), 0.22);
+    return mix(chrome_background(palette), active_tab_tint, 0.30);
 }
 
 QColor chrome_active_tab_surface_bottom(QPalette const& palette)
@@ -188,8 +192,7 @@ QColor chrome_active_tab_surface_bottom(QPalette const& palette)
     if (!dark)
         return QColor(251, 251, 251);
 
-    auto background = chrome_background(palette);
-    return mix(background, QColor(255, 255, 255), 0.20);
+    return mix(chrome_background(palette), active_tab_tint, 0.19);
 }
 
 QColor chrome_border(QPalette const& palette)
@@ -343,10 +346,14 @@ QString toolbar_container_style_sheet(QPalette const& palette)
 {
     auto dark = is_dark(palette);
 
-    auto background = style_sheet_color(chrome_background(palette));
+    auto background_color = chrome_background(palette);
+    // In dark mode, the toolbar fades from a lit top edge to slightly below the chrome background, like the tab strip.
+    auto background_top = style_sheet_color(dark ? mix(background_color, QColor(255, 255, 255), 0.022) : background_color);
+    auto background_bottom = style_sheet_color(dark ? mix(background_color, QColor(0, 0, 0), 0.18) : background_color);
     auto surface_hover = style_sheet_color(chrome_control_surface_hover(palette));
     auto surface_pressed = style_sheet_color(chrome_control_surface_pressed(palette));
-    auto separator = style_sheet_color(chrome_border(palette));
+    // In dark mode, the line under the toolbar is as soft as the one under the tab strip.
+    auto separator = style_sheet_color(dark ? mix(background_color, chrome_border(palette), 0.44) : chrome_border(palette));
     auto window_controls_separator = style_sheet_color(mix(chrome_background(palette), chrome_border(palette), dark ? 0.36 : 0.46));
     auto text = style_sheet_color(chrome_button_text(palette));
     auto disabled_text = style_sheet_color(chrome_muted_text(palette));
@@ -361,7 +368,7 @@ QString toolbar_container_style_sheet(QPalette const& palette)
 
     return qformatted(R"(
 QWidget#LadybirdToolbarContainer {{
-    background: {0};
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 {0}, stop: 1 {13});
     border: 0;
     border-bottom: 1px solid {3};
 }}
@@ -460,8 +467,9 @@ QWidget#LadybirdNavigationToolbar QToolButton#LadybirdCloseWindowButton[pressedO
     background: transparent;
 }}
 )",
-        background, surface_hover, surface_pressed, separator, text, disabled_text, close_hover, close_text,
-        window_controls_separator, badge_surface, badge_border, badge_surface_hover, badge_surface_pressed);
+        background_top, surface_hover, surface_pressed, separator, text, disabled_text, close_hover, close_text,
+        window_controls_separator, badge_surface, badge_border, badge_surface_hover, badge_surface_pressed,
+        background_bottom);
 }
 
 QString menu_bar_style_sheet(QPalette const& palette)
@@ -1155,11 +1163,14 @@ QString tab_widget_style_sheet(QPalette const& palette)
     auto close_text = style_sheet_color(chrome_destructive_text());
     auto sidebar_separator = style_sheet_color(mix(chrome_background_color, chrome_border(palette), dark ? 0.44 : 0.58));
     auto sidebar_separator_hover = style_sheet_color(mix(chrome_background_color, chrome_border(palette), dark ? 0.64 : 0.76));
+    // In dark mode, the tab strip fades from a lit top edge down to the chrome background.
+    auto tab_strip_top = style_sheet_color(mix(chrome_background_color, dark ? QColor(255, 255, 255) : QColor(0, 0, 0), dark ? 0.045 : 0.0));
+    auto tab_strip_bottom = style_sheet_color(mix(chrome_background_color, dark ? QColor(255, 255, 255) : QColor(0, 0, 0), dark ? 0.0 : 0.025));
 
     return qformatted(R"(
 QWidget#LadybirdTabStrip {{
     color: {4};
-    background: {0};
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1, stop: 0 {9}, stop: 1 {10});
     border: 0;
     border-bottom: 1px solid {7};
 }}
@@ -1304,7 +1315,8 @@ QToolButton#LadybirdCloseWindowButton[pressedOutside="true"] {{
     background: transparent;
 }}
 )",
-        background, hover, pressed, control_border, text, close_hover, close_text, sidebar_separator, sidebar_separator_hover);
+        background, hover, pressed, control_border, text, close_hover, close_text, sidebar_separator, sidebar_separator_hover,
+        tab_strip_top, tab_strip_bottom);
 }
 
 QString autocomplete_popup_style_sheet(QPalette const& palette)

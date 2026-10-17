@@ -228,7 +228,7 @@ static QColor selected_tab_border(QPalette const& palette, bool collapsed)
 {
     auto dark = ChromeStyle::is_dark(palette);
     auto color = dark ? QColor(255, 255, 255) : QColor(0, 0, 0);
-    color.setAlpha(collapsed ? (dark ? 32 : 30) : (dark ? 26 : 24));
+    color.setAlpha(collapsed ? (dark ? 32 : 30) : (dark ? 44 : 24));
     return color;
 }
 
@@ -295,7 +295,11 @@ private:
             : (is_horizontal_new_tab_button
                       ? horizontal_new_tab_button_shape_rect(QRectF(rect()))
                       : QRectF(rect()).adjusted(4.0, 3.0, -4.0, -3.0));
-        auto tab_path = tab_shape_path(shape_rect, 9.0, 9.0);
+        QPainterPath tab_path;
+        if (is_horizontal_new_tab_button && !expanded)
+            tab_path.addEllipse(shape_rect);
+        else
+            tab_path = tab_shape_path(shape_rect, 9.0, 9.0);
         auto hovered = underMouse();
 
         if (isDown()) {
@@ -712,7 +716,12 @@ void TabBar::paintEvent(QPaintEvent*)
             shape_rect = horizontal_tab_card_shape_rect(QRectF(tab_rect));
         else
             shape_rect = tab_card_shape_rect(QRectF(tab_rect));
-        auto tab_path = tab_shape_path(shape_rect, 9.0, 9.0);
+        // Horizontal tabs are pills; vertical tabs stack, so they keep softer corners.
+        QPainterPath tab_path;
+        if (m_tab_layout == TabLayout::Horizontal)
+            tab_path.addRoundedRect(shape_rect, shape_rect.height() / 2.0, shape_rect.height() / 2.0);
+        else
+            tab_path = tab_shape_path(shape_rect, 9.0, 9.0);
 
         if (is_selected) {
             painter.setPen(Qt::NoPen);
@@ -736,11 +745,15 @@ void TabBar::paintEvent(QPaintEvent*)
         if (!is_selected && !is_hovered && index > 0 && index != currentIndex() + 1 && !is_collapsed_vertical) {
             auto separator = border;
             separator.setAlpha(dark ? 24 : 20);
+            if (!is_vertical) {
+                separator = dark ? QColor(255, 255, 255) : QColor(0, 0, 0);
+                separator.setAlpha(dark ? 44 : 36);
+            }
             painter.setPen(separator);
             if (is_vertical)
                 painter.drawLine(QPoint(tab_rect.left() + 16, tab_rect.top()), QPoint(tab_rect.right() - 16, tab_rect.top()));
             else
-                painter.drawLine(QPoint(tab_rect.left(), 15), QPoint(tab_rect.left(), height() - 15));
+                painter.drawLine(QPoint(tab_rect.left(), 11), QPoint(tab_rect.left(), height() - 11));
         }
 
         auto icon = tabIcon(index);
