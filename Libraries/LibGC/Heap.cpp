@@ -22,6 +22,7 @@
 #include <AK/StackUnwinder.h>
 #include <AK/TemporaryChange.h>
 #include <AK/Time.h>
+#include <AK/kmalloc.h>
 #include <LibCore/ElapsedTimer.h>
 #include <LibCore/File.h>
 #include <LibCore/StandardPaths.h>
@@ -1557,6 +1558,9 @@ void Heap::start_idle_gc_timer()
     m_idle_gc_timer->start();
 }
 
+// NB: The allocator gives the memory a thread freed back to the system only when that thread allocates again, and only
+//     for the parts of its heap it touches then. The memory a page freed while it loaded would stay committed for good,
+//     so the moments the idle policy picks for the GC heap also give the thread's malloc heaps back.
 void Heap::idle_gc_on_timer()
 {
     // Leave an in-progress incremental sweep alone; it is already reclaiming memory. A GC deferral means now is not a
@@ -1570,11 +1574,13 @@ void Heap::idle_gc_on_timer()
     case IdleCollectionPolicy::Decision::Park:
         // Nothing left to collect; the next allocation will re-arm the timer.
         m_idle_gc_timer->stop();
+        ak_kmalloc_collect();
         return;
     case IdleCollectionPolicy::Decision::Collect:
         m_allocated_bytes_since_last_gc = 0;
         collect_garbage();
         m_idle_gc_timer->stop();
+        ak_kmalloc_collect();
         return;
     }
 }
