@@ -40,6 +40,13 @@ const _: () = assert!(std::mem::offset_of!(Utf16StringDataHeader, length_in_code
 const _: () = assert!(std::mem::offset_of!(Utf16StringDataHeader, hash) == 12);
 const _: () = assert!(std::mem::offset_of!(Utf16StringDataHeader, flags) == 16);
 
+/// Gives the memory the calling thread's allocator heaps hold freed back to the system, as `ak_kmalloc_collect()`
+/// does. A thread that is about to idle calls it, as the allocator only returns memory when its thread allocates.
+pub fn collect_allocator_caches() {
+    // SAFETY: The call has no preconditions.
+    unsafe { ladybird_collect_allocator_caches() }
+}
+
 /// A borrowed view of an `AK::Utf16String` or `AK::Utf16FlyString`.
 pub enum Utf16StringUnits<'a> {
     Ascii(&'a [u8]),
@@ -47,6 +54,7 @@ pub enum Utf16StringUnits<'a> {
 }
 
 unsafe extern "C" {
+    fn ladybird_collect_allocator_caches();
     fn ladybird_utf16_string_create_uninitialized(length: usize, has_ascii_storage: bool) -> usize;
     fn ladybird_utf16_fly_string_from_utf8(data: *const u8, length: usize) -> usize;
     fn ladybird_utf16_fly_string_from_utf16(data: *const u16, length: usize) -> usize;

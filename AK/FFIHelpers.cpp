@@ -184,6 +184,11 @@ extern "C" void* ladybird_alloc(size_t size, size_t alignment)
     return pointer;
 }
 
+extern "C" void ladybird_collect_allocator_caches()
+{
+    ak_kmalloc_collect();
+}
+
 extern "C" void* ladybird_alloc_zeroed(size_t size, size_t alignment)
 {
     if (alignment <= alignof(max_align_t))

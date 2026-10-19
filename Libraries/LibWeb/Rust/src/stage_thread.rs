@@ -115,6 +115,9 @@ pub extern "C" fn stage_thread_set_flight_finished(finished: extern "C" fn()) {
 // not committed, so the larger size costs address space only.
 const STAGE_THREAD_STACK_SIZE: usize = 64 * 1024 * 1024;
 
+/// How long a stage thread waits for its next job before it gives its freed memory back to the system.
+const IDLE_MEMORY_COLLECTION_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+
 impl StageThread {
     /// Spawns a thread named `name`, which lives as long as the process.
     pub(crate) fn spawn(name: &str) -> Self {
@@ -129,8 +132,22 @@ impl StageThread {
                 if let Some(setup) = THREAD_SETUP.get() {
                     setup();
                 }
+                // NB: The allocator returns the memory a thread freed only when that thread allocates again, so a
+                //     thread that went idle after a large job would keep it for good. Collect once per idle period.
+                let mut collected_since_last_job = true;
                 loop {
-                    let last = wait_for(|| NonNull::new(shared.handed.swap(std::ptr::null_mut(), Ordering::Acquire)));
+                    let take = || NonNull::new(shared.handed.swap(std::ptr::null_mut(), Ordering::Acquire));
+                    let last = if collected_since_last_job {
+                        wait_for(take)
+                    } else if let Some(last) = wait_for_at_most(IDLE_MEMORY_COLLECTION_DELAY, take) {
+                        last
+                    } else {
+                        #[cfg(not(test))]
+                        ak::collect_allocator_caches();
+                        collected_since_last_job = true;
+                        continue;
+                    };
+                    collected_since_last_job = false;
                     tsan::acquire(&shared.tsan_key);
                     let mut next = Some(in_handed_order(last));
                     while let Some(job) = next {
@@ -686,6 +703,21 @@ fn wait_for<T>(mut ready: impl FnMut() -> Option<T>) -> T {
             return value;
         }
         std::thread::park();
+    }
+}
+
+/// Waits as `wait_for` does, but for at most `timeout`.
+fn wait_for_at_most<T>(timeout: std::time::Duration, mut ready: impl FnMut() -> Option<T>) -> Option<T> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Some(value) = ready() {
+            return Some(value);
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return None;
+        }
+        std::thread::park_timeout(deadline - now);
     }
 }
 
