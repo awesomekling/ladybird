@@ -1498,7 +1498,7 @@ pub(crate) fn publish_style_rule_or_dormant(
     compiled: &[&CompiledSelector],
     namespaces: NamespaceScope,
     bound_scope: &BoundScopeChain,
-) -> (u32, Option<smallvec::SmallVec<[StyleAtomID; 4]>>) {
+) -> (u32, Option<super::DormantWaits>) {
     if sheet == 0 || compiled.is_empty() {
         return (0, None);
     }

@@ -10,7 +10,6 @@
 //! in. The host numbers the sheets and keeps which rules it published to each, so a write to a sheet never asks the
 //! engine anything.
 
-use super::StyleAtomID;
 use super::StyleEngine;
 use super::bridge::{
     BoundScopeChain, FfiCascadeOrigin, intern_native_text, publish_rule_declarations, publish_style_rule_or_dormant,
@@ -25,7 +24,6 @@ use crate::css::selector::CompiledSelector;
 use crate::css::selector_parser::RustParsedSelectorList;
 use crate::css::style_sheet::NativeStyleSheet;
 use crate::fast_hash::FastMap;
-use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -218,7 +216,7 @@ impl CompiledRule {
             .map(|sheet| (SheetID(sheet), before.checked_sub(1).map(RuleID)));
         let rule = match &self.kind {
             CompiledRuleKind::Style { selectors, .. } => {
-                let (id, dormant_keys): (u32, Option<SmallVec<[StyleAtomID; 4]>>) =
+                let (id, dormant_waits): (u32, Option<super::DormantWaits>) =
                     match selectors.publish_user_agent(engine, sheet, before, self.identity) {
                         Some(id) => (id, None),
                         None => selectors.compile(engine, |engine, compiled, namespaces, scope| {
@@ -226,9 +224,9 @@ impl CompiledRule {
                         }),
                     };
                 let rule = id.checked_sub(1).map(RuleID);
-                match (rule, dormant_keys) {
+                match (rule, dormant_waits) {
                     // NB: A dormant rule's declarations are published when it wakes, from its native target.
-                    (Some(rule), Some(keys)) => engine.host.dormant_rules.insert(rule, &keys, selectors.clone()),
+                    (Some(rule), Some(waits)) => engine.host.dormant_rules.insert(rule, &waits, selectors.clone()),
                     _ => {
                         if let Some(declarations) = &self.declarations {
                             publish_rule_declarations(engine, id, declarations);

@@ -5,6 +5,8 @@
     .flip span::before { color: green; }
 </style>
 <div id="container"></div>
+<!-- Carries the class the measured rules need, so they are compiled when the sheet arrives rather than when the test first gives an element the class. -->
+<div class="flip"></div>
 <script>
     let rules = "";
     for (let i = 0; i < 30; ++i) {

@@ -3,3 +3,6 @@ a later woken rule wins: rgb(0, 128, 0)
 an earlier woken rule loses: rgb(0, 128, 0)
 a woken rule moves geometry: 50
 rules woken: 4
+before the ancestor's class: rgb(0, 0, 0) 7px rgb(0, 0, 0)
+the ancestor's class added: rgb(0, 128, 0) 9px rgb(0, 128, 0)
+the ancestor's class removed: rgb(0, 0, 0) 7px rgb(0, 0, 0)

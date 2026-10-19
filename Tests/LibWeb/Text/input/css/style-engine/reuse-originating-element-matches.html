@@ -14,6 +14,8 @@
     .target.changed::selection { color: rgb(28, 29, 30) }
 </style>
 <div id="target" class="target">target</div>
+<!-- Carries the class the measured rules need, so they are compiled when the sheet arrives rather than when the test first gives an element the class. -->
+<div class="changed"></div>
 <script>
     test(() => {
         internals.updateStyle();

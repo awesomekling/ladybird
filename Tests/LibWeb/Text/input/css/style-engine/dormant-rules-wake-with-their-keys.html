@@ -10,7 +10,13 @@
     .arrives { color: green }
     #named > .child { width: 50px }
     .never-used { color: red }
+    .awake .sleeper { color: green }
+    @layer low { .reverting { margin-left: 7px } .awake .reverting { margin-left: 9px } }
+    @layer top { .reverting { margin-left: var(--missing, revert-layer) } }
+    .awake ~ .sibling { color: green }
 </style>
+<div id="ancestor"><span class="sleeper"></span><span class="reverting"></span></div>
+<div id="before"></div><span class="sibling"></span>
 <div id="root"></div>
 <script>
     test(() => {
@@ -41,5 +47,20 @@
 
         const after = internals.styleEngineCounters();
         println(`rules woken: ${after.styleRulesWoken - before.styleRulesWoken}`);
+
+        // A rule whose selector needs an ancestor's class waits for that class, though its subjects are there.
+        const ancestor = document.getElementById("ancestor");
+        const sleeper = ancestor.querySelector(".sleeper");
+        const reverting = ancestor.querySelector(".reverting");
+        const sibling = document.querySelector(".sibling");
+        const relation = () =>
+            `${getComputedStyle(sleeper).color} ${getComputedStyle(reverting).marginLeft} ${getComputedStyle(sibling).color}`;
+        println(`before the ancestor's class: ${relation()}`);
+        ancestor.classList.add("awake");
+        document.getElementById("before").classList.add("awake");
+        println(`the ancestor's class added: ${relation()}`);
+        ancestor.classList.remove("awake");
+        document.getElementById("before").classList.remove("awake");
+        println(`the ancestor's class removed: ${relation()}`);
     });
 </script>

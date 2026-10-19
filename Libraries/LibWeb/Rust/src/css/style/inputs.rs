@@ -2474,7 +2474,7 @@ impl StyleEngine {
         let (RoutingKey::Id(atom) | RoutingKey::Class(atom) | RoutingKey::TagName(atom)) = key else {
             return false;
         };
-        self.host.dormant_rules.rules_woken_by(atom).any(|rule| {
+        self.host.dormant_rules.rules_waiting_for(atom).any(|rule| {
             self.retained.program.rule_can_decide(rule)
                 && self
                     .native_rules
@@ -2915,7 +2915,7 @@ impl StyleEngine {
         selectors: &[&CompiledSelector],
         namespaces: NamespaceScope,
         scope: &ScopeChain<'_>,
-    ) -> (RuleID, Option<SmallVec<[StyleAtomID; 4]>>) {
+    ) -> (RuleID, Option<super::DormantWaits>) {
         // NB: A rule placed before another, or reusing the identity of a rule its sheet's replacement drops, keeps the
         //     eager path, whose bookkeeping both need.
         let may_sleep = super::lazy_rule_compilation_enabled()
@@ -2933,9 +2933,7 @@ impl StyleEngine {
             );
         }
         let compiled = self.compile_selector_program_noting_names(selectors, namespaces, scope);
-        let keys =
-            dormancy_keys(&compiled).filter(|keys| keys.iter().all(|&key| !self.retained.facts.atom_is_live(key)));
-        let Some(keys) = keys else {
+        let Some(waits) = dormancy_waits(&compiled, |key| self.retained.facts.atom_is_live(key)) else {
             let rule = self.add_style_rule_with(sheet, None, |engine, previous_program| {
                 engine.attach_compiled_selector_program(compiled, previous_program)
             });
@@ -2943,7 +2941,7 @@ impl StyleEngine {
         };
         let rule = self.append_rule(sheet, None, RuleKind::Style);
         self.retained.counters.bump(Counter::StyleRulesDormant);
-        (rule, Some(keys))
+        (rule, Some(waits))
     }
 
     /// Compiles a dormant rule that one of its keys woke, as if it had just arrived.
@@ -3718,31 +3716,61 @@ pub(crate) fn with_attr_names_read(selector_version: u64) -> u64 {
     selector_version.wrapping_add(crate::css::parser::arbitrary_substitution::attr_names_read_generation())
 }
 
-/// The keys a dormant rule with `program` would wait for: one an element must carry for each of its selectors' subjects
-/// to match it, or `None` where a subject needs no such key, and the rule has to be compiled at once.
-fn dormancy_keys(program: &SelectorProgram) -> Option<SmallVec<[StyleAtomID; 4]>> {
+/// What a rule with `program` would wait for while dormant, where no element carries some key each of its selectors
+/// needs (see `DormantWaits`), or `None` where one of its selectors needs nothing no element carries, and the rule has
+/// to be compiled at once.
+fn dormancy_waits(program: &SelectorProgram, is_live: impl Fn(StyleAtomID) -> bool) -> Option<super::DormantWaits> {
     // NB: A program whose selectors leave their tree scope (`:host`, `::slotted()`, `::part()`) is reached through
     //     another tree's elements, so its keys say nothing about the elements it matches.
     if program.entries().is_empty() || program.can_leave_its_scope() || program.subject_can_leave_its_scope() {
         return None;
     }
+    let mut waits = super::DormantWaits::new();
+    for entry in &program.entries()[..] {
+        let mut missing = SmallVec::new();
+        for key in required_document_keys(program, entry.root) {
+            if !is_live(key) && !missing.contains(&key) {
+                missing.push(key);
+            }
+        }
+        if missing.is_empty() {
+            return None;
+        }
+        waits.push(missing);
+    }
+    Some(waits)
+}
+
+/// The ids, classes and tag names some element of the document has to carry for `root` to match anything: those of
+/// its compounds, and of the compounds its combinators relate it to, but not those inside a pseudo-class's arguments.
+fn required_document_keys(
+    program: &SelectorProgram,
+    root: super::selector::SelectorNodeID,
+) -> SmallVec<[StyleAtomID; 4]> {
     let mut keys = SmallVec::new();
-    for entry in 0..program.entries().len() {
-        let key = match program.dispatch_metadata(entry).key {
-            DispatchKey::Id(atom) | DispatchKey::Class(atom) | DispatchKey::TagName(atom) => atom,
-            _ => return None,
-        };
-        if !keys.contains(&key) {
-            keys.push(key);
+    let mut pending: SmallVec<[super::selector::SelectorNodeID; 8]> = smallvec::smallvec![root];
+    while let Some(node) = pending.pop() {
+        match program.node(node) {
+            SelectorOp::Feature(super::selector::FeatureTest::Id(atom) | super::selector::FeatureTest::Class(atom)) => {
+                keys.push(atom)
+            }
+            // NB: As the dispatch does, on the folded form, which every element the test can match carries.
+            SelectorOp::Feature(super::selector::FeatureTest::TagName(tag)) => keys.push(tag.folded),
+            SelectorOp::And { first, count } => pending.extend_from_slice(program.operands(first, count)),
+            SelectorOp::Parent(compound)
+            | SelectorOp::Ancestor(compound)
+            | SelectorOp::PreviousSibling(compound)
+            | SelectorOp::PrecedingSibling(compound) => pending.push(compound),
+            _ => {}
         }
     }
-    Some(keys)
+    keys
 }
 
 impl RetainedState {
     /// Whether `input` is a field of a rule that this transaction woke. Such a rule matched nothing before, and each
-    /// element it can match now is staged with the key that woke it, so its program and declarations arriving reach
-    /// nothing that element's own inputs do not.
+    /// element it can match now is reached through its routes from the input that gave an element the last key it
+    /// waited for, so its program and declarations arriving reach nothing that input does not.
     pub(super) fn input_wakes_rule(&self, input: &NormalizedInput) -> bool {
         matches!(input.key, InputKey::RuleField(rule, _) if self.woken_rules.contains(&rule))
     }

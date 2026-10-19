@@ -1109,20 +1109,24 @@ pub struct RetainedState {
     diagnostic_plan_capture: Option<DiagnosticPlanCapture>,
 }
 
-/// The style rules that no element can match yet, because none carries the key their subjects need, and that the
-/// engine has therefore not compiled.
+/// What a dormant rule waits for: for each of its selectors, the ids, classes and tag names it needs that no element
+/// carries yet. The rule wakes once one of its selectors waits for nothing.
+pub(crate) type DormantWaits = SmallVec<[SmallVec<[StyleAtomID; 4]>; 2]>;
+
+/// The style rules that no element can match yet, because no element carries some key each of their selectors needs,
+/// and that the engine has therefore not compiled.
 ///
-/// Most rules of a large sheet are for elements a page never has: of YouTube's 28k selectors, the keys of 71% are on
-/// no element. A dormant rule is live and in its sheet, but has no selector program, and so no routes and no place in
-/// any scope dispatch, which already makes it match nothing. When an element first carries one of its keys, the
+/// Most rules of a large sheet are for elements a page never has: of YouTube's 28k selectors, the subject keys of 71%
+/// are on no element, and most of the others need a key on an ancestor or sibling no element has either. A dormant
+/// rule is live and in its sheet, but has no selector program, and so no routes and no place in any scope dispatch,
+/// which already makes it match nothing. When the last key one of its selectors waits for appears on an element, the
 /// transaction that stages that element compiles it before it routes and matches anything (see `wake_dormant_rules`).
 #[derive(Clone, Default)]
 pub(super) struct DormantRules {
-    /// For each key, the first of the links to the dormant rules it wakes, some of which may have woken or left
-    /// through another key since.
+    /// For each key, the first of the links to the selectors of dormant rules that wait for it, some of which may have
+    /// woken or left through another key since.
     first_link_by_key: HashMap<StyleAtomID, u32>,
-    /// The rule each link names and the next link of its key, or `u32::MAX` after the last.
-    links: Vec<(RuleID, u32)>,
+    links: Vec<DormantLink>,
     /// The dormant rules in rule order, and the selectors each is compiled from once it wakes. A rule that woke or
     /// left keeps its place without selectors until a compaction.
     rules: Vec<(RuleID, Option<DormantSelectors>)>,
@@ -1134,10 +1138,20 @@ pub(super) struct DormantRules {
     )>,
 }
 
+/// A selector of a dormant rule waiting for a key, and the next link of that key, or `u32::MAX` after the last.
+#[derive(Clone, Copy)]
+struct DormantLink {
+    rule: RuleID,
+    selector: u16,
+    next: u32,
+}
+
 #[derive(Clone)]
 struct DormantSelectors {
     selectors: std::sync::Arc<crate::css::selector_parser::RustParsedSelectorList>,
     context: u32,
+    /// How many keys each of the rule's selectors still waits for.
+    waiting: SmallVec<[u16; 2]>,
 }
 
 impl DormantRules {
@@ -1150,11 +1164,14 @@ impl DormantRules {
             .is_ok_and(|position| self.rules[position].1.is_some())
     }
 
-    pub(super) fn insert(&mut self, rule: RuleID, keys: &[StyleAtomID], selectors: rule_writes::BoundSelectors) {
-        for &key in keys {
-            let link = u32::try_from(self.links.len()).expect("dormant rule link space exhausted");
-            let next = self.first_link_by_key.insert(key, link).unwrap_or(u32::MAX);
-            self.links.push((rule, next));
+    pub(super) fn insert(&mut self, rule: RuleID, waits: &DormantWaits, selectors: rule_writes::BoundSelectors) {
+        for (selector, keys) in waits.iter().enumerate() {
+            let selector = u16::try_from(selector).expect("a rule cannot have 65536 selectors");
+            for &key in keys {
+                let link = u32::try_from(self.links.len()).expect("dormant rule link space exhausted");
+                let next = self.first_link_by_key.insert(key, link).unwrap_or(u32::MAX);
+                self.links.push(DormantLink { rule, selector, next });
+            }
         }
         let context = self
             .contexts
@@ -1174,6 +1191,10 @@ impl DormantRules {
         let dormant = DormantSelectors {
             selectors: selectors.selectors,
             context: u32::try_from(context).expect("dormant rule context space exhausted"),
+            waiting: waits
+                .iter()
+                .map(|keys| u16::try_from(keys.len()).expect("a selector cannot wait for 65536 keys"))
+                .collect(),
         };
         match self.position(rule) {
             Ok(position) => self.rules[position].1 = Some(dormant),
@@ -1201,7 +1222,7 @@ impl DormantRules {
         Some(selectors)
     }
 
-    /// Takes the dormant rules that any of `keys` wakes.
+    /// Notes that elements carry `keys` now, and takes the dormant rules one of whose selectors waits for nothing more.
     pub(super) fn take_woken_by(
         &mut self,
         keys: impl IntoIterator<Item = StyleAtomID>,
@@ -1212,8 +1233,19 @@ impl DormantRules {
                 continue;
             };
             while link != u32::MAX {
-                let (rule, next) = self.links[link as usize];
+                let DormantLink { rule, selector, next } = self.links[link as usize];
                 link = next;
+                let Ok(position) = self.position(rule) else {
+                    continue;
+                };
+                let Some(dormant) = self.rules[position].1.as_mut() else {
+                    continue;
+                };
+                let waiting = &mut dormant.waiting[selector as usize];
+                *waiting = waiting.saturating_sub(1);
+                if *waiting != 0 {
+                    continue;
+                }
                 if let Some(selectors) = self.remove(rule) {
                     woken.push((rule, selectors));
                 }
@@ -1234,12 +1266,12 @@ impl DormantRules {
         self.first_link_by_key.contains_key(&key)
     }
 
-    /// The rules still dormant that `key` wakes.
-    pub(super) fn rules_woken_by(&self, key: StyleAtomID) -> impl Iterator<Item = RuleID> + '_ {
+    /// The rules still dormant that wait for `key`, whether or not it is the last key they wait for.
+    pub(super) fn rules_waiting_for(&self, key: StyleAtomID) -> impl Iterator<Item = RuleID> + '_ {
         let mut link = self.first_link_by_key.get(&key).copied().unwrap_or(u32::MAX);
         std::iter::from_fn(move || {
             while link != u32::MAX {
-                let (rule, next) = self.links[link as usize];
+                let DormantLink { rule, next, .. } = self.links[link as usize];
                 link = next;
                 if self.is_dormant(rule) {
                     return Some(rule);

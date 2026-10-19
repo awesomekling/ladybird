@@ -4,5 +4,5 @@ section.shadow-guard: .shadow-guard:has(~ .shadow-target)
 section.shadow-target: .shadow-guard ~ .shadow-target .shadow-target:nth-of-type(2) .shadow-guard:has(.shadow-deep) ~ .shadow-target
 
 cold node evaluations: 25
-candidate checks: 78
+candidate checks: 77
 rule matches emitted: 118

@@ -6,6 +6,8 @@
     .boost #sentinel { outline-color: green }
 </style>
 <div id="root"></div>
+<!-- Carries the class the measured rules need, so they are compiled when the sheet arrives rather than when the test first gives an element the class. -->
+<div class="boost"></div>
 <script>
     test(() => {
         const root = document.getElementById("root");
