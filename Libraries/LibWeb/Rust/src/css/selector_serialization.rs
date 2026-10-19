@@ -89,11 +89,7 @@ fn serialize_an_plus_b(sink: &mut TextSink, pattern: AnPlusBPattern) {
     }
 }
 
-fn serialize_selector_list(
-    sink: &mut TextSink,
-    selectors: &[std::sync::Arc<CompiledSelector>],
-    context: &NamespaceContext<'_>,
-) {
+fn serialize_selector_list(sink: &mut TextSink, selectors: &[CompiledSelector], context: &NamespaceContext<'_>) {
     for (index, selector) in selectors.iter().enumerate() {
         if index != 0 {
             sink.push_ascii(", ");

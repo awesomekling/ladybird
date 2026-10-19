@@ -179,7 +179,7 @@ impl BoundSelectors {
     }
 
     fn compiled(&self) -> Vec<&CompiledSelector> {
-        self.selectors.selectors.iter().map(AsRef::as_ref).collect()
+        self.selectors.selectors.iter().collect()
     }
 }
 

@@ -1615,10 +1615,12 @@ impl BoundScopeChain {
             node => StyleNodeID::from_raw(node).map(ImplicitScopeRoot::Node),
         });
         if let Some(start) = start {
-            self.roots.extend(start.selectors.iter().cloned());
+            self.roots
+                .extend(start.selectors.iter().cloned().map(std::sync::Arc::new));
         }
         if let Some(end) = end {
-            self.limits.extend(end.selectors.iter().cloned());
+            self.limits
+                .extend(end.selectors.iter().cloned().map(std::sync::Arc::new));
         }
     }
 }

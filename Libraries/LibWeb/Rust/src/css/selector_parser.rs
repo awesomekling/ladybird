@@ -394,7 +394,7 @@ impl<'a> SelectorParser<'a> {
         &mut self,
         values: &[ComponentValue],
         selector_type: SelectorType,
-    ) -> Result<Arc<CompiledSelector>, ()> {
+    ) -> Result<CompiledSelector, ()> {
         let mut stream = Stream::new(values);
         let mut first_combinator = self.parse_combinator(&mut stream);
         match selector_type {
@@ -967,9 +967,9 @@ impl<'a> SelectorParser<'a> {
                     return Err(());
                 }
                 compound.combinator = Combinator::None;
-                Ok(PseudoElementValue::CompoundSelector(CompiledSelector::new(Box::new([
-                    compound,
-                ]))))
+                Ok(PseudoElementValue::CompoundSelector(Arc::new(CompiledSelector::new(
+                    Box::new([compound]),
+                ))))
             }
             PseudoElementParameterType::IdentList => {
                 let mut identifiers = Vec::new();
@@ -1154,14 +1154,14 @@ fn parse_pseudo_element_selector(input: TokenizerInput<'_>) -> Result<(Arc<Compi
     };
     let pseudo_element_type = pseudo_element.pseudo_element;
     Ok((
-        CompiledSelector::new(
+        Arc::new(CompiledSelector::new(
             normalize_pseudo_element_transitions(vec![CompoundSelector {
                 combinator: Combinator::None,
                 is_implicit_universal_anchor: false,
                 simple_selectors: Box::new([simple]),
             }])
             .into_boxed_slice(),
-        ),
+        )),
         pseudo_element_type,
     ))
 }
@@ -1389,7 +1389,7 @@ pub unsafe extern "C" fn rust_parsed_selector_list_selector(
 ) -> *mut RustSelector {
     unsafe {
         Box::into_raw(Box::new(RustSelector {
-            selector: (&(*list).selectors)[index].clone(),
+            selector: Arc::new((&(*list).selectors)[index].clone()),
         }))
     }
 }
@@ -1423,9 +1423,9 @@ mod tests {
         }
     }
 
-    fn serialize(selector: &Arc<CompiledSelector>) -> Vec<u16> {
+    fn serialize(selector: &CompiledSelector) -> Vec<u16> {
         crate::css::selector_serialization::serialize_selector_without_namespaces(&RustSelector {
-            selector: selector.clone(),
+            selector: Arc::new(selector.clone()),
         })
     }
 
@@ -1441,7 +1441,7 @@ mod tests {
             let parsed = std::thread::spawn(move || parse(source)).join().unwrap();
             let first = parsed.clone();
             let second = parsed.clone();
-            assert!(Arc::ptr_eq(&first.selectors[0], &second.selectors[0]));
+            assert_eq!(first.selectors[0], second.selectors[0]);
             drop(parsed);
             let expected = serialize(&first.selectors[0]);
             assert_eq!(serialize(&second.selectors[0]), expected);

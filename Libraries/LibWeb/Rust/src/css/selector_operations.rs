@@ -6,8 +6,6 @@
 
 //! Queries and transformations over Rust-owned CSS selectors.
 
-use std::sync::Arc;
-
 use super::css_tokenizer::{ParserTokenKind, tokenize_for_parser};
 use super::retained_fly_string::RetainedUtf16FlyString;
 use super::selector::{
@@ -31,7 +29,7 @@ fn pseudo_class(pseudo_class: PseudoClassType, arguments: SelectorList) -> Simpl
     }))
 }
 
-fn scope_selector() -> Arc<CompiledSelector> {
+fn scope_selector() -> CompiledSelector {
     CompiledSelector::new(Box::new([CompoundSelector {
         combinator: Combinator::None,
         is_implicit_universal_anchor: false,
@@ -132,7 +130,7 @@ fn invalid_for_has(selector: &CompiledSelector) -> bool {
     })
 }
 
-fn absolutize(selector: &CompiledSelector, replacement: &SimpleSelector) -> Option<Arc<CompiledSelector>> {
+fn absolutize(selector: &CompiledSelector, replacement: &SimpleSelector) -> Option<CompiledSelector> {
     if !contains_nesting(selector) {
         return Some(CompiledSelector::new(selector.compound_selectors.clone()));
     }
@@ -171,7 +169,7 @@ fn absolutize(selector: &CompiledSelector, replacement: &SimpleSelector) -> Opti
     Some(CompiledSelector::new(compounds))
 }
 
-pub(crate) fn relative_to(selector: &CompiledSelector, parent: SimpleSelector) -> Arc<CompiledSelector> {
+pub(crate) fn relative_to(selector: &CompiledSelector, parent: SimpleSelector) -> CompiledSelector {
     let mut compounds = Vec::with_capacity(selector.compound_selectors.len() + 1);
     compounds.push(CompoundSelector {
         combinator: Combinator::None,
@@ -341,7 +339,9 @@ mod tests {
                 .into_vec()
                 .into_iter()
                 .map(|selector| {
-                    let selector = super::RustSelector { selector };
+                    let selector = super::RustSelector {
+                        selector: std::sync::Arc::new(selector),
+                    };
                     serialize_selector_without_namespaces(&selector)
                 })
                 .collect()

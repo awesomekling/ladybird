@@ -66,7 +66,7 @@ fn native_selector_publication_and_replacement_outlive_the_source() {
         let rules = native_rules(text);
         let rule = rules.rule_at(0);
         let bound = rule.matching_selectors();
-        let selectors: Vec<_> = bound.selectors.iter().map(|selector| selector.as_ref()).collect();
+        let selectors: Vec<_> = bound.selectors.iter().collect();
         if published == 0 {
             published = publish_style_rule(
                 &mut engine,
@@ -141,7 +141,7 @@ fn native_scope_publication_outlives_the_rule_graph() {
             }
             let universal = native_rules("* {}");
             let bound = universal.rule_at(0).matching_selectors();
-            let selectors: Vec<_> = bound.selectors.iter().map(|selector| selector.as_ref()).collect();
+            let selectors: Vec<_> = bound.selectors.iter().collect();
             if published == 0 {
                 published = publish_style_rule(
                     &mut engine,
@@ -176,7 +176,7 @@ fn native_declaration_publication_reuses_values_and_observes_live_mutation() {
     engine.attach_sheet(sheet, TreeScopeID::DOCUMENT);
     let first = native_rules("* { color: #14181c; }");
     let bound = first.rule_at(0).matching_selectors();
-    let selectors: Vec<_> = bound.selectors.iter().map(|selector| selector.as_ref()).collect();
+    let selectors: Vec<_> = bound.selectors.iter().collect();
     let rule = publish_style_rule(
         &mut engine,
         sheet.0 + 1,

@@ -11,7 +11,7 @@ use crate::css::ffi_support::ascii_lowercase;
 use crate::css::retained_fly_string::RetainedUtf16FlyString;
 
 pub type SelectorString = crate::css::css_string::CssString;
-pub type SelectorList = Box<[Arc<CompiledSelector>]>;
+pub type SelectorList = Box<[CompiledSelector]>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -236,7 +236,7 @@ pub struct CompoundSelector {
 ///
 /// Compounds retain their parsed left-to-right order. Matching starts at the final compound and
 /// follows each compound's combinator toward the beginning of this slice.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompiledSelector {
     pub compound_selectors: Box<[CompoundSelector]>,
     /// The pseudo-element required on the initial match target, if this selector ends in one.
@@ -304,7 +304,7 @@ pub fn search_text_match_filter(simple: &SimpleSelector) -> Option<SearchTextMat
 
 impl CompiledSelector {
     #[allow(clippy::arc_with_non_send_sync)] // Bound selectors retain document-thread atoms.
-    pub(crate) fn new(compound_selectors: Box<[CompoundSelector]>) -> Arc<Self> {
+    pub(crate) fn new(compound_selectors: Box<[CompoundSelector]>) -> Self {
         let target_pseudo_element = compound_selectors
             .last()
             .and_then(|compound| compound.simple_selectors.first())
@@ -334,10 +334,10 @@ impl CompiledSelector {
                 }
             });
 
-        Arc::new(Self {
+        Self {
             compound_selectors,
             target_pseudo_element,
-        })
+        }
     }
 
     pub fn styles_every_search_text_match(&self) -> bool {
@@ -353,7 +353,7 @@ impl CompiledSelector {
     /// https://www.w3.org/TR/selectors-4/#specificity-rules
     #[must_use]
     pub fn specificity(&self) -> Specificity {
-        fn greatest_specificity(selectors: &[Arc<CompiledSelector>]) -> Specificity {
+        fn greatest_specificity(selectors: &[CompiledSelector]) -> Specificity {
             selectors
                 .iter()
                 .map(|selector| selector.specificity())
