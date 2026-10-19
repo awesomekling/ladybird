@@ -173,8 +173,9 @@ impl RetainedState {
         let routing = Arc::clone(&self.routing);
         let route_liveness = routing.route_liveness(&self.program);
         for key in keys {
-            // A maintained relation already accounts for these selectors' complete changes.
-            // Prove coverage once per input key before expanding its individual routes.
+            // A maintained relation already accounts for the complete changes of the selectors in its prefix program.
+            // Find the routes of each input key it does not answer for once, before expanding the rest.
+            let mut uncovered: Option<SmallVec<[RouteID; 8]>> = None;
             if self
                 .transaction_fact_view
                 .as_ref()
@@ -187,24 +188,41 @@ impl RetainedState {
                 && let Lookup::Known(states) = self.prefix_caches.borrow_mut().states.lookup_mut(*program)
                 && let Some(relation) = states.relation.as_mut()
             {
-                let covered = relation.handled_routing_keys.entry(key).or_insert_with(|| {
+                let routes = relation.handled_routing_keys.entry(key).or_insert_with(|| {
                     routing
                         .routes_for(key)
                         .iter()
-                        .all(|&route| self.route_is_prefix_convergence_eligible(&routing, dispatch, route))
+                        .copied()
+                        .filter(|&route| !self.route_is_prefix_convergence_eligible(&routing, dispatch, route))
+                        .collect()
                 });
-                if *covered {
+                if routes.is_empty() {
                     continue;
                 }
+                uncovered = Some(routes.iter().copied().collect());
             }
             // The tree delta already puts an arriving element and its subtree in the plan. Its
             // individual facts only have work left to do as possible witnesses of relational
             // selectors whose anchors live outside that subtree, or on the left side of sibling
             // selectors whose subjects follow it.
-            let routes = match is_arrival {
+            let mut routes = match is_arrival {
                 true => routing.arrival_routes_for(key),
                 false => routing.routes_for(key),
             };
+            let uncovered_arrival_routes: SmallVec<[RouteID; 8]>;
+            if let Some(uncovered) = &uncovered {
+                routes = match is_arrival {
+                    true => {
+                        uncovered_arrival_routes = routes
+                            .iter()
+                            .copied()
+                            .filter(|route| uncovered.contains(route))
+                            .collect();
+                        &uncovered_arrival_routes
+                    }
+                    false => uncovered,
+                };
+            }
             self.counters.add(Counter::RoutedEntryPoints, routes.len() as u64);
 
             let Some(node) = input.key.style_node() else {

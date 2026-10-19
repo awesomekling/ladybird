@@ -14,6 +14,7 @@ use smallvec::SmallVec;
 
 use super::super::capacity::ShallowCapacityBytes;
 use super::super::fast_hash::FastSet as HashSet;
+use super::super::selector::RouteID;
 use super::super::selector::RoutingKey;
 use super::super::tree::TreeScopeID;
 use super::{
@@ -309,7 +310,8 @@ pub(in crate::css::style) struct PrefixRelation {
     /// A bit per position for the arrivals of the update in progress, which hold no membership yet: an arrival's slot
     /// is new, or was taken out of every set as it departed.
     arrived: Vec<u64>,
-    pub(in crate::css::style) handled_routing_keys: HashMap<RoutingKey, bool>,
+    /// The routes of each routing key this transaction asked about that the relation does not answer for.
+    pub(in crate::css::style) handled_routing_keys: HashMap<RoutingKey, Box<[RouteID]>>,
     // Routine prefix-cache accounting must not walk every selector set for each matching node.
     capacity_bytes: u64,
     nested_capacity_bytes: u64,
@@ -395,7 +397,12 @@ impl PrefixRelation {
                 .sum::<u64>()
             + self.arrivals.shallow_capacity_bytes()
             + self.arrived.shallow_capacity_bytes()
-            + self.handled_routing_keys.shallow_capacity_bytes();
+            + self.handled_routing_keys.shallow_capacity_bytes()
+            + self
+                .handled_routing_keys
+                .values()
+                .map(|routes| (routes.len() * size_of::<RouteID>()) as u64)
+                .sum::<u64>();
     }
 
     /// Install the answers into `states`: every live node's when `states` holds none yet, and
