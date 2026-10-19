@@ -2097,20 +2097,29 @@ struct ParsedDeclaration {
 
 struct ParsedRule {
     local_identity: u64,
-    is_qualified: bool,
-    rule_kind: ParsedRuleKind,
-    name_offset: usize,
-    name_length: usize,
     declaration_block: Option<Arc<DeclarationBlockData>>,
-    children: Box<[ParsedRuleChild]>,
-    native_children: Box<[usize]>,
-    has_block: bool,
-    has_source_position: bool,
-    start_line: usize,
-    start_column: usize,
     selector_list: Option<Arc<RustParsedSelectorList>>,
     /// What only rules other than style rules have, so that the many style rules pay one pointer for it.
     rare: Option<Box<RareRuleData>>,
+    /// The rules and declarations inside the rule's block, which most style rules have none of.
+    children: Option<Box<ParsedRuleChildren>>,
+    name_offset: u32,
+    name_length: u32,
+    start_line: u32,
+    start_column: u32,
+    rule_kind: ParsedRuleKind,
+    is_qualified: bool,
+    has_block: bool,
+    has_source_position: bool,
+}
+
+// A parsed sheet keeps one of these for each of its rules.
+const _: () = assert!(size_of::<ParsedRule>() <= 64);
+
+struct ParsedRuleChildren {
+    children: Box<[ParsedRuleChild]>,
+    /// The positions in `children` of the rules the native rule list exposes.
+    native_children: Box<[u32]>,
 }
 
 #[derive(Default)]
@@ -2153,6 +2162,18 @@ static NO_RARE_RULE_DATA: RareRuleData = RareRuleData {
 impl ParsedRule {
     fn rare(&self) -> &RareRuleData {
         self.rare.as_deref().unwrap_or(&NO_RARE_RULE_DATA)
+    }
+
+    fn children(&self) -> &[ParsedRuleChild] {
+        self.children.as_ref().map_or(&[], |children| &children.children)
+    }
+
+    fn native_children(&self) -> &[u32] {
+        self.children.as_ref().map_or(&[], |children| &children.native_children)
+    }
+
+    fn name_range(&self) -> std::ops::Range<usize> {
+        self.name_offset as usize..(self.name_offset + self.name_length) as usize
     }
 }
 
@@ -2298,8 +2319,8 @@ impl ParsedStyleSheet {
         let child_rules = kind
             .child_declarations_kind(declarations_kind)
             .map(|kind| list.parsed_children(ParsedRuleList::children(self.clone(), rule.clone(), kind)));
-        let position =
-            (kind == NativeRuleType::Style && rule.has_source_position).then_some((rule.start_line, rule.start_column));
+        let position = (kind == NativeRuleType::Style && rule.has_source_position)
+            .then_some((rule.start_line as usize, rule.start_column as usize));
         let payload = match kind {
             NativeRuleType::Style => RulePayload::Style(StyleRule::new(
                 rule.selector_list.as_ref().unwrap().clone(),
@@ -2334,7 +2355,7 @@ impl ParsedStyleSheet {
                 )),
             },
             NativeRuleType::Margin => {
-                let name: Vec<u16> = self.values[rule.name_offset..rule.name_offset + rule.name_length]
+                let name: Vec<u16> = self.values[rule.name_range()]
                     .iter()
                     .map(|&unit| {
                         if (u16::from(b'A')..=u16::from(b'Z')).contains(&unit) {
@@ -2764,7 +2785,7 @@ impl SyntaxParseBuilder {
                     if rule.is_qualified && rule.selector_list.is_none() {
                         return;
                     }
-                    for child in &rule.children {
+                    for child in rule.children() {
                         visit_item(sheet, child, errors);
                     }
                 }
@@ -2782,7 +2803,7 @@ impl SyntaxParseBuilder {
                 | ParsedRuleKind::Page => {}
                 _ => return,
             }
-            for child in &rule.children {
+            for child in rule.children() {
                 match child {
                     ParsedRuleChild::Declarations(_) => visit_item(sheet, child, errors),
                     ParsedRuleChild::Rule(rule) => visit_rule(sheet, rule, errors),
@@ -3449,9 +3470,9 @@ impl SyntaxParseBuilder {
                     if child.rule_kind != ParsedRuleKind::FontFeatureValuesRule {
                         continue;
                     }
-                    let name = &self.values[child.name_offset..child.name_offset + child.name_length];
+                    let name = &self.values[child.name_range()];
                     let (kind, _) = font_feature_values_rule(name).unwrap();
-                    for item in &child.children {
+                    for item in child.children() {
                         let ParsedRuleChild::Declarations(item) = item else {
                             continue;
                         };
@@ -3622,20 +3643,27 @@ impl SyntaxParseBuilder {
             Box::default()
         } else {
             shared_rules::native_child_indices(&children, Some(rule_kind))
+                .iter()
+                .map(|&index| u32::try_from(index).expect("rule child index exceeds u32"))
+                .collect()
         };
         Arc::new(ParsedRule {
             local_identity: self.next_identity(),
             is_qualified,
             rule_kind,
-            name_offset,
-            name_length,
+            name_offset: u32::try_from(name_offset).expect("rule name offset exceeds u32"),
+            name_length: u32::try_from(name_length).expect("rule name length exceeds u32"),
             declaration_block,
-            children,
-            native_children,
+            children: (!children.is_empty()).then(|| {
+                Box::new(ParsedRuleChildren {
+                    children,
+                    native_children,
+                })
+            }),
             has_block,
             has_source_position: source_position.is_some(),
-            start_line: source_position.map_or(0, |position| position.line),
-            start_column: source_position.map_or(0, |position| position.column),
+            start_line: source_position.map_or(0, |position| u32::try_from(position.line).unwrap_or(u32::MAX)),
+            start_column: source_position.map_or(0, |position| u32::try_from(position.column).unwrap_or(u32::MAX)),
             selector_list,
             rare: (page_selector_list.is_some()
                 || import_rule.is_some()
@@ -4370,11 +4398,11 @@ mod tests {
         );
 
         let parse = parse_test_stylesheet(b"@media all { @styleset {} } @font-feature-values Family { @styleset {} }");
-        let ParsedRuleChild::Rule(media_child) = &parse.rules[0].children[0] else {
+        let ParsedRuleChild::Rule(media_child) = &parse.rules[0].children()[0] else {
             panic!("expected rule")
         };
         assert_eq!(media_child.rule_kind, ParsedRuleKind::Invalid);
-        let ParsedRuleChild::Rule(font_feature_values_child) = &parse.rules[1].children[0] else {
+        let ParsedRuleChild::Rule(font_feature_values_child) = &parse.rules[1].children()[0] else {
             panic!("expected rule")
         };
         assert_eq!(
@@ -4389,7 +4417,7 @@ mod tests {
         let layer_rules = parse
             .rules
             .iter()
-            .flat_map(|rule| rule.children.iter())
+            .flat_map(|rule| rule.children().iter())
             .filter_map(|child| match child {
                 ParsedRuleChild::Rule(rule) => Some(rule),
                 _ => None,
@@ -4589,7 +4617,7 @@ mod tests {
         assert!(parse.rules[1].selector_list.is_none());
 
         assert!(parse.rules[2].selector_list.is_some());
-        let [ParsedRuleChild::Rule(child), ParsedRuleChild::Rule(scope_rule)] = &*parse.rules[2].children else {
+        let [ParsedRuleChild::Rule(child), ParsedRuleChild::Rule(scope_rule)] = parse.rules[2].children() else {
             panic!("expected nested style and scope rules")
         };
         assert!(child.selector_list.is_some());
@@ -4600,7 +4628,7 @@ mod tests {
         let rules = parse_stylesheet(b"@media all { > b {} @scope (> .start) {} }");
         let mut parse = SyntaxParseBuilder::new(std::ptr::null(), false);
         parse.append_roots(&rules);
-        let [ParsedRuleChild::Rule(group_child), ParsedRuleChild::Rule(scope_rule)] = &*parse.rules[0].children else {
+        let [ParsedRuleChild::Rule(group_child), ParsedRuleChild::Rule(scope_rule)] = parse.rules[0].children() else {
             panic!("expected nested style and scope rules")
         };
         assert!(group_child.selector_list.is_none());

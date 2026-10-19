@@ -74,7 +74,7 @@ fn builder_constructs_one_rule_tree_with_dense_unique_identities() {
     fn visit(rule: &Arc<super::ParsedRule>, identities: &mut std::collections::BTreeSet<u64>) {
         assert_eq!(Arc::strong_count(rule), 1);
         assert!(identities.insert(rule.local_identity));
-        for child in &rule.children {
+        for child in rule.children() {
             match child {
                 ParsedRuleChild::Rule(rule) => visit(rule, identities),
                 ParsedRuleChild::Declarations(declarations) => assert!(identities.insert(declarations.local_identity)),
@@ -97,7 +97,7 @@ fn builder_constructs_one_rule_tree_with_dense_unique_identities() {
         (0..builder.identity_count).collect::<Vec<_>>()
     );
     let font = &builder.rules[1];
-    let ParsedRuleChild::Declarations(declarations) = &font.children[0] else {
+    let ParsedRuleChild::Declarations(declarations) = &font.children()[0] else {
         panic!("expected descriptors")
     };
     assert!(Arc::ptr_eq(
@@ -288,7 +288,7 @@ fn keyframe_mutation_preserves_exposed_declarations_and_snapshots() {
     let sheet = parse_shared_on_worker(
         "@keyframes 色 { from, 50% { width: 13px !important; height: 17px; } 25% { width: 19px; } to { width: 29px; } }",
     );
-    let ParsedRuleChild::Rule(first) = &sheet.rules[0].children[0] else {
+    let ParsedRuleChild::Rule(first) = &sheet.rules[0].children()[0] else {
         unreachable!()
     };
     let data = first.rare().keyframe.as_ref().unwrap();
@@ -372,7 +372,7 @@ fn worker_block_merging_and_shorthand_expansion_only_use_thread_safe_callbacks()
             &utf16("@page { @top-left { color: red !important; @unknown {} color: blue; } }"),
             &super::tests::parse_context(),
         );
-        let ParsedRuleChild::Rule(margin) = &sheet.rules[0].children[0] else {
+        let ParsedRuleChild::Rule(margin) = &sheet.rules[0].children()[0] else {
             panic!()
         };
         assert_eq!(margin.rule_kind, ParsedRuleKind::Margin);
@@ -492,7 +492,7 @@ fn worker_selector_normalization_survives_publication() {
         }
     }
     fn visit(rule: &super::ParsedRule, selectors: &mut Vec<Vec<u16>>, scopes: &mut Vec<Vec<u16>>) {
-        for child in &rule.children {
+        for child in rule.children() {
             if let ParsedRuleChild::Rule(child) = child {
                 visit(child, selectors, scopes);
             }
@@ -818,7 +818,7 @@ fn independent_workers_read_the_same_immutable_graph() {
                     1
                 );
             }
-            let ParsedRuleChild::Rule(nested) = &sheet.rules[1].children[0] else {
+            let ParsedRuleChild::Rule(nested) = &sheet.rules[1].children()[0] else {
                 panic!()
             };
             unsafe {
@@ -899,24 +899,24 @@ fn shared_rule_tree_preserves_nested_declaration_lists() {
     let last = sheet.rules[1].clone();
     drop(sheet);
     assert_eq!(media.rule_kind, ParsedRuleKind::Media);
-    assert_eq!(media.children.len(), 1);
-    let ParsedRuleChild::Rule(style) = &media.children[0] else {
+    assert_eq!(media.children().len(), 1);
+    let ParsedRuleChild::Rule(style) = &media.children()[0] else {
         panic!()
     };
     assert!(style.selector_list.is_some());
-    assert_eq!(style.children.len(), 2);
-    let ParsedRuleChild::Rule(supports) = &style.children[0] else {
+    assert_eq!(style.children().len(), 2);
+    let ParsedRuleChild::Rule(supports) = &style.children()[0] else {
         panic!()
     };
     assert_eq!(supports.rule_kind, ParsedRuleKind::Supports);
-    assert_eq!(supports.children.len(), 3);
-    for child in [&supports.children[0], &supports.children[2], &style.children[1]] {
+    assert_eq!(supports.children().len(), 3);
+    for child in [&supports.children()[0], &supports.children()[2], &style.children()[1]] {
         let ParsedRuleChild::Declarations(list) = child else {
             panic!()
         };
         assert!(list.declaration_block.is_some());
     }
-    let ParsedRuleChild::Rule(nested) = &supports.children[1] else {
+    let ParsedRuleChild::Rule(nested) = &supports.children()[1] else {
         panic!()
     };
     assert!(nested.selector_list.is_some());
@@ -1108,8 +1108,8 @@ fn declaration_mutation_does_not_change_cached_or_nested_shared_blocks() {
     );
 
     let nested = parse_shared_on_worker(".parent { .child {} margin: var(--gap); --色: green; }");
-    assert_eq!(nested.rules[0].children.len(), 2);
-    let ParsedRuleChild::Declarations(list) = &nested.rules[0].children[1] else {
+    assert_eq!(nested.rules[0].children().len(), 2);
+    let ParsedRuleChild::Declarations(list) = &nested.rules[0].children()[1] else {
         panic!()
     };
     let original = list.declaration_block.clone().unwrap();

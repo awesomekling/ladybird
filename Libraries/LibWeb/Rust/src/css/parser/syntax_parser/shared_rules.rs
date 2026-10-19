@@ -117,14 +117,14 @@ impl ParsedRuleList {
         self.parent
             .as_ref()
             .map_or(self.sheet.native_roots.len(), |(parent, _)| {
-                parent.native_children.len()
+                parent.native_children().len()
             })
     }
 
     pub(crate) fn rule_at(&self, index: usize) -> SharedRule<'_> {
         match &self.parent {
             Some((parent, kind)) => {
-                SharedRule::from_child(&parent.children[parent.native_children[index]], *kind).unwrap()
+                SharedRule::from_child(&parent.children()[parent.native_children()[index] as usize], *kind).unwrap()
             }
             None => {
                 let index = self.sheet.native_roots[index];
@@ -219,7 +219,7 @@ impl ParsedRule {
     pub(super) fn holds_media_rules(&self) -> bool {
         matches!(self.rule_kind, ParsedRuleKind::Media | ParsedRuleKind::Import)
             || self
-                .children
+                .children()
                 .iter()
                 .any(|child| matches!(child, ParsedRuleChild::Rule(rule) if rule.holds_media_rules()))
     }
@@ -401,8 +401,8 @@ impl<'a> SharedRule<'a> {
         let Some(declarations_kind) = self.rule_type.child_declarations_kind(self.declarations_kind) else {
             return ControlFlow::Continue(());
         };
-        for &index in &rule.native_children {
-            let child = Self::from_child(&rule.children[index], declarations_kind).unwrap();
+        for &index in rule.native_children() {
+            let child = Self::from_child(&rule.children()[index as usize], declarations_kind).unwrap();
             visit(child)?;
         }
         ControlFlow::Continue(())
