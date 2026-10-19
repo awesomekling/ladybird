@@ -6,7 +6,11 @@
 
 use super::fast_hash::FastMap as HashMap;
 use super::memory::MemoryController;
+use smallvec::SmallVec;
 use std::sync::{Arc, Weak};
+
+/// The references under one hash. Nearly every hash names one value, which then needs no allocation of its own.
+type Bucket<T> = SmallVec<[Weak<T>; 1]>;
 
 /// The smallest reference count a pool lets itself grow to before it first sweeps.
 const MINIMUM_SWEEP_THRESHOLD: usize = 64;
@@ -21,7 +25,7 @@ const MINIMUM_SWEEP_THRESHOLD: usize = 64;
 /// doubled since the last one, so dead references never outnumber the live ones by much. Shared
 /// values are charged once to the pool's own ledger.
 pub(super) struct WeakPool<T> {
-    by_hash: HashMap<u64, Vec<Weak<T>>>,
+    by_hash: HashMap<u64, Bucket<T>>,
     references: usize,
     sweep_threshold: usize,
     pub(super) memory: MemoryController,
@@ -96,7 +100,7 @@ impl<T> WeakPool<T> {
             bucket.retain(|candidate| candidate.strong_count() != 0);
             !bucket.is_empty()
         });
-        self.references = self.by_hash.values().map(Vec::len).sum();
+        self.references = self.by_hash.values().map(SmallVec::len).sum();
         self.sweep_threshold = (self.references * 2).max(MINIMUM_SWEEP_THRESHOLD);
     }
 
