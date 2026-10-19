@@ -209,12 +209,12 @@ pub struct PseudoElementSelector {
 // Keep the common ID and class selectors inline without reserving space for the larger payloads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SimpleSelector {
-    Universal(Box<QualifiedName>),
-    TagName(Box<QualifiedName>),
+    Universal(Arc<QualifiedName>),
+    TagName(Arc<QualifiedName>),
     Id(NameSelector),
     Class(NameSelector),
-    Attribute(Box<AttributeSelector>),
-    PseudoClass(Box<PseudoClassSelector>),
+    Attribute(Arc<AttributeSelector>),
+    PseudoClass(Arc<PseudoClassSelector>),
     PseudoElement(Box<PseudoElementSelector>),
     Nesting,
     Invalid(SelectorString),
@@ -268,6 +268,56 @@ impl CompoundRef<'_> {
             combinator: self.combinator,
             is_implicit_universal_anchor: self.is_implicit_universal_anchor,
             simple_selectors: self.simple_selectors.into(),
+        }
+    }
+}
+
+/// Shares the payloads of the simple selectors a sheet repeats: tag names, attribute selectors and pseudo-classes
+/// without arguments. Of YouTube's 80k simple selectors, 11k name a tag and 8k test an attribute, of few kinds each.
+#[derive(Default)]
+pub(crate) struct SharedSimpleSelectors {
+    qualified_names: crate::fast_hash::FastMap<u64, Vec<Arc<QualifiedName>>>,
+    attributes: crate::fast_hash::FastMap<u64, Vec<Arc<AttributeSelector>>>,
+    pseudo_classes: crate::fast_hash::FastMap<u64, Vec<Arc<PseudoClassSelector>>>,
+}
+
+impl SharedSimpleSelectors {
+    pub(crate) fn share(&mut self, selectors: &mut [CompiledSelector]) {
+        use std::hash::{Hash, Hasher};
+        for selector in selectors {
+            for simple in selector.simple_selectors.iter_mut() {
+                let mut hasher = crate::fast_hash::fast_hasher();
+                match simple {
+                    SimpleSelector::Universal(name) | SimpleSelector::TagName(name) => {
+                        (name.namespace_type as u8, name.namespace.raw(), name.name.raw()).hash(&mut hasher);
+                        Self::intern(&mut self.qualified_names, name, hasher.finish());
+                    }
+                    SimpleSelector::Attribute(attribute) => {
+                        (attribute.qualified_name.name.raw(), attribute.value.units()).hash(&mut hasher);
+                        Self::intern(&mut self.attributes, attribute, hasher.finish());
+                    }
+                    SimpleSelector::PseudoClass(pseudo_class)
+                        if pseudo_class.argument_selector_list.is_empty()
+                            && pseudo_class.languages.is_empty()
+                            && pseudo_class.levels.is_empty()
+                            && pseudo_class.identifier.is_none() =>
+                    {
+                        std::mem::discriminant(&pseudo_class.pseudo_class).hash(&mut hasher);
+                        pseudo_class.an_plus_b_pattern.step_size.hash(&mut hasher);
+                        pseudo_class.an_plus_b_pattern.offset.hash(&mut hasher);
+                        Self::intern(&mut self.pseudo_classes, pseudo_class, hasher.finish());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn intern<T: PartialEq>(table: &mut crate::fast_hash::FastMap<u64, Vec<Arc<T>>>, value: &mut Arc<T>, hash: u64) {
+        let bucket = table.entry(hash).or_default();
+        match bucket.iter().find(|shared| ***shared == **value) {
+            Some(shared) => *value = shared.clone(),
+            None => bucket.push(value.clone()),
         }
     }
 }

@@ -582,9 +582,9 @@ impl<'a> SelectorParser<'a> {
         if let Some(qualified_name) = self.parse_qualified_name(stream, true) {
             return Ok(Some(
                 if qualified_name.name == RetainedUtf16FlyString::from_utf16(&[b'*' as u16]) {
-                    SimpleSelector::Universal(Box::new(qualified_name))
+                    SimpleSelector::Universal(Arc::new(qualified_name))
                 } else {
-                    SimpleSelector::TagName(Box::new(qualified_name))
+                    SimpleSelector::TagName(Arc::new(qualified_name))
                 },
             ));
         }
@@ -625,7 +625,7 @@ impl<'a> SelectorParser<'a> {
         let qualified_name = self.parse_qualified_name(&mut stream, false).ok_or(())?;
         stream.discard_whitespace();
         if stream.is_empty() {
-            return Ok(SimpleSelector::Attribute(Box::new(AttributeSelector {
+            return Ok(SimpleSelector::Attribute(Arc::new(AttributeSelector {
                 match_type: AttributeMatchType::HasAttribute,
                 qualified_name,
                 value: SelectorString::default(),
@@ -673,7 +673,7 @@ impl<'a> SelectorParser<'a> {
         if !stream.is_empty() {
             return Err(());
         }
-        Ok(SimpleSelector::Attribute(Box::new(AttributeSelector {
+        Ok(SimpleSelector::Attribute(Arc::new(AttributeSelector {
             match_type,
             qualified_name,
             value_identity: value.to_fly_string(),
@@ -698,7 +698,7 @@ impl<'a> SelectorParser<'a> {
             {
                 return Err(());
             }
-            return Ok(SimpleSelector::PseudoClass(Box::new(pseudo_class_selector(
+            return Ok(SimpleSelector::PseudoClass(Arc::new(pseudo_class_selector(
                 pseudo_class,
             ))));
         }
@@ -725,7 +725,7 @@ impl<'a> SelectorParser<'a> {
         let result = self.parse_pseudo_class_function(pseudo_class, metadata.parameter_type, function_values);
         self.pseudo_class_context.pop();
         self.bare_current_allowed = bare_current_allowed;
-        result.map(|selector| SimpleSelector::PseudoClass(Box::new(selector)))
+        result.map(|selector| SimpleSelector::PseudoClass(Arc::new(selector)))
     }
 
     fn parse_pseudo_class_function(
@@ -1087,7 +1087,7 @@ fn normalize_pseudo_element_transitions(compounds: Vec<CompoundSelector>) -> Vec
                     normalized.push(CompoundSelector {
                         combinator,
                         is_implicit_universal_anchor: true,
-                        simple_selectors: vec![SimpleSelector::Universal(Box::new(QualifiedName {
+                        simple_selectors: vec![SimpleSelector::Universal(Arc::new(QualifiedName {
                             namespace_type: NamespaceType::Any,
                             namespace: RetainedUtf16FlyString::none(),
                             name: RetainedUtf16FlyString::from_utf16(&[u16::from(b'*')]),

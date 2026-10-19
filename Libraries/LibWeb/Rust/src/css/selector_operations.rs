@@ -15,7 +15,7 @@ use super::selector::{
 use super::selector_parser::StyleNestingParent;
 
 fn pseudo_class(pseudo_class: PseudoClassType, arguments: SelectorList) -> SimpleSelector {
-    SimpleSelector::PseudoClass(Box::new(PseudoClassSelector {
+    SimpleSelector::PseudoClass(std::sync::Arc::new(PseudoClassSelector {
         pseudo_class,
         an_plus_b_pattern: Default::default(),
         argument_selector_list: arguments,
@@ -140,7 +140,7 @@ fn absolutize(selector: &CompiledSelector, replacement: &SimpleSelector) -> Opti
             match simple {
                 SimpleSelector::Nesting => simples.push(replacement.clone()),
                 SimpleSelector::PseudoClass(pseudo_class) => {
-                    let mut pseudo_class = pseudo_class.clone();
+                    let mut pseudo_class = (**pseudo_class).clone();
                     let mut arguments = Vec::with_capacity(pseudo_class.argument_selector_list.len());
                     for argument in &pseudo_class.argument_selector_list {
                         match absolutize(argument, replacement) {
@@ -158,7 +158,7 @@ fn absolutize(selector: &CompiledSelector, replacement: &SimpleSelector) -> Opti
                     {
                         return None;
                     }
-                    simples.push(SimpleSelector::PseudoClass(pseudo_class));
+                    simples.push(SimpleSelector::PseudoClass(std::sync::Arc::new(pseudo_class)));
                 }
                 _ => simples.push(simple.clone()),
             }

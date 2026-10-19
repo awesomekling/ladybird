@@ -2206,6 +2206,7 @@ struct SyntaxParseBuilder {
     shared_supports_conditions: crate::fast_hash::FastMap<Vec<u16>, Arc<FfiQueryHandle>>,
     /// The custom property names the sheet declares, each of which a large sheet repeats in many blocks.
     custom_property_names: std::cell::RefCell<crate::fast_hash::FastMap<Vec<u16>, CssString>>,
+    shared_simple_selectors: std::cell::RefCell<crate::css::selector::SharedSimpleSelectors>,
     /// The names of the declarations, which their name offsets point into until `finish` moves the names of the
     /// declarations it keeps into `values`.
     declaration_names: Vec<u16>,
@@ -2943,6 +2944,7 @@ impl SyntaxParseBuilder {
             shared_media_lists: Default::default(),
             shared_supports_conditions: Default::default(),
             custom_property_names: Default::default(),
+            shared_simple_selectors: Default::default(),
             declaration_names: Vec::new(),
         }
     }
@@ -3353,7 +3355,11 @@ impl SyntaxParseBuilder {
             .collect::<Vec<_>>();
         let selector_list =
             parse_selector_list_from_component_values(values, &declared_namespaces, selector_type).ok()?;
-        Some(Arc::new(selector_list.adapt_for_nesting(nesting_parent)))
+        let mut selector_list = selector_list.adapt_for_nesting(nesting_parent);
+        self.shared_simple_selectors
+            .borrow_mut()
+            .share(&mut selector_list.selectors);
+        Some(Arc::new(selector_list))
     }
 
     fn rule_descriptors(children: &[ParsedRuleChild], kind: ParsedRuleKind) -> Option<Arc<DescriptorBlockData>> {
