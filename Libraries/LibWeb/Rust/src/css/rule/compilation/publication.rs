@@ -58,22 +58,45 @@ impl Default for SelectorInputs {
 }
 
 impl SelectorInputs {
-    fn bind(&self, source: &RustParsedSelectorList, parent_kind: StyleNestingParent) -> Arc<RustParsedSelectorList> {
+    fn absolutize(
+        &self,
+        source: &RustParsedSelectorList,
+        parent_kind: StyleNestingParent,
+    ) -> Option<RustParsedSelectorList> {
         let empty: crate::css::selector::SelectorList = Box::new([]);
         let parents = if parent_kind == StyleNestingParent::Style {
             self.parents.as_ref().map_or(&empty, |parents| &parents.selectors)
         } else {
             &empty
         };
-        Arc::new(RustParsedSelectorList {
-            selectors: absolutize_selector_list(&source.selectors, parent_kind, parents)
-                .unwrap_or_else(|| source.selectors.clone()),
-        })
+        absolutize_selector_list(&source.selectors, parent_kind, parents)
+            .map(|selectors| RustParsedSelectorList { selectors })
+    }
+
+    fn bind(&self, source: &RustParsedSelectorList, parent_kind: StyleNestingParent) -> Arc<RustParsedSelectorList> {
+        Arc::new(
+            self.absolutize(source, parent_kind)
+                .unwrap_or_else(|| RustParsedSelectorList {
+                    selectors: source.selectors.clone(),
+                }),
+        )
+    }
+
+    /// Binds `source` as `bind` does, sharing it where nothing in it is relative to its parents.
+    fn bind_shared(
+        &self,
+        source: Arc<RustParsedSelectorList>,
+        parent_kind: StyleNestingParent,
+    ) -> Arc<RustParsedSelectorList> {
+        match self.absolutize(&source, parent_kind) {
+            Some(absolute) => Arc::new(absolute),
+            None => source,
+        }
     }
 
     pub(super) fn matching_selectors(&self, rule: RuleRef<'_>) -> Option<Arc<RustParsedSelectorList>> {
         match rule.rule_type() {
-            NativeRuleType::Style => Some(self.bind(&rule.selectors().unwrap(), self.parent_kind)),
+            NativeRuleType::Style => Some(self.bind_shared(rule.selectors().unwrap(), self.parent_kind)),
             NativeRuleType::NestedDeclarations => {
                 if let Some(parents) = &self.parents {
                     return Some(parents.clone());
