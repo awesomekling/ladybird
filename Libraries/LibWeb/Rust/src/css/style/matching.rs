@@ -2303,6 +2303,11 @@ impl RetainedState {
         let mut cascade_update_properties = Vec::new();
         let mut cascade_update_rules = Vec::new();
         for input in &transaction.inputs {
+            // NB: A rule this transaction woke matches only elements staged with its key: arrivals, which match cold,
+            //     and elements gaining the key, whose own inputs select it below through its new routes.
+            if self.input_wakes_rule(input) {
+                continue;
+            }
             // Retained cascade inputs are document-scope identities. A local fact inside a shadow
             // tree may route to both that tree and an outer host, but its published answers cannot
             // be completed from the document cascade order used by a retained patch.

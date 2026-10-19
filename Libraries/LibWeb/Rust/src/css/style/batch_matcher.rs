@@ -412,6 +412,42 @@ pub(super) fn insert_scope_rule(
     }
 }
 
+/// The entries `RuleDispatch::extend_with_late_rules` adds for `rule`, or `None` when one of them dispatches on no key
+/// and has to be inserted by a build.
+pub(super) fn late_scope_rule_entries(
+    programs: &SelectorPrograms,
+    rule: RuleID,
+    selector_program: SelectorProgramID,
+) -> Option<Vec<(DispatchKey, DispatchEntry)>> {
+    let compiled = programs.get(selector_program);
+    (0..compiled.entries().len())
+        .map(|index| {
+            let metadata = compiled.dispatch_metadata(index);
+            if metadata.key == DispatchKey::Universal {
+                return None;
+            }
+            let entry = u32::try_from(index).expect("selector entry space exhausted");
+            Some((
+                metadata.key,
+                DispatchEntry {
+                    identity: programs.entry_id(selector_program, entry),
+                    rule,
+                    program: selector_program,
+                    entry,
+                    cascade_order: 0,
+                    required_attribute_value: metadata.required_attribute_value,
+                    required_parent: metadata.required_parent,
+                    required_ancestor: metadata.required_ancestor,
+                    required_ancestor_index: None,
+                    required_subject_bloom: metadata.required_subject_bloom,
+                    prefix_matched: false,
+                    multi_key: false,
+                },
+            ))
+        })
+        .collect()
+}
+
 fn for_each_scope_rule(
     program: &StyleSheetProgram,
     tree_scope: TreeScopeID,

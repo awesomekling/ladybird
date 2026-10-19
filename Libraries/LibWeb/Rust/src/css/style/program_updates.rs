@@ -225,6 +225,116 @@ impl RetainedState {
         }
     }
 
+    /// Add the rules this transaction woke to every scope program that ranks their sheets, in place.
+    ///
+    /// A woken rule changes no sheet's dispatch version, so each program keeps its identity, and the prefix caches keep
+    /// what they retain for it: its rule entries become late rows of its dispatch (see `extend_with_late_rules`). A
+    /// program no scope uses, or one whose late rows would outnumber the rows it was built with, is dropped instead,
+    /// and the next scope to ask for it builds it again with these rules in place.
+    pub(super) fn extend_scope_programs_with_woken_rules(&mut self) {
+        if self.woken_rules.is_empty() {
+            return;
+        }
+        let mut woken: Vec<(RuleID, SheetID, SelectorProgramID)> = self
+            .woken_rules
+            .iter()
+            .filter_map(|&rule| {
+                let selector_program = self.program.rule_version(rule).selector_program?;
+                Some((rule, self.program.rule_sheet(rule), selector_program))
+            })
+            .collect();
+        woken.sort_unstable_by_key(|&(rule, _, _)| rule);
+        for index in 0..self.scope_programs.len() {
+            let id = ScopeProgramID(u32::try_from(index).expect("scope program identity space exhausted"));
+            let Some(program) = self.scope_programs[id].as_ref() else {
+                continue;
+            };
+            let arriving: Vec<_> = woken
+                .iter()
+                .filter(|&&(rule, sheet, selector_program)| {
+                    program.key.sheets.iter().any(|&(candidate, _)| candidate == sheet)
+                        && program
+                            .dispatch
+                            .cascade_order_for_entry(rule, selector_program, 0)
+                            .is_none()
+                })
+                .collect();
+            if arriving.is_empty() {
+                continue;
+            }
+            let scope = (0..self.scope_program_by_scope.len())
+                .find(|&scope| self.scope_program_by_scope[scope].is_some_and(|(_, held)| held == id))
+                .map(|scope| TreeScopeID(u32::try_from(scope).expect("tree scope identity space exhausted")));
+            let entries: Option<Vec<_>> = arriving
+                .iter()
+                .map(|&&(rule, _, selector_program)| {
+                    super::batch_matcher::late_scope_rule_entries(&self.programs, rule, selector_program)
+                })
+                .collect::<Option<Vec<_>>>()
+                .map(|entries| entries.into_iter().flatten().collect());
+            // NB: Building the dispatch again builds a new prefix program, which the prefix caches lose everything
+            //     they retain for. Late rows only miss the prefix program's shortcuts, so they may grow until they
+            //     outnumber the rows the dispatch was built with.
+            let late_row_limit = (program.dispatch.entry_count() - program.dispatch.late_row_count()).max(1024);
+            let (Some(scope), Some(entries)) = (scope, entries) else {
+                self.drop_scope_program(id);
+                continue;
+            };
+            if program.dispatch.late_row_count() + entries.len() > late_row_limit {
+                self.drop_scope_program(id);
+                continue;
+            }
+            let mut dispatch = program.dispatch.clone_for_extension();
+            dispatch.extend_with_late_rules(
+                &entries,
+                |candidate| {
+                    let entry = &self.programs.get(candidate.program).entries()[candidate.entry as usize];
+                    self.own_scope_cascade_priority_of(candidate.rule, scope, entry.specificity, u32::MAX, false)
+                },
+                |candidate| {
+                    self.program.rule_is_gated_by_container_query(candidate.rule)
+                        || !self.program.declarations_are_complete_for(candidate.rule)
+                },
+                |candidate| {
+                    let entry = &self.programs.get(candidate.program).entries()[candidate.entry as usize];
+                    let sheet = self.program.rule_sheet(candidate.rule);
+                    if scope != TreeScopeID::DOCUMENT
+                        || self.program.sheet_origin(sheet) != CascadeOrigin::Author
+                        || self.program.rule_is_gated_by_container_query(candidate.rule)
+                        || !self.program.declarations_are_complete_for(candidate.rule)
+                        || entry.scope_root.is_some()
+                    {
+                        return None;
+                    }
+                    let declared = self.program.declared_properties_of(candidate.rule);
+                    if declared.iter().any(|property| property.important) {
+                        return None;
+                    }
+                    Some(declared.iter().map(|property| property.property))
+                },
+            );
+            dispatch.settle_memory(&mut self.memory);
+            self.scope_programs[id].as_mut().unwrap().dispatch = Arc::new(dispatch);
+        }
+    }
+
+    /// Drop one scope program for every scope that uses it, and from the identities the next build could find it by.
+    fn drop_scope_program(&mut self, id: ScopeProgramID) {
+        for index in 0..self.scope_program_by_scope.len() {
+            if self.scope_program_by_scope[index].is_some_and(|(_, held)| held == id) {
+                self.scope_program_by_scope.get_mut(index).and_then(Option::take);
+            }
+        }
+        let mut caches = self.prefix_caches.borrow_mut();
+        caches.states.remove(id);
+        caches.answers.remove_program(&mut self.match_answers, id);
+        drop(caches);
+        let program = self.scope_programs[id].take().unwrap();
+        self.scope_programs
+            .remove_identity(intern_table::content_hash(&program.key), id);
+        self.vacant_scope_programs.push(id);
+    }
+
     pub(super) fn settle_program(&mut self) {
         self.program.settle_memory(&mut self.memory);
     }
@@ -292,6 +402,7 @@ impl RetainedState {
                         | InputKey::ElementDeclaration(..)
                         | InputKey::ElementStyleInput(..)
                 ) && !matches!(input.key, InputKey::LocalFeature(_, LocalFeatureKey::ArrivingFacts))
+                    || self.input_wakes_rule(input)
             });
         let mut roots = Vec::new();
         let mut departures = Vec::new();
@@ -333,6 +444,9 @@ impl RetainedState {
                         if key
                             .program_tree_scope()
                             .is_some_and(|scope| scope != TreeScopeID::DOCUMENT) => {}
+                    // NB: A woken rule's matches are all on elements staged with the key that woke it, whose own
+                    //     inputs reach it; its program arriving adds no transition of its own.
+                    _ if self.input_wakes_rule(input) => {}
                     (
                         InputKey::LocalFeature(node, key),
                         InputValue::Feature(old_value),
@@ -478,8 +592,11 @@ impl StyleEngine {
         if !self.staged_rule_is_arriving(rule) {
             let program_version = self.retained.program.version();
             self.host.program_staging.base_version.get_or_insert(program_version);
-            let sheet = self.retained.program.rule_sheet(rule);
-            self.invalidate_scope_programs_for_sheet(sheet);
+            // NB: A woken rule joins the scope programs that rank its sheet in place, when the program commits.
+            if !self.retained.woken_rules.contains(&rule) {
+                let sheet = self.retained.program.rule_sheet(rule);
+                self.invalidate_scope_programs_for_sheet(sheet);
+            }
         }
         self.host.program_staging.rule_declarations.stage(
             rule,
@@ -783,8 +900,11 @@ impl StyleEngine {
         if !self.staged_rule_is_arriving(rule) {
             let program_version = self.retained.program.version();
             self.host.program_staging.base_version.get_or_insert(program_version);
-            let sheet = self.retained.program.rule_sheet(rule);
-            self.invalidate_scope_programs_for_sheet(sheet);
+            // NB: A woken rule joins the scope programs that rank its sheet in place, when the program commits.
+            if !self.retained.woken_rules.contains(&rule) {
+                let sheet = self.retained.program.rule_sheet(rule);
+                self.invalidate_scope_programs_for_sheet(sheet);
+            }
         }
         self.host
             .program_staging
@@ -874,12 +994,14 @@ impl StyleEngine {
 
         let declarations = self.host.program_staging.rule_declarations.take_dirty();
         for (rule, pending) in declarations {
-            self.retained.program.set_rule_declared_properties(
+            let keeps_dispatch = self.retained.woken_rules.contains(&rule);
+            self.retained.program.set_rule_declared_properties_with(
                 rule,
                 pending.declared,
                 pending.written_values,
                 pending.custom_declarations,
                 pending.custom_written_values,
+                keeps_dispatch,
             );
         }
 
@@ -889,6 +1011,8 @@ impl StyleEngine {
             for (rule, version) in versions {
                 if self.staged_rule_is_arriving(rule) {
                     self.retained.program.replace_reserved_rule_version(rule, version);
+                } else if self.retained.woken_rules.contains(&rule) {
+                    self.retained.program.replace_woken_rule_version(rule, version);
                 } else {
                     self.retained.program.replace_rule_version(rule, version);
                 }
@@ -938,6 +1062,7 @@ impl StyleEngine {
         if changes_program {
             self.invalidate_outdated_scope_programs();
         }
+        self.retained.extend_scope_programs_with_woken_rules();
     }
 
     /// Drop the ranked programs that no longer match the program of their scope. Staging a change drops the programs it
@@ -1191,6 +1316,7 @@ impl StyleEngine {
             .iter()
             .any(|&removed| self.current_rule_version(removed).selector_program.is_some());
         for &id in &removed {
+            self.host.dormant_rules.remove(id);
             self.retained.native_rules.remove(id, &mut self.retained.memory);
             self.stage_rule_liveness(id, false);
             self.record_rule_existence(id, true, false);

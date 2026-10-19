@@ -10,9 +10,10 @@
 //! in. The host numbers the sheets and keeps which rules it published to each, so a write to a sheet never asks the
 //! engine anything.
 
+use super::StyleAtomID;
 use super::StyleEngine;
 use super::bridge::{
-    BoundScopeChain, FfiCascadeOrigin, intern_native_text, publish_rule_declarations, publish_style_rule,
+    BoundScopeChain, FfiCascadeOrigin, intern_native_text, publish_rule_declarations, publish_style_rule_or_dormant,
     publish_style_rule_selectors, publish_user_agent_style_rule,
 };
 use super::compiler::NamespaceScope;
@@ -24,6 +25,7 @@ use crate::css::selector::CompiledSelector;
 use crate::css::selector_parser::RustParsedSelectorList;
 use crate::css::style_sheet::NativeStyleSheet;
 use crate::fast_hash::FastMap;
+use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -150,6 +152,7 @@ impl NamespaceTexts {
 }
 
 /// A style rule's bound selectors, the scopes it is inside, and the namespaces its sheet declares.
+#[derive(Clone)]
 pub(crate) struct BoundSelectors {
     pub(crate) selectors: Arc<RustParsedSelectorList>,
     pub(crate) scope: Arc<BoundScopeChain>,
@@ -215,17 +218,24 @@ impl CompiledRule {
             .map(|sheet| (SheetID(sheet), before.checked_sub(1).map(RuleID)));
         let rule = match &self.kind {
             CompiledRuleKind::Style { selectors, .. } => {
-                let id = selectors
-                    .publish_user_agent(engine, sheet, before, self.identity)
-                    .unwrap_or_else(|| {
-                        selectors.compile(engine, |engine, compiled, namespaces, scope| {
-                            publish_style_rule(engine, sheet, before, compiled, namespaces, scope)
-                        })
-                    });
-                if let Some(declarations) = &self.declarations {
-                    publish_rule_declarations(engine, id, declarations);
+                let (id, dormant_keys): (u32, Option<SmallVec<[StyleAtomID; 4]>>) =
+                    match selectors.publish_user_agent(engine, sheet, before, self.identity) {
+                        Some(id) => (id, None),
+                        None => selectors.compile(engine, |engine, compiled, namespaces, scope| {
+                            publish_style_rule_or_dormant(engine, sheet, before, compiled, namespaces, scope)
+                        }),
+                    };
+                let rule = id.checked_sub(1).map(RuleID);
+                match (rule, dormant_keys) {
+                    // NB: A dormant rule's declarations are published when it wakes, from its native target.
+                    (Some(rule), Some(keys)) => engine.host.dormant_rules.insert(rule, &keys, selectors.clone()),
+                    _ => {
+                        if let Some(declarations) = &self.declarations {
+                            publish_rule_declarations(engine, id, declarations);
+                        }
+                    }
                 }
-                id.checked_sub(1).map(RuleID)
+                rule
             }
             CompiledRuleKind::Named { kind, name } => {
                 let name = intern_native_text(engine, name);
@@ -328,9 +338,17 @@ impl RuleWrite {
             }
             Self::ReplaceSelectors { identity, selectors } => {
                 let rule = rule_number(engine, identity);
+                // NB: New selectors compile a dormant rule too, which then needs the declarations it skipped.
+                let woken = rule
+                    .checked_sub(1)
+                    .map(RuleID)
+                    .filter(|&rule| engine.host.dormant_rules.remove(rule).is_some());
                 selectors.compile(engine, |engine, compiled, namespaces, scope| {
                     publish_style_rule_selectors(engine, rule, compiled, namespaces, scope);
                 });
+                if let Some(rule) = woken {
+                    publish_target_declarations(engine, rule);
+                }
             }
             Self::RemoveRules(identities) => {
                 for identity in identities {
@@ -382,8 +400,55 @@ pub(crate) fn publish_native_rule_declarations(
     engine.native_rules.targets.get_mut(&rule).unwrap().declarations = declarations.clone();
     let version = engine.next_declaration_block_version();
     engine.record_rule_declarations_changed(rule, version);
+    // NB: A dormant rule publishes the declarations its native target holds when it wakes.
+    if engine.host.dormant_rules.is_dormant(rule) {
+        return;
+    }
     if let Some(declarations) = &declarations {
         publish_rule_declarations(engine, rule.0 + 1, declarations);
+    }
+}
+
+/// Publishes the declarations the native target of `rule` holds, as the rule's own.
+fn publish_target_declarations(engine: &mut StyleEngine, rule: RuleID) {
+    let declarations = engine
+        .native_rules
+        .targets
+        .get(&rule)
+        .and_then(|target| target.declarations().cloned());
+    if let Some(declarations) = declarations {
+        publish_rule_declarations(engine, rule.0 + 1, &declarations);
+    }
+}
+
+impl StyleEngine {
+    /// Compiles the dormant rules a key the staged elements carry wakes, as if they had just arrived, so that this
+    /// transaction routes and matches them with everything else that changed. Before it, no element carried any of
+    /// their keys, so each element they can match is staged with a change of one, and is evaluated in full.
+    pub(super) fn wake_dormant_rules(&mut self) {
+        if self.host.dormant_rules.is_empty() {
+            return;
+        }
+        let mut keys = Vec::new();
+        let dormant = &self.host.dormant_rules;
+        self.retained.facts.for_each_staged_atom(|atom| {
+            if dormant.has_key(atom) && !keys.contains(&atom) {
+                keys.push(atom);
+            }
+        });
+        if keys.is_empty() {
+            return;
+        }
+        for (rule, selectors) in self.host.dormant_rules.take_woken_by(keys) {
+            self.retained.woken_rules.insert(rule);
+            // NB: The declarations go first, so that the routes the program adds know whether the rule may move
+            //     layout geometry.
+            publish_target_declarations(self, rule);
+            selectors.compile(self, |engine, compiled, namespaces, scope| {
+                super::bridge::publish_woken_style_rule(engine, rule, compiled, namespaces, scope);
+            });
+        }
+        self.settle_program();
     }
 }
 

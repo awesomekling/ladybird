@@ -1460,7 +1460,8 @@ pub unsafe extern "C" fn style_engine_describes_animation_effects(
     })
 }
 
-/// Publish already bound immutable selector inputs, after all host interning has finished.
+/// Publishes a style rule with its selector program compiled at once, as unit tests that inspect the program expect.
+#[cfg(test)]
 pub(crate) fn publish_style_rule(
     engine: &mut StyleEngine,
     sheet: u32,
@@ -1486,6 +1487,54 @@ pub(crate) fn publish_style_rule(
     };
     let rule = engine.add_style_rule_in_scope(SheetID(sheet - 1), before, compiled, namespaces, &scope);
     rule.0 + 1
+}
+
+/// Publish already bound immutable selector inputs, after all host interning has finished, or add the rule dormant,
+/// answering the keys it waits for (see `StyleEngine::add_style_rule_or_dormant`).
+pub(crate) fn publish_style_rule_or_dormant(
+    engine: &mut StyleEngine,
+    sheet: u32,
+    before_rule: u32,
+    compiled: &[&CompiledSelector],
+    namespaces: NamespaceScope,
+    bound_scope: &BoundScopeChain,
+) -> (u32, Option<smallvec::SmallVec<[StyleAtomID; 4]>>) {
+    if sheet == 0 || compiled.is_empty() {
+        return (0, None);
+    }
+    let scope: Vec<_> = bound_scope.roots.iter().map(|selector| selector.as_ref()).collect();
+    let limits: Vec<_> = bound_scope.limits.iter().map(|selector| selector.as_ref()).collect();
+    let before = match before_rule {
+        0 => None,
+        id => Some(RuleID(id - 1)),
+    };
+    let scope = ScopeChain {
+        roots: &scope,
+        limits: &limits,
+        levels: &bound_scope.levels,
+        implicit_roots: &bound_scope.implicit_roots,
+    };
+    let (rule, keys) = engine.add_style_rule_or_dormant(SheetID(sheet - 1), before, compiled, namespaces, &scope);
+    (rule.0 + 1, keys)
+}
+
+/// Compiles the dormant rule `rule` that one of its keys woke.
+pub(crate) fn publish_woken_style_rule(
+    engine: &mut StyleEngine,
+    rule: RuleID,
+    compiled: &[&CompiledSelector],
+    namespaces: NamespaceScope,
+    bound_scope: &BoundScopeChain,
+) {
+    let scope: Vec<_> = bound_scope.roots.iter().map(|selector| selector.as_ref()).collect();
+    let limits: Vec<_> = bound_scope.limits.iter().map(|selector| selector.as_ref()).collect();
+    let scope = ScopeChain {
+        roots: &scope,
+        limits: &limits,
+        levels: &bound_scope.levels,
+        implicit_roots: &bound_scope.implicit_roots,
+    };
+    engine.wake_style_rule(rule, compiled, namespaces, &scope);
 }
 
 /// Publishes a style rule of a user-agent sheet with the selector program the process compiled for

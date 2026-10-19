@@ -107,6 +107,8 @@ define_counters! {
 
     // Stylesheet program.
     StyleRulesCompiled => "styleRulesCompiled",
+    StyleRulesDormant => "styleRulesDormant",
+    StyleRulesWoken => "styleRulesWoken",
     ExactSelectorEntries => "exactSelectorEntries",
     // Why an entry had to be conservative, so the remaining gap is a list rather than a feeling.
     UnsupportedPseudoClass => "unsupportedPseudoClass",

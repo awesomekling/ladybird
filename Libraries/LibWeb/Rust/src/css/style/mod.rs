@@ -771,6 +771,8 @@ pub(super) struct BatchCustomPropertyMatch {
 pub struct RetainedState {
     /// What the engine counts of its own decisions.
     counters: Counters,
+    /// The rules the transaction being taken woke, whose arrival its staged elements carry (see `wake_dormant_rules`).
+    woken_rules: HashSet<RuleID>,
     memory: MemoryController,
     /// The controller's Tier-3 admission facts, copied at the loop and quota boundaries that can
     /// change them. A walk reads admission from here: a step may not reach the controller, whose
@@ -1107,6 +1109,87 @@ pub struct RetainedState {
     diagnostic_plan_capture: Option<DiagnosticPlanCapture>,
 }
 
+/// The style rules that no element can match yet, because none carries the key their subjects need, and that the
+/// engine has therefore not compiled.
+///
+/// Most rules of a large sheet are for elements a page never has: of YouTube's 28k selectors, the keys of 71% are on
+/// no element. A dormant rule is live and in its sheet, but has no selector program, and so no routes and no place in
+/// any scope dispatch, which already makes it match nothing. When an element first carries one of its keys, the
+/// transaction that stages that element compiles it before it routes and matches anything (see `wake_dormant_rules`).
+#[derive(Clone, Default)]
+pub(super) struct DormantRules {
+    /// The dormant rules each key wakes, some of which may have woken or left through another key since.
+    by_key: HashMap<StyleAtomID, SmallVec<[RuleID; 2]>>,
+    /// The selectors each dormant rule is compiled from once it wakes.
+    selectors: HashMap<RuleID, rule_writes::BoundSelectors>,
+}
+
+impl DormantRules {
+    pub(super) fn is_dormant(&self, rule: RuleID) -> bool {
+        self.selectors.contains_key(&rule)
+    }
+
+    pub(super) fn insert(&mut self, rule: RuleID, keys: &[StyleAtomID], selectors: rule_writes::BoundSelectors) {
+        for &key in keys {
+            self.by_key.entry(key).or_default().push(rule);
+        }
+        self.selectors.insert(rule, selectors);
+    }
+
+    /// Forgets `rule`, answering the selectors it was waiting with if it was dormant.
+    pub(super) fn remove(&mut self, rule: RuleID) -> Option<rule_writes::BoundSelectors> {
+        self.selectors.remove(&rule)
+    }
+
+    /// Takes the dormant rules that any of `keys` wakes.
+    pub(super) fn take_woken_by(
+        &mut self,
+        keys: impl IntoIterator<Item = StyleAtomID>,
+    ) -> Vec<(RuleID, rule_writes::BoundSelectors)> {
+        let mut woken = Vec::new();
+        for key in keys {
+            let Some(rules) = self.by_key.remove(&key) else {
+                continue;
+            };
+            for rule in rules {
+                if let Some(selectors) = self.selectors.remove(&rule) {
+                    woken.push((rule, selectors));
+                }
+            }
+        }
+        woken
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.selectors.is_empty()
+    }
+
+    pub(super) fn has_key(&self, key: StyleAtomID) -> bool {
+        self.by_key.contains_key(&key)
+    }
+
+    /// The rules still dormant that `key` wakes.
+    pub(super) fn rules_woken_by(&self, key: StyleAtomID) -> impl Iterator<Item = RuleID> + '_ {
+        self.by_key
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|rule| self.selectors.contains_key(rule))
+    }
+
+    pub(super) fn keys(&self) -> impl Iterator<Item = StyleAtomID> + '_ {
+        self.by_key.keys().copied()
+    }
+}
+
+/// Whether style rules no element can match yet stay uncompiled, from LIBWEB_STYLE_LAZY_RULES (`0` to compile every
+/// rule at once).
+pub(super) fn lazy_rule_compilation_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("LIBWEB_STYLE_LAZY_RULES").map_or(true, |value| value != "0"))
+}
+
 /// Host-facing engine state: C++ ownership and journal intake.
 /// Never reachable from an evaluation step.
 #[derive(Clone)]
@@ -1148,6 +1231,7 @@ pub struct HostState {
     sheet_occurrence_memory: MemoryLease,
     /// The old dense rule sequence while one sheet is synchronously reparsed.
     sheet_rule_replacement: Option<SheetRuleReplacement>,
+    dormant_rules: DormantRules,
     /// Identities released at transaction settlement. The FFI keeps this batch borrowed until C++
     /// has removed its matching fly-string references and atom-keyed memo entries.
     reclaimed_style_atoms: Vec<ReclaimedStyleAtom>,

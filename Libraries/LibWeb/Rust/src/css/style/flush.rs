@@ -454,6 +454,7 @@ impl StyleEngine {
         }
         self.discard_prepared_batch_matching_traversal();
         self.discard_published_match_answers();
+        self.wake_dormant_rules();
         // Winners whose container verdicts moved since they were published are published again
         // from the nodes' retained answers, or dropped under a changing rule program: an answer
         // can name a rule this transaction removes or replaces.
@@ -517,7 +518,7 @@ impl StyleEngine {
                         | InputKey::CascadeTopology(_)
                         | InputKey::ElementDeclaration(..)
                         | InputKey::ElementStyleInput(_)
-                )
+                ) || self.retained.input_wakes_rule(input)
             });
         if !preserves_selector_incidence {
             self.retained.retained_selector_incidences.clear();
@@ -554,12 +555,13 @@ impl StyleEngine {
                         | InputKey::CustomPropertyRegistration(_)
                 )
             });
+        // NB: A rule this transaction woke matched nothing before, so each answer naming it now is a new identity.
         let match_identity_is_complete_output = !transaction.has_coarsened_markers()
             && transaction.inputs.iter().all(|input| {
                 !matches!(
                     input.key,
                     InputKey::RuleField(_, RuleField::Declarations | RuleField::Layer) | InputKey::CascadeTopology(_)
-                )
+                ) || self.retained.input_wakes_rule(input)
             });
         let retained_answer_patch_selection = self.rules_for_retained_answer_patch(&transaction);
         let transaction_supports_global_exact_cascade_stops =
@@ -574,7 +576,7 @@ impl StyleEngine {
                                 | LocalFeatureKey::CustomState(_)
                                 | LocalFeatureKey::Attribute(_)
                         )
-                    )
+                    ) || self.retained.input_wakes_rule(input)
                 }) && transaction.inputs.iter().all(|input| {
                     let InputKey::LocalFeature(node, LocalFeatureKey::Attribute(_)) = input.key else {
                         return true;
@@ -614,7 +616,7 @@ impl StyleEngine {
                     | InputKey::State(..)
                     | InputKey::ElementDeclaration(..)
                     | InputKey::ElementStyleInput(_)
-            )
+            ) || self.retained.input_wakes_rule(input)
         });
         let transaction_supports_retained_cascade_stops =
             retained_answer_patch_selection.as_ref().is_some_and(|selection| {
@@ -804,6 +806,10 @@ impl StyleEngine {
                 if reconstruct {
                     break;
                 }
+                // NB: A rule this transaction woke is outside the prefix program the relation maintains.
+                if self.retained.input_wakes_rule(input) {
+                    continue;
+                }
                 let (tree_scope, maintained) = match input.key {
                     InputKey::LocalFeature(node, LocalFeatureKey::TagName | LocalFeatureKey::FoldedTagName) => {
                         (self.retained.tree.tree_scope(node), false)
@@ -868,11 +874,11 @@ impl StyleEngine {
             // Only program routing joins against the resident nodes, and a transaction of pure
             // DOM inputs has no program joins at all. Walking every element of the document to
             // enumerate them for such a transaction would be the flush's single largest cost.
+            // NB: A rule this transaction woke joins no resident node: its matches are all on staged elements.
             let program_routing_needs_resident_nodes = !outer_arrivals.is_empty()
-                && transaction
-                    .inputs
-                    .iter()
-                    .any(|input| !transaction.program_joins_for(input.key).is_empty());
+                && transaction.inputs.iter().any(|input| {
+                    !self.retained.input_wakes_rule(input) && !transaction.program_joins_for(input.key).is_empty()
+                });
             let mut resident_nodes: Vec<StyleNodeID> = if !program_routing_needs_resident_nodes {
                 Vec::new()
             } else if regions.topology_node_count() == connected_element_count {
@@ -945,6 +951,12 @@ impl StyleEngine {
                 .iter()
                 .filter(|input| !matches!(input.key, InputKey::SheetAttachment(..)))
             {
+                // NB: The elements a rule this transaction woke can match are all staged with the key that woke
+                //     it, and their own inputs reach it now that it has routes. Joining its program would only
+                //     search the document for them again.
+                if self.retained.input_wakes_rule(input) {
+                    continue;
+                }
                 self.route_program_input(
                     input,
                     transaction.program_joins_for(input.key),
@@ -1179,12 +1191,13 @@ impl StyleEngine {
         // A rule's declarations edited may be custom properties, which are no winners. The
         // descriptors of a named rule context, such as a counter style's, are no declarations a
         // winner holds: the context moves, as below.
+        // NB: The declarations of a rule this transaction woke are new to every element, whose answer names it anew.
         let rule_declarations_edited = transaction.inputs.iter().any(|input| {
             matches!(input.key, InputKey::RuleField(rule, RuleField::Declarations)
             if !matches!(
                 self.retained.program.rule_version(rule).kind,
                 RuleKind::CounterStyle | RuleKind::Function | RuleKind::FontFeatureValues
-            ))
+            )) && !self.retained.input_wakes_rule(input)
         });
         let mut named_rules_moved = NamedRuleContextsMoved::default();
         for delta in &transaction.program_joins {

@@ -1,4 +1,4 @@
-first edit compiles private contents: 3
+first edit compiles private contents: 2
 first edit: rgb(255, 0, 0), rgb(0, 128, 0)
 later insertion compiles one rule: 1
 later insertion: rgb(0, 128, 0), rgb(0, 128, 0)

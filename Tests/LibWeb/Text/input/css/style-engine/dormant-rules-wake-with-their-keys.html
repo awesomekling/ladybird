@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<span id="before" class="shown"></span>
+<span id="after" class="shown-too"></span>
+<style>
+    .shown { color: red }
+    .late { color: green }
+    .late-too { color: red }
+    .shown-too { color: green }
+    .arrives { color: green }
+    #named > .child { width: 50px }
+    .never-used { color: red }
+</style>
+<div id="root"></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+        const before = internals.styleEngineCounters();
+        const root = document.getElementById("root");
+
+        // Nothing carried these keys when the sheet arrived. The element that first does wakes its rule.
+        const arrives = document.createElement("span");
+        arrives.className = "arrives";
+        root.append(arrives);
+        println(`an arriving element: ${getComputedStyle(arrives).color}`);
+
+        // A rule that wakes takes its place in the cascade among the rules that were compiled at once.
+        document.getElementById("before").classList.add("late");
+        document.getElementById("after").classList.add("late-too");
+        println(`a later woken rule wins: ${getComputedStyle(document.getElementById("before")).color}`);
+        println(`an earlier woken rule loses: ${getComputedStyle(document.getElementById("after")).color}`);
+
+        // A woken rule that moves geometry reaches a layout query.
+        const parent = document.createElement("div");
+        parent.id = "named";
+        const child = document.createElement("div");
+        child.className = "child";
+        parent.append(child);
+        root.append(parent);
+        println(`a woken rule moves geometry: ${child.offsetWidth}`);
+
+        const after = internals.styleEngineCounters();
+        println(`rules woken: ${after.styleRulesWoken - before.styleRulesWoken}`);
+    });
+</script>

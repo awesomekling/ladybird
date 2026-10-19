@@ -2099,6 +2099,8 @@ impl RetainedState {
 impl StyleEngine {
     /// Normalize the pending inputs without advancing the committed snapshot.
     pub(super) fn drain_transaction(&mut self) -> StyleTransaction {
+        // NB: Every way of taking a transaction applies the staged facts, so each wakes the rules they need first.
+        self.wake_dormant_rules();
         self.merge_deferred_geometry_transaction();
         self.host.initial_tree_bulk_load_is_pending = false;
         self.finalize_staged_sheet_rule_replacements();
@@ -2222,6 +2224,7 @@ impl StyleEngine {
     /// Release a drained transaction's scratch charge.
     pub fn release_transaction(&mut self, transaction: StyleTransaction) {
         transaction.release(&mut self.retained.memory);
+        self.retained.woken_rules.clear();
         self.forget_departed_elements();
         self.host.tree_staging.clear();
         self.host
@@ -2249,6 +2252,8 @@ impl StyleEngine {
         visited += self.retained.facts.collect_atoms(&mut atoms);
         visited += self.retained.program.collect_atoms(&mut atoms);
         visited += self.retained.programs.collect_atoms(&mut atoms);
+        // NB: A dormant rule waits for its keys by atom. Reclaiming one would leave the rule asleep for good.
+        atoms.extend(self.host.dormant_rules.keys());
         if !self.retained.html_element_namespace.is_none() {
             atoms.insert(self.retained.html_element_namespace);
         }

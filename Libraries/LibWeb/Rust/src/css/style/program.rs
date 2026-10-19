@@ -979,6 +979,20 @@ impl StyleSheetProgram {
         self.bump_version();
     }
 
+    /// Replace the version of a rule that just woke with the one carrying its selector program, as
+    /// `replace_rule_version` does, without changing its sheet's dispatch version: the ranked
+    /// dispatches of the sheet take the rule in place (see `extend_with_late_rules`).
+    pub(crate) fn replace_woken_rule_version(&mut self, rule: RuleID, contents: RuleVersion) {
+        assert_eq!(contents.rule, rule, "a rule version must name its own rule");
+        let slot = self.rules[rule.0 as usize].version_slot;
+        let selector_changed = self.rule_versions[slot as usize].selector_program != contents.selector_program;
+        self.rule_versions.set(slot as usize, contents);
+        if selector_changed {
+            self.bump_routing_liveness_version();
+        }
+        self.bump_version();
+    }
+
     pub(crate) fn replace_reserved_rule_version(&mut self, rule: RuleID, contents: RuleVersion) {
         assert_eq!(contents.rule, rule, "a rule version must name its own rule");
         let slot = self.rules[rule.0 as usize].version_slot;
@@ -1287,6 +1301,7 @@ impl StyleSheetProgram {
     ///
     /// The cascade needs this to know which properties a rule can win: only a property some added,
     /// removed, modified or reprioritized rule declares is a candidate for a winner change.
+    #[cfg(test)]
     pub fn set_rule_declared_properties(
         &mut self,
         rule: RuleID,
@@ -1294,6 +1309,27 @@ impl StyleSheetProgram {
         written_values: Vec<RetainedStyleValueData>,
         custom_declarations: Vec<CustomDeclaration>,
         custom_written_values: Vec<RetainedStyleValueData>,
+    ) {
+        self.set_rule_declared_properties_with(
+            rule,
+            declared,
+            written_values,
+            custom_declarations,
+            custom_written_values,
+            false,
+        );
+    }
+
+    /// Record a rule's declared properties as `set_rule_declared_properties` does. With `keeps_dispatch`, the sheet's
+    /// dispatch version stays as it is, for a rule that just woke, which the ranked dispatches take in place.
+    pub(crate) fn set_rule_declared_properties_with(
+        &mut self,
+        rule: RuleID,
+        declared: Vec<DeclaredProperty>,
+        written_values: Vec<RetainedStyleValueData>,
+        custom_declarations: Vec<CustomDeclaration>,
+        custom_written_values: Vec<RetainedStyleValueData>,
+        keeps_dispatch: bool,
     ) {
         debug_assert!(written_values.is_empty() || written_values.len() == declared.len());
         debug_assert!(custom_written_values.is_empty() || custom_written_values.len() == custom_declarations.len());
@@ -1336,7 +1372,9 @@ impl StyleSheetProgram {
         if moves_layout_geometry && self.rule_can_decide(rule) {
             self.bump_routing_liveness_version();
         }
-        self.bump_rule_sheet_dispatch_version(rule);
+        if !keeps_dispatch {
+            self.bump_rule_sheet_dispatch_version(rule);
+        }
     }
 
     fn invalidate_semantic_declarations(&mut self) {

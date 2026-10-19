@@ -2423,6 +2423,9 @@ pub struct RuleDispatch {
     cascade_properties: SharedVector<u16>,
     cascade_entries: SharedVector<CascadeEntryData>,
     topology: Arc<RuleDispatchTopology>,
+    /// Rows added after the dispatch was built, by the key the candidate walk reaches them through. They stay out of
+    /// the shared topology and the prefix program (see `extend_with_late_rules`).
+    late_rows: HashMap<DispatchKey, Vec<DispatchRow>>,
     residency: MemoryLease,
 }
 
@@ -2446,6 +2449,7 @@ impl WeakRuleDispatch {
             cascade_orders_by_rule_entry: SharedVector::default(),
             cascade_properties: SharedVector::default(),
             cascade_entries: SharedVector::default(),
+            late_rows: HashMap::default(),
             residency: MemoryLease::new(MemoryCategory::RuleProgram),
         })
     }
@@ -2461,6 +2465,7 @@ impl Default for RuleDispatch {
             cascade_properties: SharedVector::default(),
             cascade_entries: SharedVector::default(),
             topology: Arc::new(RuleDispatchTopology::default()),
+            late_rows: HashMap::default(),
             residency: MemoryLease::new(MemoryCategory::RuleProgram),
         }
     }
@@ -2547,6 +2552,7 @@ impl RuleDispatch {
             cascade_properties: SharedVector::default(),
             cascade_entries: SharedVector::default(),
             topology: Arc::clone(&template.topology),
+            late_rows: HashMap::default(),
             residency: MemoryLease::new(MemoryCategory::RuleProgram),
         }
     }
@@ -2918,6 +2924,181 @@ impl RuleDispatch {
             .copied()
     }
 
+    /// How many rows `extend_with_late_rules` added to this dispatch after it was built.
+    #[must_use]
+    pub(super) fn late_row_count(&self) -> usize {
+        self.late_rows.values().map(Vec::len).sum()
+    }
+
+    /// A copy of this dispatch to extend, which shares its storage until the extension writes to it.
+    #[must_use]
+    pub(super) fn clone_for_extension(&self) -> Self {
+        Self {
+            entries: Arc::clone(&self.entries),
+            entry_bindings: self.entry_bindings.clone(),
+            cascade_order_rule_pages: self.cascade_order_rule_pages.clone(),
+            cascade_orders_by_rule_entry: self.cascade_orders_by_rule_entry.clone(),
+            cascade_properties: self.cascade_properties.clone(),
+            cascade_entries: self.cascade_entries.clone(),
+            topology: Arc::clone(&self.topology),
+            late_rows: self.late_rows.clone(),
+            residency: MemoryLease::new(MemoryCategory::RuleProgram),
+        }
+    }
+
+    /// Add the entries of rules that arrive after this dispatch was built, without building it again.
+    ///
+    /// Each entry becomes a row that only the candidate walk reaches, through its key. The topology, the ancestor
+    /// indices and the prefix program are left as they are, so everything the prefix caches retain for this dispatch
+    /// stays true: an entry outside the prefix program is evaluated by the exact matcher wherever it is a candidate.
+    /// The entries take their places among the cascade ranks, which the ranks after them make room for.
+    ///
+    /// `entries` gives each entry with its key, which must not be universal; one rule's entries come together and in
+    /// order, and the rules are new to this dispatch.
+    pub(super) fn extend_with_late_rules<K: Ord, Properties: ExactSizeIterator<Item = u16>>(
+        &mut self,
+        entries: &[(DispatchKey, DispatchEntry)],
+        mut priority_of: impl FnMut(DispatchEntry) -> K,
+        mut blocks_pruning: impl FnMut(DispatchEntry) -> bool,
+        mut properties_of: impl FnMut(DispatchEntry) -> Option<Properties>,
+    ) {
+        if entries.is_empty() {
+            return;
+        }
+        let rank_space = self.entry_count();
+        let mut row_of_rank = vec![u32::MAX; rank_space];
+        for (row, binding) in self.entry_bindings.iter().enumerate() {
+            if binding.cascade_order_index != u32::MAX {
+                let rank = self.cascade_orders_by_rule_entry[binding.cascade_order_index as usize];
+                row_of_rank[rank as usize] = u32::try_from(row).expect("dispatch row space exhausted");
+            }
+        }
+        let ranks: Vec<u32> = (0..rank_space)
+            .filter(|&rank| row_of_rank[rank] != u32::MAX)
+            .map(|rank| u32::try_from(rank).expect("dispatch entry space exhausted"))
+            .collect();
+
+        // Find where each new entry goes among the existing ranks, ordered as `assign_cascade_order` orders them.
+        let mut key_of = |entry: DispatchEntry| (priority_of(entry), entry.rule, entry.program, entry.entry);
+        let keys: Vec<_> = entries.iter().map(|&(_, entry)| key_of(entry)).collect();
+        let end = u32::try_from(rank_space).expect("dispatch entry space exhausted");
+        let positions_by_entry: Vec<u32> = keys
+            .iter()
+            .map(|key| {
+                let before =
+                    ranks.partition_point(|&rank| key_of(self.entry(DispatchRow(row_of_rank[rank as usize]))) < *key);
+                ranks.get(before).copied().unwrap_or(end)
+            })
+            .collect();
+        let mut placed: Vec<(u32, usize)> = positions_by_entry.iter().copied().zip(0..).collect();
+        placed.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| keys[left.1].cmp(&keys[right.1])));
+        let positions: Vec<u32> = placed.iter().map(|&(position, _)| position).collect();
+        let shifted =
+            |rank: u32| rank + u32::try_from(positions.partition_point(|&position| position <= rank)).unwrap();
+        let mut new_ranks = vec![0u32; entries.len()];
+        for (offset, &(position, index)) in placed.iter().enumerate() {
+            new_ranks[index] = position + u32::try_from(offset).expect("dispatch entry space exhausted");
+        }
+
+        for rank in self.cascade_orders_by_rule_entry.make_mut().iter_mut() {
+            *rank = shifted(*rank);
+        }
+        let mut cascade_entries = vec![CascadeEntryData::default(); rank_space + entries.len()];
+        for (rank, data) in self.cascade_entries.iter().enumerate() {
+            cascade_entries[shifted(u32::try_from(rank).expect("dispatch entry space exhausted")) as usize] = *data;
+        }
+
+        let metadata = Arc::make_mut(&mut self.entries);
+        for (index, &(key, entry)) in entries.iter().enumerate() {
+            debug_assert!(
+                key != DispatchKey::Universal,
+                "a late entry must be reached through its key"
+            );
+            debug_assert!(!entry.prefix_matched && !entry.multi_key && entry.required_ancestor_index.is_none());
+            let row = DispatchRow::from_index(metadata.rows.len());
+            let row_number = NonZeroU32::new(row.0.checked_add(1).expect("dispatch row space exhausted")).unwrap();
+            metadata.rows.push(DispatchEntryMetadata {
+                identity: entry.identity,
+                program: entry.program,
+                entry: entry.entry,
+                required_attribute_value: entry.required_attribute_value,
+                required_parent: entry.required_parent,
+                required_ancestor: entry.required_ancestor,
+                required_ancestor_index: None,
+                required_subject_bloom: entry.required_subject_bloom,
+                prefix_matched: false,
+                multi_key: false,
+                next_for_identity: None,
+            });
+            let identity = entry.identity.0 as usize;
+            if metadata.entry_heads.len() <= identity {
+                metadata.entry_heads.resize(identity + 1, None);
+            }
+            match metadata.entry_heads[identity] {
+                None => metadata.entry_heads[identity] = Some(row_number),
+                Some(mut last) => {
+                    while let Some(next) = metadata.rows[(last.get() - 1) as usize].next_for_identity {
+                        last = next;
+                    }
+                    metadata.rows[(last.get() - 1) as usize].next_for_identity = Some(row_number);
+                }
+            }
+            if !metadata.entry_tails.is_empty() {
+                metadata.entry_tails.resize(metadata.entry_heads.len(), None);
+                metadata.entry_tails[identity] = Some(row_number);
+            }
+
+            let rule_index = entry.rule.0 as usize;
+            let page_index = rule_index / CASCADE_ORDER_RULE_PAGE_SIZE;
+            if self.cascade_order_rule_pages.len() <= page_index {
+                self.cascade_order_rule_pages.resize_with(page_index + 1, || None);
+            }
+            let page = self.cascade_order_rule_pages[page_index].get_or_insert_with(|| {
+                (0..CASCADE_ORDER_RULE_PAGE_SIZE)
+                    .map(|_| CascadeOrderRule::default())
+                    .collect()
+            });
+            let order_rule = &mut page.make_mut()[rule_index % CASCADE_ORDER_RULE_PAGE_SIZE];
+            if order_rule.entry_count == 0 {
+                order_rule.program = entry.program;
+                order_rule.entry_start =
+                    u32::try_from(self.cascade_orders_by_rule_entry.len()).expect("dispatch entry space exhausted");
+            }
+            assert_eq!(
+                order_rule.program, entry.program,
+                "one rule cannot have multiple selector programs"
+            );
+            assert_eq!(
+                order_rule.entry_count, entry.entry,
+                "a rule's late entries must come in order"
+            );
+            order_rule.entry_count += 1;
+            let cascade_order_index = order_rule.entry_start + entry.entry;
+            self.cascade_orders_by_rule_entry.make_mut().push(new_ranks[index]);
+            self.entry_bindings.make_mut().push(DispatchEntryBinding {
+                rule: entry.rule,
+                cascade_order_index,
+            });
+
+            let entry = DispatchEntry {
+                cascade_order: new_ranks[index],
+                ..entry
+            };
+            let data = &mut cascade_entries[new_ranks[index] as usize];
+            data.pruning_blocker = blocks_pruning(entry);
+            data.property_start =
+                u32::try_from(self.cascade_properties.len()).expect("cascade property space exhausted");
+            if let Some(properties) = properties_of(entry) {
+                data.property_count =
+                    u16::try_from(properties.len()).expect("a rule cannot declare more than u16::MAX longhands");
+                self.cascade_properties.make_mut().extend(properties);
+                data.prunable = true;
+            }
+            self.late_rows.entry(key).or_default().push(row);
+        }
+        self.cascade_entries = cascade_entries.into_iter().collect();
+    }
+
     /// Publish each entry's complete normal author declaration inventory beside the dispatch.
     ///
     /// Cascade matching reads this directly while walking candidates. Keeping it in the immutable
@@ -3126,6 +3307,14 @@ impl RuleDispatch {
                 for &id in self.bucket_ids(key, entries) {
                     offer(id, attribute_value);
                 }
+                // NB: Late rows are never prefix matched, so every walk considers them.
+                if !self.late_rows.is_empty()
+                    && let Some(late) = self.late_rows.get(&key)
+                {
+                    for &id in late {
+                        offer(id, attribute_value);
+                    }
+                }
             });
         }
         if descending_cascade_order && workspace.candidates.len() > 1 {
@@ -3159,6 +3348,7 @@ impl RuleDispatch {
                 self.cascade_orders_by_rule_entry,
                 self.cascade_properties,
                 self.cascade_entries,
+                self.late_rows,
             ];
             cached [];
             nested [
@@ -3167,6 +3357,10 @@ impl RuleDispatch {
                     .iter()
                     .flatten()
                     .map(ShallowCapacityBytes::shallow_capacity_bytes)
+                    .sum::<u64>(),
+                self.late_rows
+                    .values()
+                    .map(|rows| (rows.capacity() * size_of::<DispatchRow>()) as u64)
                     .sum::<u64>(),
             ];
             skip [self.entries, self.residency];
@@ -4040,6 +4234,21 @@ impl ElementFactStore {
             Self::decrement_atom_count(&mut self.atom_live_counts, attribute.value);
             Self::decrement_atom_count(&mut self.attribute_name_live_counts, attribute.name);
             Self::decrement_atom_count(&mut self.attribute_value_live_counts, attribute.value);
+        }
+    }
+
+    /// Whether any committed element row carries `atom`, as a name of any kind.
+    #[must_use]
+    pub(super) fn atom_is_live(&self, atom: StyleAtomID) -> bool {
+        self.atom_live_counts
+            .get(atom.0 as usize)
+            .is_some_and(|count| count != 0)
+    }
+
+    /// Visits every atom the rows staged since the last application carry, which `apply_staged` commits next.
+    pub(super) fn for_each_staged_atom(&self, mut visit: impl FnMut(StyleAtomID)) {
+        for (_, facts) in self.staging.dirty_rows() {
+            Self::for_each_row_atom(facts, &mut visit);
         }
     }
 
@@ -6394,6 +6603,89 @@ mod tests {
             dispatch.cascade_order_for_entry(RuleID(999), SelectorProgramID(999), 0),
             None
         );
+    }
+
+    #[test]
+    fn late_rules_take_their_cascade_places_and_are_reached_through_their_keys() {
+        let mut pools = DispatchStoragePools::default();
+        let mut dispatch = RuleDispatch::new();
+        let entry = |rule: u32| DispatchEntry {
+            identity: EntryID(rule),
+            rule: RuleID(rule),
+            program: SelectorProgramID(rule),
+            entry: 0,
+            cascade_order: 0,
+            required_attribute_value: StyleAtomID::NONE,
+            required_parent: None,
+            required_ancestor: None,
+            required_ancestor_index: None,
+            required_subject_bloom: 0,
+            prefix_matched: false,
+            multi_key: false,
+        };
+        dispatch.insert(DispatchKey::Class(StyleAtomID(10)), entry(1));
+        dispatch.insert(DispatchKey::Class(StyleAtomID(11)), entry(3));
+        dispatch.insert(DispatchKey::Class(StyleAtomID(12)), entry(5));
+        dispatch.assign_cascade_order(|candidate| candidate.rule);
+        let properties_of = |candidate: DispatchEntry| Some([candidate.rule.0 as u16].into_iter());
+        dispatch.assign_cascade_properties(&mut pools, |_| false, properties_of);
+
+        dispatch.extend_with_late_rules(
+            &[
+                (DispatchKey::Class(StyleAtomID(13)), entry(2)),
+                (DispatchKey::Class(StyleAtomID(10)), entry(6)),
+                (DispatchKey::Class(StyleAtomID(11)), entry(4)),
+            ],
+            |candidate| candidate.rule,
+            |candidate| candidate.rule == RuleID(4),
+            properties_of,
+        );
+
+        assert_eq!(dispatch.late_row_count(), 3);
+        let orders: Vec<u32> = (1..=6)
+            .map(|rule| {
+                dispatch
+                    .cascade_order_for_entry(RuleID(rule), SelectorProgramID(rule), 0)
+                    .unwrap()
+            })
+            .collect();
+        assert!(orders.is_sorted() && orders.windows(2).all(|pair| pair[0] != pair[1]));
+        for (rule, &order) in (1..=6).zip(&orders) {
+            assert_eq!(dispatch.cascade_properties_for_order(order), Some(&[rule as u16][..]));
+            assert_eq!(dispatch.cascade_pruning_blocker_for_order(order), rule == 4);
+        }
+        assert_eq!(
+            dispatch
+                .entries_for_identity(EntryID(6))
+                .map(|candidate| (candidate.rule, candidate.cascade_order))
+                .collect::<Vec<_>>(),
+            [(RuleID(6), orders[5])]
+        );
+
+        let mut facts = StyleNodeFacts::new();
+        facts.push_row(
+            StyleNodeID::element(1),
+            StyleAtomID(1),
+            StyleAtomID::NONE,
+            StateSet::default(),
+            &[StyleAtomID(10), StyleAtomID(13)],
+            &[],
+        );
+        let mut workspace = DispatchCandidateWorkspace::default();
+        let candidates: Vec<(u32, u32)> = dispatch
+            .candidates_for(
+                &facts,
+                0,
+                false,
+                ParentDispatchFacts::Unknown,
+                None,
+                CandidateEntries::All,
+                true,
+                &mut workspace,
+            )
+            .map(|candidate| (candidate.rule.0, candidate.cascade_order))
+            .collect();
+        assert_eq!(candidates, [(6, orders[5]), (2, orders[1]), (1, orders[0])]);
     }
 
     #[test]

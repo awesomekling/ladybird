@@ -353,6 +353,18 @@ impl RetainedState {
         scope: &ScopeChain<'_>,
         reusable: Option<SelectorProgramID>,
     ) -> SelectorProgramID {
+        let compiled = self.compile_selector_program_noting_names(selectors, namespaces, scope);
+        self.attach_compiled_selector_program(compiled, reusable)
+    }
+
+    /// Compiles `selectors` into a program, and records the attribute names it tests, which the host reports facts
+    /// for: an element arriving with them reports what the program reads, whether or not the program is kept.
+    pub(super) fn compile_selector_program_noting_names(
+        &mut self,
+        selectors: &[&CompiledSelector],
+        namespaces: NamespaceScope,
+        scope: &ScopeChain<'_>,
+    ) -> SelectorProgram {
         let compiled = compile_selector_program(
             &mut self.atoms,
             self.fold_id_and_class_name_case,
@@ -363,6 +375,15 @@ impl RetainedState {
             &self.counters,
         );
         self.note_selector_attribute_names(&compiled);
+        compiled
+    }
+
+    /// Makes `compiled` the program of a rule whose previous program was `reusable`.
+    pub(super) fn attach_compiled_selector_program(
+        &mut self,
+        compiled: SelectorProgram,
+        reusable: Option<SelectorProgramID>,
+    ) -> SelectorProgramID {
         if let Some(reusable) = reusable
             && self.programs.get(reusable) == &compiled
         {
@@ -1979,6 +2000,7 @@ impl StyleEngine {
         Self {
             retained: RetainedState {
                 counters: Counters::new(),
+                woken_rules: HashSet::default(),
                 memory,
                 admission: AdmissionFacts::default(),
                 deferred_pseudo_elements: 0,
@@ -2135,6 +2157,7 @@ impl StyleEngine {
                 sheet_occurrence_storage_bytes: 0,
                 sheet_occurrence_memory: MemoryLease::new(MemoryCategory::RuleProgram),
                 sheet_rule_replacement: None,
+                dormant_rules: DormantRules::default(),
                 reclaimed_style_atoms: Vec::new(),
                 defers_atom_sweep: false,
             },
@@ -2445,6 +2468,30 @@ impl StyleEngine {
         self.host.owes_element_style_input(node)
     }
 
+    /// Whether an input that `key` routes wakes a dormant rule that may move layout geometry. Such a rule has no
+    /// routes to answer for it yet, so this asks what its native target declares, as routing would ask its program.
+    fn key_wakes_dormant_rules_affecting_layout_geometry(&self, key: RoutingKey) -> bool {
+        let (RoutingKey::Id(atom) | RoutingKey::Class(atom) | RoutingKey::TagName(atom)) = key else {
+            return false;
+        };
+        self.host.dormant_rules.rules_woken_by(atom).any(|rule| {
+            self.retained.program.rule_can_decide(rule)
+                && self
+                    .native_rules
+                    .targets
+                    .get(&rule)
+                    .and_then(|target| target.declarations())
+                    .is_some_and(|declarations| {
+                        !declarations.custom_properties.is_empty()
+                            || declarations.properties.iter().any(|declaration| {
+                                crate::css::property_metadata::property_may_affect_layout_geometry(
+                                    declaration.property_id,
+                                )
+                            })
+                    })
+        })
+    }
+
     /// Whether settling the pending selector inputs can change geometry derived from the committed
     /// layout. This is deliberately a proof of independence rather than a list of properties which
     /// usually avoid layout: anything not explicitly known to preserve geometry remains observable.
@@ -2489,11 +2536,12 @@ impl StyleEngine {
                 // Geometry independence depends on the routing key's rules, not the node.
                 // Reuse that proof when several journal inputs reach the same key.
                 checked_keys.insert(key)
-                    && self.retained.routing.key_may_affect_layout_geometry(
-                        key,
-                        &self.retained.program,
-                        &self.retained.programs,
-                    )
+                    && (self.key_wakes_dormant_rules_affecting_layout_geometry(key)
+                        || self.retained.routing.key_may_affect_layout_geometry(
+                            key,
+                            &self.retained.program,
+                            &self.retained.programs,
+                        ))
             })
         })
     }
@@ -2856,6 +2904,65 @@ impl StyleEngine {
         self.add_style_rule_with(sheet, before, |engine, previous_program| {
             engine.compile_selectors(selectors, namespaces, scope, previous_program)
         })
+    }
+
+    /// Adds a style rule as `add_style_rule_in_scope` does, unless no element carries any key its selectors' subjects
+    /// need. Such a rule is added dormant, without a selector program, and the keys it waits for are answered.
+    pub(crate) fn add_style_rule_or_dormant(
+        &mut self,
+        sheet: SheetID,
+        before: Option<RuleID>,
+        selectors: &[&CompiledSelector],
+        namespaces: NamespaceScope,
+        scope: &ScopeChain<'_>,
+    ) -> (RuleID, Option<SmallVec<[StyleAtomID; 4]>>) {
+        // NB: A rule placed before another, or reusing the identity of a rule its sheet's replacement drops, keeps the
+        //     eager path, whose bookkeeping both need.
+        let may_sleep = super::lazy_rule_compilation_enabled()
+            && before.is_none()
+            && self
+                .host
+                .sheet_rule_replacement
+                .as_ref()
+                .is_none_or(|replacement| replacement.sheet != sheet)
+            && self.program.sheet_origin(sheet) == CascadeOrigin::Author;
+        if !may_sleep {
+            return (
+                self.add_style_rule_in_scope(sheet, before, selectors, namespaces, scope),
+                None,
+            );
+        }
+        let compiled = self.compile_selector_program_noting_names(selectors, namespaces, scope);
+        let keys =
+            dormancy_keys(&compiled).filter(|keys| keys.iter().all(|&key| !self.retained.facts.atom_is_live(key)));
+        let Some(keys) = keys else {
+            let rule = self.add_style_rule_with(sheet, None, |engine, previous_program| {
+                engine.attach_compiled_selector_program(compiled, previous_program)
+            });
+            return (rule, None);
+        };
+        let rule = self.append_rule(sheet, None, RuleKind::Style);
+        self.retained.counters.bump(Counter::StyleRulesDormant);
+        (rule, Some(keys))
+    }
+
+    /// Compiles a dormant rule that one of its keys woke, as if it had just arrived.
+    pub(crate) fn wake_style_rule(
+        &mut self,
+        rule: RuleID,
+        selectors: &[&CompiledSelector],
+        namespaces: NamespaceScope,
+        scope: &ScopeChain<'_>,
+    ) {
+        let mut version = self.current_rule_version(rule);
+        if !self.current_rule_is_live(rule) || version.kind != RuleKind::Style || version.selector_program.is_some() {
+            return;
+        }
+        let program = self.compile_selectors(selectors, namespaces, scope, None);
+        self.add_routing_rule(rule, program);
+        version.selector_program = Some(program);
+        self.replace_rule_version(rule, version);
+        self.retained.counters.bump(Counter::StyleRulesWoken);
     }
 
     /// Add a style rule whose selector program `attach` gives it, from the program of the rule it replaces, if any.
@@ -3392,6 +3499,7 @@ impl RetainedState {
     pub(super) fn retire_node_state(&mut self, node: StyleNodeID) {
         let Self {
             counters: _,
+            woken_rules: _,
             memory: _,
             admission: _,
             deferred_pseudo_elements: _,
@@ -3608,4 +3716,34 @@ pub(crate) fn next_declaration_block_version(versions: &std::sync::atomic::Atomi
 /// it moves with every name an `attr()` anywhere in the process can newly read, too.
 pub(crate) fn with_attr_names_read(selector_version: u64) -> u64 {
     selector_version.wrapping_add(crate::css::parser::arbitrary_substitution::attr_names_read_generation())
+}
+
+/// The keys a dormant rule with `program` would wait for: one an element must carry for each of its selectors' subjects
+/// to match it, or `None` where a subject needs no such key, and the rule has to be compiled at once.
+fn dormancy_keys(program: &SelectorProgram) -> Option<SmallVec<[StyleAtomID; 4]>> {
+    // NB: A program whose selectors leave their tree scope (`:host`, `::slotted()`, `::part()`) is reached through
+    //     another tree's elements, so its keys say nothing about the elements it matches.
+    if program.entries().is_empty() || program.can_leave_its_scope() || program.subject_can_leave_its_scope() {
+        return None;
+    }
+    let mut keys = SmallVec::new();
+    for entry in 0..program.entries().len() {
+        let key = match program.dispatch_metadata(entry).key {
+            DispatchKey::Id(atom) | DispatchKey::Class(atom) | DispatchKey::TagName(atom) => atom,
+            _ => return None,
+        };
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    Some(keys)
+}
+
+impl RetainedState {
+    /// Whether `input` is a field of a rule that this transaction woke. Such a rule matched nothing before, and each
+    /// element it can match now is staged with the key that woke it, so its program and declarations arriving reach
+    /// nothing that element's own inputs do not.
+    pub(super) fn input_wakes_rule(&self, input: &NormalizedInput) -> bool {
+        matches!(input.key, InputKey::RuleField(rule, _) if self.woken_rules.contains(&rule))
+    }
 }
