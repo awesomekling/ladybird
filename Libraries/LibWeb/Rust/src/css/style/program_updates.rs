@@ -229,8 +229,9 @@ impl RetainedState {
     ///
     /// A woken rule changes no sheet's dispatch version, so each program keeps its identity, and the prefix caches keep
     /// what they retain for it: its rule entries become late rows of its dispatch (see `extend_with_late_rules`). A
-    /// program no scope uses, or one whose late rows would outnumber the rows it was built with, is dropped instead,
-    /// and the next scope to ask for it builds it again with these rules in place.
+    /// program no scope uses, one whose late rows would outnumber the rows it was built with, or one a large batch of
+    /// woken rules reaches, is dropped instead, and the next scope to ask for it builds it again with these rules in
+    /// place.
     pub(super) fn extend_scope_programs_with_woken_rules(&mut self) {
         if self.woken_rules.is_empty() {
             return;
@@ -274,13 +275,16 @@ impl RetainedState {
                 .map(|entries| entries.into_iter().flatten().collect());
             // NB: Building the dispatch again builds a new prefix program, which the prefix caches lose everything
             //     they retain for. Late rows only miss the prefix program's shortcuts, so they may grow until they
-            //     outnumber the rows the dispatch was built with.
+            //     outnumber the rows the dispatch was built with. A batch as large as a sheet's worth of rules, which
+            //     a document's first elements wake, is built in at once, though: its rules would miss the shortcuts
+            //     for good, and the cold match that follows such a batch builds the prefix caches again anyway.
             let late_row_limit = (program.dispatch.entry_count() - program.dispatch.late_row_count()).max(1024);
+            const LATE_BATCH_LIMIT: usize = 512;
             let (Some(scope), Some(entries)) = (scope, entries) else {
                 self.drop_scope_program(id);
                 continue;
             };
-            if program.dispatch.late_row_count() + entries.len() > late_row_limit {
+            if entries.len() > LATE_BATCH_LIMIT || program.dispatch.late_row_count() + entries.len() > late_row_limit {
                 self.drop_scope_program(id);
                 continue;
             }
