@@ -111,7 +111,7 @@ struct SnapshotBuilder<'vm> {
 }
 
 /// The number of bytecode instructions of an executable, counted up to one past `limit`.
-fn instruction_count(executable: &Executable, limit: u32) -> u32 {
+pub(super) fn instruction_count(executable: &Executable, limit: u32) -> u32 {
     let bytecode = executable.bytecode();
     let mut count = 0;
     let mut offset = 0;

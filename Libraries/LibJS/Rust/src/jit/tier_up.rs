@@ -13,7 +13,7 @@ use libjs_jit::code::CompiledCode;
 use super::code::{CompileState, JitCode, SnapshotExecutable};
 use super::compile_queue::CompileResult;
 use super::executable_memory::ExecutableMemory;
-use super::snapshot::capture_snapshot;
+use super::snapshot::{capture_snapshot, instruction_count};
 use super::{CompileJob, DeferGc, JitState};
 use crate::bytecode::executable::Executable;
 use crate::bytecode::feedback::tier_up_costs;
@@ -115,7 +115,11 @@ fn function_to_compile(vm: &Vm) -> Option<Gc<EcmascriptFunctionObject>> {
     //     Generators, async functions and async generators resume in their code at the entries of their
     //     continuations.
     let function = as_ecmascript_function_object(vm.running_execution_context_ref().function.get()?)?;
-    (!function.shared_data().is_module_wrapper()).then_some(function)
+    if function.shared_data().is_module_wrapper() {
+        return None;
+    }
+    let max_size = vm.jit.options.max_size;
+    (instruction_count(&vm.current_executable(), max_size) <= max_size).then_some(function)
 }
 
 /// Whether the running frame runs a builtin written in JavaScript.

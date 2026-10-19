@@ -511,6 +511,7 @@ LIBJS_JIT=threshold=100,help ./Build/release/bin/js script.js
 | `warmup=N`              | 8       | How many invocations a function runs before the interpreter collects feedback for it.                              |
 | `sync`                  | off     | Compile on the main thread when a function gets hot, at the same points in every run, instead of on a compile thread. |
 | `compile-threads=N`     | 0       | How many threads compile hot functions; 0 starts one per processor core but one, up to 8.                         |
+| `max-size=N`            | 20000   | How many bytecode instructions a function may have to be compiled.                                                 |
 | `callee-boost=N`        | 16      | How many invocations a call from compiled code into a function the interpreter runs counts as; 1 for one.          |
 | `inline-budget=N`       | 250     | How many bytecode instructions the inlined callees of one compile may have together.                               |
 | `inline-max-size=N`     | 30      | How many bytecode instructions one inlined callee may have.                                                        |

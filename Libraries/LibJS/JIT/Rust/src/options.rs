@@ -33,6 +33,10 @@ pub struct Options {
     /// `compile_thread_count()`).
     pub compile_threads: u32,
 
+    /// How many bytecode instructions an executable may have to be compiled. Larger ones, like the body of a bundled
+    /// script that runs once, stay in the interpreter: compiling them costs much time and memory and gains little.
+    pub max_size: u32,
+
     /// How many function entries a call from compiled code into a function the interpreter runs costs that function's
     /// tier-up budget: code hot enough to be compiled calls it, so it is likely to be hot as well. 1 counts such calls
     /// like any other.
@@ -106,6 +110,7 @@ impl Default for Options {
             warmup: 8,
             sync: false,
             compile_threads: 0,
+            max_size: 20000,
             callee_boost: 16,
             help: false,
             dump_ir: false,
@@ -198,6 +203,14 @@ const DEFINITIONS: &[Definition] = &[
             bare: None,
         },
         description: "How many threads compile hot functions; 0 starts one per processor core but one.",
+    },
+    Definition {
+        name: "max-size",
+        setting: Setting::Number {
+            field: |options| &mut options.max_size,
+            bare: None,
+        },
+        description: "How many bytecode instructions a function may have to be compiled.",
     },
     Definition {
         name: "callee-boost",
@@ -473,7 +486,7 @@ mod tests {
     #[test]
     fn every_option_parses() {
         let options = Options::parse(
-            "threshold=1,warmup=2,sync,compile-threads=9,callee-boost=5,inline-budget=3,inline-max-size=4,inline-depth=0,dump-ir,dump-passes,dump-asm,\
+            "threshold=1,warmup=2,sync,compile-threads=9,max-size=8,callee-boost=5,inline-budget=3,inline-max-size=4,inline-depth=0,dump-ir,dump-passes,dump-asm,\
              dump-feedback,verify-ir,log-exits,perf-map,coverage=/tmp/coverage,seed=18446744073709551615,\
              stress-exits=6,stress-osr,stress-registers,random-thresholds,stress-install,stress-invalidate=7,help",
         )
@@ -484,6 +497,7 @@ mod tests {
             warmup: 2,
             sync: true,
             compile_threads: 9,
+            max_size: 8,
             callee_boost: 5,
             help: true,
             dump_ir: true,
@@ -567,7 +581,7 @@ mod tests {
             assert!(help.contains(&definition.syntax()), "{}", definition.name);
         }
         assert!(help.ends_with(
-            "In effect: LIBJS_JIT=on,threshold=50,warmup=8,compile-threads=0,callee-boost=16,inline-budget=250,inline-max-size=30,inline-depth=5,\
+            "In effect: LIBJS_JIT=on,threshold=50,warmup=8,compile-threads=0,max-size=20000,callee-boost=16,inline-budget=250,inline-max-size=30,inline-depth=5,\
              seed=1,stress-exits=0,stress-invalidate=0\n"
         ));
     }
