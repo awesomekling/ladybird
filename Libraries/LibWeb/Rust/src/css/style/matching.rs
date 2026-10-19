@@ -1000,6 +1000,46 @@ impl RetainedState {
         dispatch
     }
 
+    /// Drops the templates no live scope program evaluates against. Each style transaction
+    /// prepares its scopes first, so the templates a rebuild after a program change seeds from
+    /// have served by the time it ends. Sheets that arrive one at a time give every intermediate
+    /// sheet set its own shape, and each of those templates would otherwise keep a complete
+    /// dispatch alive for the rest of the document's life.
+    pub(super) fn drop_unused_scope_templates(&mut self) {
+        let live = self
+            .scope_programs
+            .iter()
+            .flatten()
+            .map(|program| &program.dispatch)
+            .collect::<Vec<_>>();
+        let is_live = |template: &Arc<RuleDispatch>| live.iter().any(|dispatch| Arc::ptr_eq(dispatch, template));
+        let dispatch_templates = self.scope_dispatch_templates.len();
+        let cascade_templates = self.scope_cascade_templates.len();
+        self.scope_dispatch_templates.retain(|_, template| is_live(template));
+        self.scope_cascade_templates.retain(|_, template| is_live(template));
+        if self.scope_dispatch_templates.len() == dispatch_templates
+            && self.scope_cascade_templates.len() == cascade_templates
+        {
+            return;
+        }
+        let live_ancestors = live
+            .iter()
+            .map(|dispatch| dispatch.ancestor_topology())
+            .collect::<Vec<_>>();
+        let is_live_ancestor = |template: &Arc<index::AncestorDispatchTopology>| {
+            live_ancestors.iter().any(|ancestor| Arc::ptr_eq(ancestor, template))
+        };
+        // NB: The table is shared copy-on-write with forks; only a removal may unshare it.
+        if !self.ancestor_dispatch_templates.values().all(is_live_ancestor) {
+            self.ancestor_dispatch_templates
+                .retain(|_, template| is_live_ancestor(template));
+        }
+        dispatch_pools()
+            .dispatches
+            .templates
+            .retain(|_, template| template.is_alive());
+    }
+
     pub(super) fn scope_dispatch_key(&self, scope: TreeScopeID) -> ScopeDispatchKey {
         let document_sheet_mode = if scope == TreeScopeID::DOCUMENT {
             DocumentSheetMode::None

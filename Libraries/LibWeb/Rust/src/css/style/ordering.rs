@@ -2231,6 +2231,7 @@ impl StyleEngine {
         self.host.program_staging.clear();
         self.host.environment_move_changed_names.clear();
         self.sweep_selector_programs();
+        self.retained.drop_unused_scope_templates();
         self.shed_routing_for_detached_sheets();
     }
 
