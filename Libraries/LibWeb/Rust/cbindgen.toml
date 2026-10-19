@@ -24,3 +24,5 @@ rename_types = "PascalCase"
 [export.rename]
 # A style engine handle is opaque to C++.
 "StyleEngineHandle" = "const void*"
+# A lazily tokenized component-value list is opaque to C++.
+"LazyComponentValues" = "void*"

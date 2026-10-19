@@ -5501,19 +5501,20 @@ pub(crate) fn unresolved_value(
     presence: SubstitutionFunctionsPresence,
 ) -> StyleValueData {
     let source_text = trim_ascii_whitespace(unresolved_source);
-    let component_source = if comparison_source.is_empty() {
-        source_text
+    let source_text = CssString::from_utf16(source_text);
+    let value_comparison_text = CssString::from_utf16(comparison_source);
+    let components = crate::css::style_value::RetainedComponentValueList::lazy(if comparison_source.is_empty() {
+        source_text.clone()
     } else {
-        comparison_source
-    };
-    let components = crate::css::style_value::RetainedComponentValueList::from_source(component_source);
+        value_comparison_text.clone()
+    });
     if presence.attr {
         crate::css::parser::arbitrary_substitution::note_attr_names_read_by(components.as_slice());
     }
     StyleValueData::Unresolved {
         components,
-        source_text: CssString::from_utf16(source_text),
-        value_comparison_text: CssString::from_utf16(comparison_source),
+        source_text,
+        value_comparison_text,
         presence_attr: presence.attr,
         presence_dashed_function: presence.dashed_function,
         presence_env: presence.env,

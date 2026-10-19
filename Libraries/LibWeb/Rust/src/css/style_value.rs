@@ -23,39 +23,70 @@ pub(crate) use crate::css::css_string::{CssString, CssStringList};
 /// unresolved style value but never inspects its elements.
 #[repr(C)]
 pub struct RetainedComponentValueList {
-    pointer: *mut c_void,
-    length: usize,
+    /// The text the values are tokenized from the first time they are asked for, unless they were given.
+    ///
+    /// NB: Only an unresolved value that some element substitutes ever needs its values, and most never do: the rules
+    ///     declaring them match nothing.
+    source: CssString,
+    values: LazyComponentValues,
 }
 
-// SAFETY: This handle owns an immutable boxed slice. The bounds cover the erased element type.
+/// The values of a `RetainedComponentValueList` once tokenized: an erased `Box<Box<[ComponentValue]>>`, or null. C++ sees
+/// a pointer.
+/// cbindgen:ignore
+#[repr(transparent)]
+pub struct LazyComponentValues(std::sync::atomic::AtomicPtr<c_void>);
+
+// SAFETY: This handle owns an immutable boxed slice, set at most once. The bounds cover the erased element type.
 unsafe impl Send for RetainedComponentValueList where ComponentValue: Send {}
 unsafe impl Sync for RetainedComponentValueList where ComponentValue: Sync {}
 
 impl RetainedComponentValueList {
-    pub(crate) fn from_values(values: Vec<ComponentValue>) -> Self {
-        let mut values = values.into_boxed_slice();
-        let result = Self {
-            pointer: values.as_mut_ptr().cast(),
-            length: values.len(),
-        };
-        std::mem::forget(values);
-        result
+    fn erase(values: Vec<ComponentValue>) -> *mut c_void {
+        Box::into_raw(Box::new(values.into_boxed_slice())).cast()
     }
 
-    pub(crate) fn from_source(source: &[u16]) -> Self {
-        let values = crate::css::parser::component_value::consume_a_list_of_component_values(
-            crate::css::css_tokenizer::tokenize_for_parser(source),
-        )
-        .unwrap_or_default();
-        Self::from_values(values)
+    pub(crate) fn from_values(values: Vec<ComponentValue>) -> Self {
+        Self {
+            source: CssString::none(),
+            values: LazyComponentValues(std::sync::atomic::AtomicPtr::new(Self::erase(values))),
+        }
+    }
+
+    /// The values `source` tokenizes to, tokenized the first time they are asked for.
+    pub(crate) fn lazy(source: CssString) -> Self {
+        Self {
+            source,
+            values: LazyComponentValues(std::sync::atomic::AtomicPtr::new(std::ptr::null_mut())),
+        }
     }
 
     pub(crate) fn as_slice(&self) -> &[ComponentValue] {
-        if self.pointer.is_null() {
-            return &[];
+        use std::sync::atomic::Ordering;
+        let mut values = self.values.0.load(Ordering::Acquire);
+        if values.is_null() {
+            let tokenized = Self::erase(
+                crate::css::parser::component_value::consume_a_list_of_component_values(
+                    crate::css::css_tokenizer::tokenize_for_parser(self.source.units()),
+                )
+                .unwrap_or_default(),
+            );
+            values = match self.values.0.compare_exchange(
+                std::ptr::null_mut(),
+                tokenized,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => tokenized,
+                Err(winner) => {
+                    // SAFETY: The losing tokenization was never published, so this is its only owner.
+                    drop(unsafe { Box::from_raw(tokenized.cast::<Box<[ComponentValue]>>()) });
+                    winner
+                }
+            };
         }
-        // SAFETY: The allocation is owned by this handle and has `length` initialized elements.
-        unsafe { std::slice::from_raw_parts(self.pointer.cast(), self.length) }
+        // SAFETY: A non-null pointer owns a boxed slice that is never replaced while the handle lives.
+        unsafe { &*values.cast::<Box<[ComponentValue]>>() }
     }
 }
 
@@ -308,6 +339,9 @@ mod unresolved_component_tests {
 
 impl Clone for RetainedComponentValueList {
     fn clone(&self) -> Self {
+        if self.values.0.load(std::sync::atomic::Ordering::Acquire).is_null() {
+            return Self::lazy(self.source.clone());
+        }
         Self::from_values(self.as_slice().to_vec())
     }
 }
@@ -322,16 +356,12 @@ impl PartialEq for RetainedComponentValueList {
 
 impl Drop for RetainedComponentValueList {
     fn drop(&mut self) {
-        if self.pointer.is_null() {
+        let values = *self.values.0.get_mut();
+        if values.is_null() {
             return;
         }
-        // SAFETY: `from_values` leaked exactly this boxed slice to the handle.
-        unsafe {
-            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
-                self.pointer.cast::<ComponentValue>(),
-                self.length,
-            )));
-        }
+        // SAFETY: `erase` leaked exactly this box to the handle.
+        drop(unsafe { Box::from_raw(values.cast::<Box<[ComponentValue]>>()) });
     }
 }
 
@@ -3143,19 +3173,20 @@ pub unsafe extern "C" fn rust_style_value_create_unresolved_from_source(
         };
         (source_text.to_vec(), Vec::new())
     };
-    let component_source = if value_comparison_text.is_empty() {
-        &source_text
+    let source_text_string = CssString::from_utf16(&source_text);
+    let value_comparison_string = CssString::from_utf16(&value_comparison_text);
+    let components = RetainedComponentValueList::lazy(if value_comparison_text.is_empty() {
+        source_text_string.clone()
     } else {
-        &value_comparison_text
-    };
-    let components = RetainedComponentValueList::from_source(component_source);
+        value_comparison_string.clone()
+    });
     if presence_attr {
         crate::css::parser::arbitrary_substitution::note_attr_names_read_by(components.as_slice());
     }
     Arc::into_raw(Arc::new(StyleValueData::Unresolved {
         components,
-        source_text: CssString::from_utf16(&source_text),
-        value_comparison_text: CssString::from_utf16(&value_comparison_text),
+        source_text: source_text_string,
+        value_comparison_text: value_comparison_string,
         presence_attr,
         presence_dashed_function,
         presence_env,
