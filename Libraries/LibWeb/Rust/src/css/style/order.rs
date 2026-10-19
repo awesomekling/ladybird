@@ -85,6 +85,19 @@ impl OrderMaintenance {
         self.free_entries.push(token.0);
     }
 
+    /// Moves the order's vectors into allocations of their length where more than a quarter of one is unused, and
+    /// answers whether it moved any.
+    pub fn compact(&mut self) -> bool {
+        fn compact<T: Clone>(values: &mut Vec<T>) -> bool {
+            if values.capacity() <= values.len() + values.len() / 4 {
+                return false;
+            }
+            super::shared_vector::compact(values);
+            true
+        }
+        compact(&mut self.labels) | compact(&mut self.free_entries) | compact(&mut self.order)
+    }
+
     #[must_use]
     pub fn capacity_bytes(&self) -> u64 {
         capacity_bytes! {

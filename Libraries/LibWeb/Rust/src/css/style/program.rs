@@ -1592,6 +1592,30 @@ impl StyleSheetProgram {
     pub(super) fn share_rule_storage(&mut self) {
         self.rule_versions.share();
         self.rules.share();
+        // NB: A sheet's rules arrive one at a time, so the vectors that hold them grow by doubling. Move the ones
+        //     left mostly empty into allocations of their length.
+        let mut previous_capacity = 0;
+        let mut current_capacity = 0;
+        for sheet in &mut self.sheets {
+            if has_slack(&sheet.rules) {
+                previous_capacity += (sheet.rules.capacity() * size_of::<RuleID>()) as u64;
+                super::shared_vector::compact(&mut sheet.rules);
+                current_capacity += (sheet.rules.capacity() * size_of::<RuleID>()) as u64;
+            }
+            let order_capacity = sheet.rule_order.capacity_bytes();
+            if sheet.rule_order.compact() {
+                previous_capacity += order_capacity;
+                current_capacity += sheet.rule_order.capacity_bytes();
+            }
+        }
+        for children in &mut self.rule_children {
+            if has_slack(children) {
+                previous_capacity += (children.capacity() * size_of::<RuleID>()) as u64;
+                super::shared_vector::compact(children);
+                current_capacity += (children.capacity() * size_of::<RuleID>()) as u64;
+            }
+        }
+        self.record_capacity_change(previous_capacity, current_capacity);
     }
 
     fn allocate_rule_version(&mut self, contents: RuleVersion) -> u32 {
@@ -1695,6 +1719,11 @@ impl StyleSheetProgram {
         #[cfg(test)]
         assert_eq!(current, self.recompute_capacity_bytes());
     }
+}
+
+/// Whether more than a quarter of `values`' capacity is unused.
+fn has_slack<T>(values: &Vec<T>) -> bool {
+    values.capacity() > values.len() + values.len() / 4
 }
 
 fn semantic_declaration_bucket_capacity_bytes(bucket: &Vec<SemanticDeclarationEntry>) -> u64 {
