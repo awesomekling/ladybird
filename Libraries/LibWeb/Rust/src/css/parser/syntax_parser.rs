@@ -2175,6 +2175,9 @@ struct SyntaxParseBuilder {
     parse_context: *const ParseContext,
     preserve_property_source_text: bool,
     dedup: DeclarationDedup,
+    /// The names of the declarations, which their name offsets point into until `finish` moves the names of the
+    /// declarations it keeps into `values`.
+    declaration_names: Vec<u16>,
 }
 
 /// Lets the declarations and declaration blocks a sheet repeats share one parse, for the length of the sheet's parse.
@@ -2796,7 +2799,7 @@ impl SyntaxParseBuilder {
         errors.into_boxed_slice()
     }
 
-    fn finish(self) -> ParsedStyleSheet {
+    fn finish(mut self) -> ParsedStyleSheet {
         let mut declaration_errors = self.collect_declaration_errors().into_vec();
         let mut root_declarations = Vec::new();
         for item in &self.items {
@@ -2809,9 +2812,13 @@ impl SyntaxParseBuilder {
             new_indices[index] = 0;
         }
         let mut declarations = Vec::new();
-        for (index, declaration) in self.declarations.into_iter().enumerate() {
+        for (index, mut declaration) in std::mem::take(&mut self.declarations).into_iter().enumerate() {
             if new_indices[index] != usize::MAX {
                 new_indices[index] = declarations.len();
+                let name =
+                    &self.declaration_names[declaration.name_offset..declaration.name_offset + declaration.name_length];
+                declaration.name_offset = self.values.len();
+                self.values.extend_from_slice(name);
                 declarations.push(declaration);
             }
         }
@@ -2883,7 +2890,14 @@ impl SyntaxParseBuilder {
             parse_context,
             preserve_property_source_text,
             dedup: DeclarationDedup::default(),
+            declaration_names: Vec::new(),
         }
+    }
+
+    fn append_declaration_name(&mut self, name: &[u16]) -> (usize, usize) {
+        let offset = self.declaration_names.len();
+        self.declaration_names.extend_from_slice(name);
+        (offset, name.len())
     }
 
     pub(crate) fn append_value(&mut self, value: &[u16]) -> (usize, usize) {
@@ -2949,7 +2963,7 @@ impl SyntaxParseBuilder {
         declaration: &Declaration,
         font_feature_maximum_value_count: Option<usize>,
     ) -> usize {
-        let (name_offset, name_length) = self.append_value(declaration.name.as_ref());
+        let (name_offset, name_length) = self.append_declaration_name(declaration.name.as_ref());
         let value_source = component_list_source(&declaration.value);
         let shareable = declaration.is_property && !value_may_not_be_shared(value_source.as_ref());
         let value_key = shareable.then(|| {
@@ -3099,7 +3113,7 @@ impl SyntaxParseBuilder {
     }
 
     fn append_collected_declaration(&mut self, descriptor: &DescriptorData) {
-        let (name_offset, name_length) = self.append_value(descriptor.name.units());
+        let (name_offset, name_length) = self.append_declaration_name(descriptor.name.units());
         self.declarations.push(ParsedDeclaration {
             name_offset,
             name_length,
@@ -3184,7 +3198,8 @@ impl SyntaxParseBuilder {
                 value: value.clone(),
             };
             if declaration.property_id == property_id::CUSTOM {
-                let name = &self.values[declaration.name_offset..declaration.name_offset + declaration.name_length];
+                let name =
+                    &self.declaration_names[declaration.name_offset..declaration.name_offset + declaration.name_length];
                 block.set_custom_property(CssString::from_utf16(name), property);
             } else {
                 block.append_in_specified_order(property);
@@ -3446,7 +3461,7 @@ impl SyntaxParseBuilder {
                             if declaration.font_feature_value_count == 0 {
                                 continue;
                             }
-                            let name = &self.values
+                            let name = &self.declaration_names
                                 [declaration.name_offset..declaration.name_offset + declaration.name_length];
                             let values = &self.font_feature_values[declaration.font_feature_values_start
                                 ..declaration.font_feature_values_start + declaration.font_feature_value_count];
