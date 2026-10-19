@@ -2895,6 +2895,8 @@ pub struct SelectorPrograms {
     /// Open-addressed structural interning table. Reclamation rebuilds it, so lookup never has to
     /// carry tombstones for vacant program identities.
     program_index: SharedVector<Option<NonZeroU32>>,
+    /// Whether the indices changed since `share_indices` last ran.
+    indices_changed: bool,
     /// What the programs themselves reserve, accumulated as they arrive. A program is immutable
     /// once compiled, so this is settled by the one place that can move it - which matters because
     /// compiling a rule settles the charge, and deriving it by walking the list would make a sheet
@@ -2914,6 +2916,7 @@ impl Default for SelectorPrograms {
             entry_locations: SharedVector::default(),
             vacant_entries: Vec::new(),
             program_index: SharedVector::default(),
+            indices_changed: false,
             program_memory: MemoryLease::new(MemoryCategory::RuleProgram),
             memory: MemoryLease::new(MemoryCategory::RuleProgram),
             scope: SelectorProgramScope::Document,
@@ -3001,6 +3004,7 @@ impl SelectorPrograms {
     }
 
     fn insert(&mut self, bucket: usize, program: SelectorProgramStorage) -> SelectorProgramID {
+        self.indices_changed = true;
         let entry_count = program.program().entries().len();
         let id = self.vacant_programs.last().copied().unwrap_or_else(|| {
             SelectorProgramID(u32::try_from(self.programs.len()).expect("selector program space exhausted"))
@@ -3062,6 +3066,7 @@ impl SelectorPrograms {
     }
 
     fn rebuild_program_index(&mut self) {
+        self.indices_changed = true;
         let capacity = ((self.programs.len() + 1) * 4).next_power_of_two().max(16);
         self.program_index.clear();
         self.program_index.make_mut().resize(capacity, None);
@@ -3085,6 +3090,13 @@ impl SelectorPrograms {
     }
 
     pub(super) fn share_indices(&mut self, memory: &mut MemoryController) {
+        // NB: Programs and indices that changed since the last call stay owned until a call finds them unchanged.
+        //     Programs that arrive transaction after transaction, as dormant rules wake, then extend one owned copy
+        //     instead of copying and hashing all of them each time.
+        if std::mem::take(&mut self.indices_changed) {
+            self.settle_memory(memory);
+            return;
+        }
         if matches!(self.scope, SelectorProgramScope::Process) {
             self.programs.share(&mut selector_program_pools().program_attachments);
         }
@@ -3206,6 +3218,7 @@ impl SelectorPrograms {
     }
 
     pub fn sweep_unreferenced(&mut self, referenced: &[bool]) {
+        self.indices_changed = true;
         self.vacant_programs.clear();
         for (index, slot) in self.programs.make_mut().iter_mut().enumerate() {
             if referenced.get(index).copied().unwrap_or(false) {
@@ -3482,6 +3495,10 @@ impl RouteDirectory {
         if routes.last() != Some(&route) {
             routes.push(route);
         }
+    }
+
+    fn is_flat(&self) -> bool {
+        matches!(self, Self::FlatAfterIdle { .. } | Self::FlatAfterChange { .. })
     }
 
     fn get(&self, key: RoutingKey) -> &[RouteID] {
@@ -4759,7 +4776,12 @@ impl RoutingRegistry {
         let mut pools = routing_pools();
         let changed = self.by_input.finish(&mut pools.flat_route_directories)
             | self.arrival_by_input.finish(&mut pools.flat_route_directories);
-        self.routes.share(&mut pools);
+        // NB: The route columns change whenever the directories do, so they are shared once the directories settle.
+        //     Rules that arrive transaction after transaction, as dormant rules wake, then extend one owned copy
+        //     instead of copying and hashing every route each time.
+        if self.by_input.is_flat() && self.arrival_by_input.is_flat() {
+            self.routes.share(&mut pools);
+        }
         changed
     }
 
@@ -8054,6 +8076,11 @@ mod tests {
         for programs in [&mut first, &mut second] {
             programs.add(make_program(7));
             programs.add(make_program(8));
+            programs.share_indices(&mut memory);
+            assert!(
+                !programs.program_index.is_shared(),
+                "indices that just changed stay owned"
+            );
             programs.share_indices(&mut memory);
         }
         assert_eq!(first.program_index.as_ptr(), second.program_index.as_ptr());

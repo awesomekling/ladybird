@@ -117,6 +117,13 @@ impl<T> Deref for SharedVector<T> {
     }
 }
 
+impl<T> SharedVector<T> {
+    #[cfg(test)]
+    pub(super) fn is_shared(&self) -> bool {
+        matches!(self.storage, Storage::Shared(_))
+    }
+}
+
 impl<T: Clone> SharedVector<T> {
     pub(super) fn make_mut(&mut self) -> &mut Vec<T> {
         if matches!(self.storage, Storage::Shared(_)) {
