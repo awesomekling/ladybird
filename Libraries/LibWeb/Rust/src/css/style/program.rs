@@ -981,8 +981,8 @@ impl StyleSheetProgram {
     }
 
     /// Replace the version of a rule that just woke with the one carrying its selector program, as
-    /// `replace_rule_version` does, without changing its sheet's dispatch version: the ranked
-    /// dispatches of the sheet take the rule in place (see `extend_with_late_rules`).
+    /// `replace_rule_version` does, without changing its sheet's dispatch version or the program's
+    /// version: the ranked dispatches of the sheet take the rule in place (see `extend_with_late_rules`).
     pub(crate) fn replace_woken_rule_version(&mut self, rule: RuleID, contents: RuleVersion) {
         assert_eq!(contents.rule, rule, "a rule version must name its own rule");
         let slot = self.rules[rule.0 as usize].version_slot;
@@ -991,7 +991,8 @@ impl StyleSheetProgram {
         if selector_changed {
             self.bump_routing_liveness_version();
         }
-        self.bump_version();
+        // NB: The program keeps its version, which the cascade winners every element keeps are tied to. The rule
+        //     matched nothing before, so a winner it can change is one of an element the transaction reaches anyway.
     }
 
     pub(crate) fn replace_reserved_rule_version(&mut self, rule: RuleID, contents: RuleVersion) {
