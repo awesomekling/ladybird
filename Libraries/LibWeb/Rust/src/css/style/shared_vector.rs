@@ -143,6 +143,14 @@ impl<T: Clone> SharedVector<T> {
     }
 }
 
+/// Moves `values` into an allocation of exactly its length, for a vector that is done growing. Shrinking in place may
+/// keep the whole allocation: the allocator reuses a block for any size above half of it.
+pub(super) fn compact<T: Clone>(values: &mut Vec<T>) {
+    if values.capacity() > values.len() {
+        *values = values.as_slice().to_vec();
+    }
+}
+
 impl<T: Clone + Eq + Hash> SharedVector<T> {
     pub(super) fn share(&mut self, pool: &mut SharedVectorPool<T>) {
         let Storage::Owned(values) = &self.storage else { return };
@@ -158,6 +166,8 @@ impl<T: Clone + Eq + Hash> SharedVector<T> {
         let shared = match pool.pool.find(hash, |data| data.values == values) {
             Some(found) => found,
             None => {
+                let mut values = values;
+                compact(&mut values);
                 let mut memory = MemoryLease::new(pool.category);
                 memory.resize_required_to(
                     &mut pool.pool.memory,

@@ -3697,6 +3697,7 @@ impl RouteColumns {
         let shared = match pools.route_columns.find(hash, |candidate| candidate.data == *data) {
             Some(found) => found,
             None => {
+                data.compact();
                 // Offsets and lengths can agree even when route keys or rule bindings differ.
                 // Share each immutable range column independently of the complete registry.
                 data.paths.share(&mut pools.route_ranges);
@@ -3752,6 +3753,20 @@ impl RouteColumnData {
 
     fn is_empty(&self) -> bool {
         self.headers.is_empty()
+    }
+
+    /// Drops the growth slack of the columns before they are shared and frozen.
+    fn compact(&mut self) {
+        use super::shared_vector::compact;
+        compact(&mut self.headers);
+        compact(&mut self.anchors);
+        compact(&mut self.entry_facts);
+        compact(&mut self.inverse_steps);
+        compact(&mut self.keys);
+        compact(&mut self.relational);
+        compact(&mut self.sibling_first);
+        compact(&mut self.canonical_next);
+        self.canonical_route_heads.shrink_to_fit();
     }
 
     fn capacity_bytes(&self) -> u64 {
