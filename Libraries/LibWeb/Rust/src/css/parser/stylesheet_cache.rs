@@ -242,8 +242,45 @@ impl ContextKey {
     }
 }
 
+/// Identifies a sheet's text without keeping a copy of it: its length and two keyed hashes of its code units. The
+/// keys are random for each process, so a page cannot make two different texts collide.
+#[derive(PartialEq, Eq, Hash)]
+struct TextDigest {
+    length: usize,
+    hashes: [u64; 2],
+}
+
+impl TextDigest {
+    fn new(source: TokenizerInput<'_>) -> Self {
+        const CHUNK_BYTES: usize = 4096;
+        static KEYS: OnceLock<[RandomState; 2]> = OnceLock::new();
+        let mut hashers = KEYS
+            .get_or_init(|| [RandomState::new(), RandomState::new()])
+            .each_ref()
+            .map(RandomState::build_hasher);
+        // NB: Equal texts hash equally whether they arrive as ASCII or as UTF-16.
+        let units: Box<dyn Iterator<Item = u16>> = match source {
+            TokenizerInput::Ascii(units) => Box::new(units.iter().map(|&unit| u16::from(unit))),
+            TokenizerInput::Utf16(units) => Box::new(units.iter().copied()),
+        };
+        let mut chunk = Vec::with_capacity(CHUNK_BYTES);
+        for unit in units {
+            chunk.extend_from_slice(&unit.to_ne_bytes());
+            if chunk.len() == CHUNK_BYTES {
+                hashers.iter_mut().for_each(|hasher| hasher.write(&chunk));
+                chunk.clear();
+            }
+        }
+        hashers.iter_mut().for_each(|hasher| hasher.write(&chunk));
+        Self {
+            length: source.len(),
+            hashes: hashers.map(|hasher| hasher.finish()),
+        }
+    }
+}
+
 struct StyleSheetKey {
-    text: Box<[u16]>,
+    text: TextDigest,
     context: Option<ContextKey>,
 }
 
@@ -343,7 +380,7 @@ pub(super) unsafe fn parse_with_cache(
         None => None,
     };
     let key = StyleSheetKey {
-        text: own_text(source),
+        text: TextDigest::new(source),
         context: context_key,
     };
     static HASHER: OnceLock<RandomState> = OnceLock::new();
