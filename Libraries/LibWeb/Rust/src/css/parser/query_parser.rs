@@ -1524,13 +1524,113 @@ impl FfiQueryHandle {
     }
 }
 
-pub(crate) fn media_query_handle(query: MediaQuery) -> Arc<FfiQueryHandle> {
+impl MediaQuery {
+    fn detach(&mut self) {
+        if let Some(media_type) = &mut self.media_type {
+            media_type.detach();
+        }
+        if let Some(condition) = &mut self.condition {
+            condition.detach();
+        }
+    }
+}
+
+impl Expression {
+    /// Detaches every component value and string the expression keeps (see `ComponentValue::detach`).
+    fn detach(&mut self) {
+        match self {
+            Self::Not(expression)
+            | Self::InParens(expression)
+            | Self::StyleFunction(expression)
+            | Self::ScrollStateFunction(expression) => expression.detach(),
+            Self::And(expressions) | Self::Or(expressions) => expressions.iter_mut().for_each(Expression::detach),
+            Self::GeneralEnclosed { component, .. } => component.detach(),
+            Self::GeneralEnclosedValues { components, .. } => components.iter_mut().for_each(ComponentValue::detach),
+            Self::QueryFeature(feature) => feature.detach(),
+            Self::SupportsFeature(feature) => feature.detach(),
+            Self::StyleFeature(feature) => feature.detach(),
+        }
+    }
+}
+
+impl QueryFeature {
+    fn detach(&mut self) {
+        match self {
+            Self::Boolean { .. } => {}
+            Self::Plain { value, .. } => value.components.iter_mut().for_each(ComponentValue::detach),
+            Self::Range { left, right, .. } => {
+                if let Some((value, _)) = left {
+                    value.components.iter_mut().for_each(ComponentValue::detach);
+                }
+                if let Some((_, value)) = right {
+                    value.components.iter_mut().for_each(ComponentValue::detach);
+                }
+            }
+        }
+    }
+}
+
+impl SupportsFeature {
+    fn detach(&mut self) {
+        match self {
+            Self::Declaration { components, .. } | Self::Selector { components, .. } => {
+                components.iter_mut().for_each(ComponentValue::detach);
+            }
+            Self::FontTech { name, .. }
+            | Self::FontFormat { name, .. }
+            | Self::AtRule { name, .. }
+            | Self::Env { name, .. } => name.detach(),
+        }
+    }
+}
+
+impl StyleRangeValue {
+    fn detach(&mut self) {
+        match self {
+            Self::Property(name) => name.detach(),
+            Self::Components(components) => components.iter_mut().for_each(ComponentValue::detach),
+        }
+    }
+}
+
+impl StyleFeature {
+    fn detach(&mut self) {
+        match self {
+            Self::Boolean(name) => name.detach(),
+            Self::Plain {
+                name,
+                value,
+                original_source,
+                original_value_source,
+            } => {
+                name.detach();
+                value.iter_mut().for_each(ComponentValue::detach);
+                original_source.detach();
+                original_value_source.detach();
+            }
+            Self::Range {
+                left, middle, right, ..
+            } => {
+                left.detach();
+                middle.detach();
+                if let Some((_, right)) = right {
+                    right.detach();
+                }
+            }
+        }
+    }
+}
+
+// NB: A query outlives the parse of its sheet, so its handle detaches it from the sheet's text.
+pub(crate) fn media_query_handle(mut query: MediaQuery) -> Arc<FfiQueryHandle> {
+    query.detach();
     Arc::new(FfiQueryHandle {
         tree: QueryTree::MediaQuery(query),
     })
 }
 
-pub(crate) fn expression_query_handle(expression: Expression, kind: QueryKind) -> Arc<FfiQueryHandle> {
+pub(crate) fn expression_query_handle(mut expression: Expression, kind: QueryKind) -> Arc<FfiQueryHandle> {
+    expression.detach();
     Arc::new(FfiQueryHandle {
         tree: QueryTree::Expression { expression, kind },
     })

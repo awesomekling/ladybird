@@ -36,6 +36,23 @@ pub(crate) struct ComponentValue {
 }
 
 impl ComponentValue {
+    /// Copies the value's text out of the sheet's source and token storage, for a value that outlives its parse.
+    /// Otherwise the value keeps the text of the whole sheet alive.
+    pub(crate) fn detach(&mut self) {
+        self.original_source_text.detach();
+        match &mut self.kind {
+            ComponentKind::Token(token) => token.detach(),
+            ComponentKind::Function { name, values } => {
+                name.detach();
+                values.iter_mut().for_each(ComponentValue::detach);
+            }
+            ComponentKind::SimpleBlock { opening, values } => {
+                opening.detach();
+                values.iter_mut().for_each(ComponentValue::detach);
+            }
+        }
+    }
+
     pub(crate) fn end_of_file() -> Self {
         Self {
             kind: ComponentKind::Token(ParserTokenKind::EndOfFile),

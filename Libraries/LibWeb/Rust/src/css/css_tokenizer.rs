@@ -357,6 +357,20 @@ pub(crate) enum ParserString {
 }
 
 impl ParserString {
+    /// Copies the string out of the storage it shares with the other strings of its tokens, so that keeping it does
+    /// not keep that storage alive.
+    pub(crate) fn detach(&mut self) {
+        let Self::Shared { storage, range } = self else {
+            return;
+        };
+        let units = &storage[range.clone()];
+        *self = if units.len() <= 16 {
+            Self::Inline(SmallVec::from_slice(units))
+        } else {
+            Self::Owned(units.into())
+        };
+    }
+
     fn finish_shared(&mut self, storage: Arc<[u16]>, offset: usize) {
         let Self::Pending(range) = self else {
             return;
@@ -442,8 +456,21 @@ pub(crate) enum ParserTokenKind {
 }
 
 impl ParserTokenKind {
+    /// Detaches the token's string, if it has one (see `ParserString::detach`).
+    pub(crate) fn detach(&mut self) {
+        if let Some(string) = self.string_mut() {
+            string.detach();
+        }
+    }
+
     fn finish_shared_strings(&mut self, storage: Arc<[u16]>, offset: usize) {
-        let string = match self {
+        if let Some(string) = self.string_mut() {
+            string.finish_shared(storage, offset);
+        }
+    }
+
+    fn string_mut(&mut self) -> Option<&mut ParserString> {
+        match self {
             Self::Ident(value)
             | Self::Function(value)
             | Self::AtKeyword(value)
@@ -452,9 +479,6 @@ impl ParserTokenKind {
             Self::Hash { value, .. } => Some(value),
             Self::Dimension { unit, .. } => Some(unit),
             _ => None,
-        };
-        if let Some(string) = string {
-            string.finish_shared(storage, offset);
         }
     }
 }
@@ -525,6 +549,21 @@ impl ParserSource {
 
     fn shared(storage: Arc<SourceStorage>, range: Range<usize>) -> Self {
         Self::Shared { storage, range }
+    }
+
+    /// Copies the source text out of the whole source it shares with every other token, so that keeping it does not
+    /// keep that whole source alive.
+    pub(crate) fn detach(&mut self) {
+        if !matches!(self, Self::Shared { .. }) {
+            return;
+        }
+        let mut units = Vec::with_capacity(self.len());
+        self.append_to(&mut units);
+        *self = if units.is_empty() {
+            Self::Empty
+        } else {
+            Self::Owned(units.into_boxed_slice())
+        };
     }
 
     pub(crate) fn covering(first: &Self, last: &Self) -> Option<Self> {
