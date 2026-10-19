@@ -4,35 +4,90 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use super::{CascadeLayerID, RuleID, RuleKind, RuleVersion, StyleScopeID};
+use super::{
+    ActivationPredicateID, CascadeLayerID, DeclarationBlockID, RuleID, RuleKind, RuleVersion, SelectorProgramID,
+    StyleScopeID,
+};
 use crate::css::style::capacity::ShallowCapacityBytes;
 use crate::css::style::fast_hash::fast_hasher;
+use crate::css::style::index::StyleAtomID;
 use crate::css::style::memory::{MemoryCategory, MemoryController, MemoryLease};
 use crate::css::style::weak_pool::WeakPool;
 use std::hash::{Hash, Hasher};
-use std::ops::Index;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 const RULE_VERSIONS_PER_PAGE: usize = 128;
-const EMPTY_VERSION: RuleVersion = RuleVersion {
+
+/// A rule version as a page stores it, each identity it may lack as `NONE`, so that a version takes 32 bytes rather
+/// than 48.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct PackedRuleVersion {
+    rule: RuleID,
+    declared_name: u32,
+    selector_program: u32,
+    declaration_block: u32,
+    activation_predicate: u32,
+    layer: CascadeLayerID,
+    scope: StyleScopeID,
+    kind: RuleKind,
+}
+
+const _: () = assert!(size_of::<PackedRuleVersion>() == 32);
+
+const NONE: u32 = u32::MAX;
+
+impl PackedRuleVersion {
+    fn pack(version: RuleVersion) -> Self {
+        let pack = |id: Option<u32>| {
+            assert_ne!(id, Some(NONE), "a rule version identity must not be the absent one");
+            id.unwrap_or(NONE)
+        };
+        Self {
+            rule: version.rule,
+            declared_name: pack(version.declared_name.map(|atom| atom.0)),
+            selector_program: pack(version.selector_program.map(|program| program.0)),
+            declaration_block: pack(version.declaration_block.map(|block| block.0)),
+            activation_predicate: pack(version.activation_predicate.map(|predicate| predicate.0)),
+            layer: version.layer,
+            scope: version.scope,
+            kind: version.kind,
+        }
+    }
+
+    fn unpack(self) -> RuleVersion {
+        let unpack = |id: u32| (id != NONE).then_some(id);
+        RuleVersion {
+            rule: self.rule,
+            kind: self.kind,
+            declared_name: unpack(self.declared_name).map(StyleAtomID),
+            selector_program: unpack(self.selector_program).map(SelectorProgramID),
+            declaration_block: unpack(self.declaration_block).map(DeclarationBlockID),
+            activation_predicate: unpack(self.activation_predicate).map(ActivationPredicateID),
+            layer: self.layer,
+            scope: self.scope,
+        }
+    }
+}
+
+const EMPTY_VERSION: PackedRuleVersion = PackedRuleVersion {
     rule: RuleID(0),
-    kind: RuleKind::Style,
-    declared_name: None,
-    selector_program: None,
-    declaration_block: None,
-    activation_predicate: None,
+    declared_name: NONE,
+    selector_program: NONE,
+    declaration_block: NONE,
+    activation_predicate: NONE,
     layer: CascadeLayerID::UNLAYERED,
     scope: StyleScopeID::NONE,
+    kind: RuleKind::Style,
 };
 
 struct RuleVersionPage {
-    values: [RuleVersion; RULE_VERSIONS_PER_PAGE],
+    values: [PackedRuleVersion; RULE_VERSIONS_PER_PAGE],
     shared_hash: Option<u64>,
     _memory: MemoryLease,
 }
 
 impl RuleVersionPage {
-    fn new(values: [RuleVersion; RULE_VERSIONS_PER_PAGE], memory_controller: &mut MemoryController) -> Self {
+    fn new(values: [PackedRuleVersion; RULE_VERSIONS_PER_PAGE], memory_controller: &mut MemoryController) -> Self {
         let mut memory = MemoryLease::new(MemoryCategory::RuleProgram);
         memory.resize_required_to(memory_controller, size_of::<Self>() as u64);
         Self {
@@ -77,9 +132,15 @@ impl RuleVersionTable {
         self.set(index, value);
     }
 
+    pub(super) fn get(&self, index: usize) -> RuleVersion {
+        assert!(index < self.len);
+        self.pages[index / RULE_VERSIONS_PER_PAGE].values[index % RULE_VERSIONS_PER_PAGE].unpack()
+    }
+
     pub(super) fn set(&mut self, index: usize, value: RuleVersion) {
         assert!(index < self.len);
-        if self[index] == value {
+        let value = PackedRuleVersion::pack(value);
+        if self.pages[index / RULE_VERSIONS_PER_PAGE].values[index % RULE_VERSIONS_PER_PAGE] == value {
             return;
         }
         let page = &mut self.pages[index / RULE_VERSIONS_PER_PAGE];
@@ -122,15 +183,6 @@ impl RuleVersionTable {
     }
 }
 
-impl Index<usize> for RuleVersionTable {
-    type Output = RuleVersion;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        assert!(index < self.len);
-        &self.pages[index / RULE_VERSIONS_PER_PAGE].values[index % RULE_VERSIONS_PER_PAGE]
-    }
-}
-
 impl ShallowCapacityBytes for RuleVersionTable {
     fn shallow_capacity_bytes(&self) -> u64 {
         // Page allocations are charged to the pool's ledger, including private pages.
@@ -158,11 +210,11 @@ mod tests {
             assert!(Arc::ptr_eq(left, right));
         }
         let index = RULE_VERSIONS_PER_PAGE + 7;
-        let mut changed = second[index];
+        let mut changed = second.get(index);
         changed.kind = RuleKind::Media;
         second.set(index, changed);
-        assert_eq!(first[index].kind, RuleKind::Style);
-        assert_eq!(second[index].kind, RuleKind::Media);
+        assert_eq!(first.get(index).kind, RuleKind::Style);
+        assert_eq!(second.get(index).kind, RuleKind::Media);
         assert!(Arc::ptr_eq(&first.pages[0], &second.pages[0]));
         assert!(!Arc::ptr_eq(&first.pages[1], &second.pages[1]));
         second.share();

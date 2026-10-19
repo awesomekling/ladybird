@@ -414,7 +414,7 @@ impl StyleSheetProgram {
                 visited += 1;
                 atoms.insert(declaration.name);
             }
-            let version = self.rule_versions[rule.version_slot as usize];
+            let version = self.rule_versions.get(rule.version_slot as usize);
             if let Some(name) = version.declared_name {
                 atoms.insert(name);
             }
@@ -950,7 +950,7 @@ impl StyleSheetProgram {
 
     pub fn live_selector_programs(&self) -> impl Iterator<Item = (RuleID, SelectorProgramID)> + '_ {
         self.rules.iter().enumerate().filter_map(|(index, rule)| {
-            let version = self.rule_versions[rule.version_slot as usize];
+            let version = self.rule_versions.get(rule.version_slot as usize);
             (rule.live).then_some((
                 RuleID(u32::try_from(index).expect("rule identity space exhausted")),
                 version.selector_program?,
@@ -960,7 +960,8 @@ impl StyleSheetProgram {
 
     #[must_use]
     pub fn rule_version(&self, rule: RuleID) -> RuleVersion {
-        self.rule_versions[self.rules[rule.0 as usize].version_slot as usize]
+        self.rule_versions
+            .get(self.rules[rule.0 as usize].version_slot as usize)
     }
 
     /// Replace one rule's semantic contents after the transaction carrying its previous value has
@@ -970,7 +971,7 @@ impl StyleSheetProgram {
     pub fn replace_rule_version(&mut self, rule: RuleID, contents: RuleVersion) {
         assert_eq!(contents.rule, rule, "a rule version must name its own rule");
         let slot = self.rules[rule.0 as usize].version_slot;
-        let selector_changed = self.rule_versions[slot as usize].selector_program != contents.selector_program;
+        let selector_changed = self.rule_versions.get(slot as usize).selector_program != contents.selector_program;
         self.rule_versions.set(slot as usize, contents);
         self.bump_rule_sheet_dispatch_version(rule);
         if selector_changed {
@@ -985,7 +986,7 @@ impl StyleSheetProgram {
     pub(crate) fn replace_woken_rule_version(&mut self, rule: RuleID, contents: RuleVersion) {
         assert_eq!(contents.rule, rule, "a rule version must name its own rule");
         let slot = self.rules[rule.0 as usize].version_slot;
-        let selector_changed = self.rule_versions[slot as usize].selector_program != contents.selector_program;
+        let selector_changed = self.rule_versions.get(slot as usize).selector_program != contents.selector_program;
         self.rule_versions.set(slot as usize, contents);
         if selector_changed {
             self.bump_routing_liveness_version();
