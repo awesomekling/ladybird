@@ -1118,27 +1118,87 @@ pub struct RetainedState {
 /// transaction that stages that element compiles it before it routes and matches anything (see `wake_dormant_rules`).
 #[derive(Clone, Default)]
 pub(super) struct DormantRules {
-    /// The dormant rules each key wakes, some of which may have woken or left through another key since.
-    by_key: HashMap<StyleAtomID, SmallVec<[RuleID; 2]>>,
-    /// The selectors each dormant rule is compiled from once it wakes.
-    selectors: HashMap<RuleID, rule_writes::BoundSelectors>,
+    /// For each key, the first of the links to the dormant rules it wakes, some of which may have woken or left
+    /// through another key since.
+    first_link_by_key: HashMap<StyleAtomID, u32>,
+    /// The rule each link names and the next link of its key, or `u32::MAX` after the last.
+    links: Vec<(RuleID, u32)>,
+    /// The dormant rules in rule order, and the selectors each is compiled from once it wakes. A rule that woke or
+    /// left keeps its place without selectors until a compaction.
+    rules: Vec<(RuleID, Option<DormantSelectors>)>,
+    dormant_count: usize,
+    /// The scope chains and namespaces dormant rules are bound in, which the rules of one sheet share.
+    contexts: Vec<(
+        std::sync::Arc<bridge::BoundScopeChain>,
+        Option<std::sync::Arc<rule_writes::NamespaceTexts>>,
+    )>,
+}
+
+#[derive(Clone)]
+struct DormantSelectors {
+    selectors: std::sync::Arc<crate::css::selector_parser::RustParsedSelectorList>,
+    context: u32,
 }
 
 impl DormantRules {
+    fn position(&self, rule: RuleID) -> Result<usize, usize> {
+        self.rules.binary_search_by_key(&rule, |&(candidate, _)| candidate)
+    }
+
     pub(super) fn is_dormant(&self, rule: RuleID) -> bool {
-        self.selectors.contains_key(&rule)
+        self.position(rule)
+            .is_ok_and(|position| self.rules[position].1.is_some())
     }
 
     pub(super) fn insert(&mut self, rule: RuleID, keys: &[StyleAtomID], selectors: rule_writes::BoundSelectors) {
         for &key in keys {
-            self.by_key.entry(key).or_default().push(rule);
+            let link = u32::try_from(self.links.len()).expect("dormant rule link space exhausted");
+            let next = self.first_link_by_key.insert(key, link).unwrap_or(u32::MAX);
+            self.links.push((rule, next));
         }
-        self.selectors.insert(rule, selectors);
+        let context = self
+            .contexts
+            .iter()
+            .rposition(|(scope, namespaces)| {
+                std::sync::Arc::ptr_eq(scope, &selectors.scope)
+                    && match (namespaces, &selectors.namespaces) {
+                        (Some(left), Some(right)) => std::sync::Arc::ptr_eq(left, right),
+                        (None, None) => true,
+                        _ => false,
+                    }
+            })
+            .unwrap_or_else(|| {
+                self.contexts.push((selectors.scope, selectors.namespaces));
+                self.contexts.len() - 1
+            });
+        let dormant = DormantSelectors {
+            selectors: selectors.selectors,
+            context: u32::try_from(context).expect("dormant rule context space exhausted"),
+        };
+        match self.position(rule) {
+            Ok(position) => self.rules[position].1 = Some(dormant),
+            Err(position) => self.rules.insert(position, (rule, Some(dormant))),
+        }
+        self.dormant_count += 1;
     }
 
     /// Forgets `rule`, answering the selectors it was waiting with if it was dormant.
     pub(super) fn remove(&mut self, rule: RuleID) -> Option<rule_writes::BoundSelectors> {
-        self.selectors.remove(&rule)
+        let position = self.position(rule).ok()?;
+        let dormant = self.rules[position].1.take()?;
+        self.dormant_count -= 1;
+        let (scope, namespaces) = self.contexts[dormant.context as usize].clone();
+        let selectors = rule_writes::BoundSelectors {
+            selectors: dormant.selectors,
+            scope,
+            namespaces,
+        };
+        if self.dormant_count == 0 {
+            *self = Self::default();
+        } else if self.dormant_count < self.rules.len() / 2 {
+            self.rules.retain(|(_, dormant)| dormant.is_some());
+        }
+        Some(selectors)
     }
 
     /// Takes the dormant rules that any of `keys` wakes.
@@ -1148,12 +1208,18 @@ impl DormantRules {
     ) -> Vec<(RuleID, rule_writes::BoundSelectors)> {
         let mut woken = Vec::new();
         for key in keys {
-            let Some(rules) = self.by_key.remove(&key) else {
+            let Some(mut link) = self.first_link_by_key.remove(&key) else {
                 continue;
             };
-            for rule in rules {
-                if let Some(selectors) = self.selectors.remove(&rule) {
+            while link != u32::MAX {
+                let (rule, next) = self.links[link as usize];
+                link = next;
+                if let Some(selectors) = self.remove(rule) {
                     woken.push((rule, selectors));
+                }
+                // NB: Waking the last dormant rule resets the links.
+                if self.links.is_empty() {
+                    break;
                 }
             }
         }
@@ -1161,25 +1227,30 @@ impl DormantRules {
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.selectors.is_empty()
+        self.dormant_count == 0
     }
 
     pub(super) fn has_key(&self, key: StyleAtomID) -> bool {
-        self.by_key.contains_key(&key)
+        self.first_link_by_key.contains_key(&key)
     }
 
     /// The rules still dormant that `key` wakes.
     pub(super) fn rules_woken_by(&self, key: StyleAtomID) -> impl Iterator<Item = RuleID> + '_ {
-        self.by_key
-            .get(&key)
-            .into_iter()
-            .flatten()
-            .copied()
-            .filter(|rule| self.selectors.contains_key(rule))
+        let mut link = self.first_link_by_key.get(&key).copied().unwrap_or(u32::MAX);
+        std::iter::from_fn(move || {
+            while link != u32::MAX {
+                let (rule, next) = self.links[link as usize];
+                link = next;
+                if self.is_dormant(rule) {
+                    return Some(rule);
+                }
+            }
+            None
+        })
     }
 
     pub(super) fn keys(&self) -> impl Iterator<Item = StyleAtomID> + '_ {
-        self.by_key.keys().copied()
+        self.first_link_by_key.keys().copied()
     }
 }
 
