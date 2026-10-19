@@ -73,7 +73,7 @@ fn parse_shared_on_worker(source: &'static str) -> Arc<ParsedStyleSheet> {
 fn builder_constructs_one_rule_tree_with_dense_unique_identities() {
     fn visit(rule: &Arc<super::ParsedRule>, identities: &mut std::collections::BTreeSet<u64>) {
         assert_eq!(Arc::strong_count(rule), 1);
-        assert!(identities.insert(rule.local_identity));
+        assert!(identities.insert(u64::from(rule.local_identity)));
         for child in rule.children() {
             match child {
                 ParsedRuleChild::Rule(rule) => visit(rule, identities),

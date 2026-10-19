@@ -254,7 +254,7 @@ impl<'a> SharedRule<'a> {
 
     pub(crate) fn local_identity(self) -> u64 {
         match self.data {
-            SharedRuleData::Rule(rule) => rule.local_identity,
+            SharedRuleData::Rule(rule) => u64::from(rule.local_identity),
             SharedRuleData::Declarations(declarations) => declarations.local_identity,
         }
     }

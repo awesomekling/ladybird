@@ -2096,15 +2096,13 @@ struct ParsedDeclaration {
 }
 
 struct ParsedRule {
-    local_identity: u64,
     declaration_block: Option<Arc<DeclarationBlockData>>,
     selector_list: Option<Arc<RustParsedSelectorList>>,
     /// What only rules other than style rules have, so that the many style rules pay one pointer for it.
     rare: Option<Box<RareRuleData>>,
     /// The rules and declarations inside the rule's block, which most style rules have none of.
     children: Option<Box<ParsedRuleChildren>>,
-    name_offset: u32,
-    name_length: u32,
+    local_identity: u32,
     start_line: u32,
     start_column: u32,
     rule_kind: ParsedRuleKind,
@@ -2114,7 +2112,7 @@ struct ParsedRule {
 }
 
 // A parsed sheet keeps one of these for each of its rules.
-const _: () = assert!(size_of::<ParsedRule>() <= 64);
+const _: () = assert!(size_of::<ParsedRule>() <= 48);
 
 struct ParsedRuleChildren {
     children: Box<[ParsedRuleChild]>,
@@ -2139,6 +2137,9 @@ struct RareRuleData {
     namespace_rule: Option<Arc<NamespaceRuleData>>,
     property_rule: Option<Arc<PropertyRuleData>>,
     function_signature: Option<Arc<FunctionSignature>>,
+    /// Where the name of an at-rule that has one is in the sheet's values.
+    name_offset: u32,
+    name_length: u32,
 }
 
 static NO_RARE_RULE_DATA: RareRuleData = RareRuleData {
@@ -2157,6 +2158,8 @@ static NO_RARE_RULE_DATA: RareRuleData = RareRuleData {
     namespace_rule: None,
     property_rule: None,
     function_signature: None,
+    name_offset: 0,
+    name_length: 0,
 };
 
 impl ParsedRule {
@@ -2173,7 +2176,8 @@ impl ParsedRule {
     }
 
     fn name_range(&self) -> std::ops::Range<usize> {
-        self.name_offset as usize..(self.name_offset + self.name_length) as usize
+        let rare = self.rare();
+        rare.name_offset as usize..(rare.name_offset + rare.name_length) as usize
     }
 }
 
@@ -2336,7 +2340,7 @@ impl ParsedStyleSheet {
             NativeRuleType::Import => RulePayload::Import {
                 data: rule.rare().import_rule.as_ref().unwrap().clone(),
                 media: list
-                    .import_media_for(list.identity_for(rule.local_identity))
+                    .import_media_for(list.identity_for(u64::from(rule.local_identity)))
                     .unwrap_or_else(|| MediaList::new(rule.rare().media_list.as_ref().unwrap().clone())),
                 scope: rule.rare().scope_selectors.clone(),
             },
@@ -2391,7 +2395,7 @@ impl ParsedStyleSheet {
             NativeRuleType::NestedDeclarations | NativeRuleType::FunctionDeclarations => unreachable!(),
         };
         Some(NativeRule::with_identity(
-            list.identity_for(rule.local_identity),
+            list.identity_for(u64::from(rule.local_identity)),
             kind,
             payload,
             child_rules,
@@ -3674,11 +3678,9 @@ impl SyntaxParseBuilder {
                 .collect()
         };
         Arc::new(ParsedRule {
-            local_identity: self.next_identity(),
+            local_identity: u32::try_from(self.next_identity()).expect("parsed rule identity exceeds u32"),
             is_qualified,
             rule_kind,
-            name_offset: u32::try_from(name_offset).expect("rule name offset exceeds u32"),
-            name_length: u32::try_from(name_length).expect("rule name length exceeds u32"),
             declaration_block,
             children: (!children.is_empty()).then(|| {
                 Box::new(ParsedRuleChildren {
@@ -3705,26 +3707,29 @@ impl SyntaxParseBuilder {
                 || counter_style.is_some()
                 || namespace_rule.is_some()
                 || property_rule.is_some()
-                || function_signature.is_some())
-            .then(|| {
-                Box::new(RareRuleData {
-                    page_selector_list,
-                    import_rule,
-                    supports_condition,
-                    descriptor_block,
-                    layer_names,
-                    container_conditions,
-                    font_feature_values,
-                    keyframe,
-                    keyframes_name,
-                    scope_selectors,
-                    media_list,
-                    counter_style,
-                    namespace_rule,
-                    property_rule,
-                    function_signature,
-                })
-            }),
+                || function_signature.is_some()
+                || name_length != 0)
+                .then(|| {
+                    Box::new(RareRuleData {
+                        name_offset: u32::try_from(name_offset).expect("rule name offset exceeds u32"),
+                        name_length: u32::try_from(name_length).expect("rule name length exceeds u32"),
+                        page_selector_list,
+                        import_rule,
+                        supports_condition,
+                        descriptor_block,
+                        layer_names,
+                        container_conditions,
+                        font_feature_values,
+                        keyframe,
+                        keyframes_name,
+                        scope_selectors,
+                        media_list,
+                        counter_style,
+                        namespace_rule,
+                        property_rule,
+                        function_signature,
+                    })
+                }),
         })
     }
 
