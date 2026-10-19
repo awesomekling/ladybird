@@ -26,7 +26,7 @@ use crate::css::selector::AttributeCaseType;
 use crate::css::selector::AttributeSelector;
 use crate::css::selector::Combinator;
 use crate::css::selector::CompiledSelector;
-use crate::css::selector::CompoundSelector;
+use crate::css::selector::CompoundRef;
 use crate::css::selector::Direction;
 use crate::css::selector::NamespaceType;
 use crate::css::selector::PseudoClassSelector;
@@ -36,6 +36,7 @@ use crate::css::selector::PseudoElementType;
 use crate::css::selector::PseudoElementValue;
 use crate::css::selector::SimpleSelector;
 use crate::css::selector::search_text_match_filter_of_pseudo_class;
+use smallvec::SmallVec;
 
 use super::atoms::synthetic_text_atom_key;
 use super::fnv::fnv1a64;
@@ -237,7 +238,8 @@ pub struct SelectorCompiler<'a, A: AtomSpace = EngineAtoms> {
     /// Whether the current compound is the subject of a selector nested in a logical pseudo-class.
     /// A sheet's default namespace does not constrain that subject unless it writes a type or
     /// universal selector of its own.
-    logical_pseudo_subject: Option<*const CompoundSelector>,
+    /// The compound a logical pseudo-class's argument is evaluated against, by the address of its simple selectors.
+    logical_pseudo_subject: Option<*const SimpleSelector>,
     /// Whether the `::search-text` selector being compiled is compiled for the current match's
     /// pseudo-element kind, which a rule naming neither `:current` nor `:not(:current)` styles too.
     compiles_for_current_search_text_match: bool,
@@ -278,7 +280,7 @@ impl<'a> SelectorCompiler<'a, QueryAtoms> {
         // NB: A selector query matches elements, never pseudo-elements. `::slotted()` is represented
         //     as an operator on its assigned element for style matching, so it needs this explicit
         //     query rejection rather than the entry's ordinary pseudo-element target check.
-        if selector.compound_selectors.iter().any(|compound| {
+        if selector.compounds().any(|compound| {
             compound
                 .simple_selectors
                 .iter()
@@ -387,7 +389,7 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
                 scope_selectors.push(self.push_implicit_scope_root(implicit));
             }
             for root_selector in &scope_roots[root_start..root_end] {
-                let compounds = &root_selector.compound_selectors;
+                let compounds: SmallVec<[CompoundRef<'_>; 4]> = root_selector.compounds().collect();
                 if compounds.is_empty() {
                     marker.get_or_insert(CompilationMarker::KnownNeverMatches(CompilationMarkerReason::Malformed));
                     continue;
@@ -396,7 +398,7 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
                 // the scope enclosing it - which is bound while this level's candidates are tested.
                 // The outermost level has none unless this compile is itself inside a scope.
                 let bound = std::mem::replace(&mut self.scope_root_is_bound, level > 0 || outer_bound);
-                scope_selectors.push(self.compile_chain(compounds, compounds.len() - 1, &mut marker));
+                scope_selectors.push(self.compile_chain(&compounds, compounds.len() - 1, &mut marker));
                 self.scope_root_is_bound = bound;
             }
             // An explicit `<scope-start>` whose selectors all failed parent substitution matches
@@ -414,12 +416,12 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
             scope_selectors.reserve(limit_end - limit_start);
             let bound = std::mem::replace(&mut self.scope_root_is_bound, true);
             for limit_selector in &scope_limits[limit_start..limit_end] {
-                let compounds = &limit_selector.compound_selectors;
+                let compounds: SmallVec<[CompoundRef<'_>; 4]> = limit_selector.compounds().collect();
                 if compounds.is_empty() {
                     marker.get_or_insert(CompilationMarker::KnownNeverMatches(CompilationMarkerReason::Malformed));
                     continue;
                 }
-                scope_selectors.push(self.compile_chain(compounds, compounds.len() - 1, &mut marker));
+                scope_selectors.push(self.compile_chain(&compounds, compounds.len() - 1, &mut marker));
             }
             self.scope_root_is_bound = bound;
             let limit = (!scope_selectors.is_empty()).then(|| self.builder.push_any_of(&scope_selectors));
@@ -469,7 +471,7 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
     fn compile(&mut self, selector: &CompiledSelector) -> CompiledEntry {
         // `::slotted()` and `::part()` name an element in another tree, which the sheet's default
         // namespace says nothing about.
-        self.selector_escapes_its_namespace = selector.compound_selectors.iter().any(|compound| {
+        self.selector_escapes_its_namespace = selector.compounds().any(|compound| {
             compound.simple_selectors.iter().any(|simple| {
                 matches!(simple, SimpleSelector::PseudoElement(pseudo_element)
                 if matches!(
@@ -478,7 +480,7 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
                 ))
             })
         });
-        let compounds = &selector.compound_selectors;
+        let compounds: SmallVec<[CompoundRef<'_>; 4]> = selector.compounds().collect();
         if compounds.is_empty() {
             let never = self.builder.push_never();
             let entry = self.builder.push_entry(never);
@@ -489,7 +491,7 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
         }
 
         let mut marker = None;
-        let root = self.compile_chain(compounds, compounds.len() - 1, &mut marker);
+        let root = self.compile_chain(&compounds, compounds.len() - 1, &mut marker);
         let pseudo_element = selector
             .target_pseudo_element
             .map(|kind| {
@@ -511,14 +513,14 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
     /// A compound's combinator relates it to the compound on its left, so walking leftwards from
     /// the subject turns each one into a constraint on that subject.
     /// Whether this compound is the `::part()` half of a selector.
-    fn names_a_part(compound: &CompoundSelector) -> bool {
+    fn names_a_part(compound: &CompoundRef<'_>) -> bool {
         compound.simple_selectors.iter().any(|simple| {
             matches!(simple, SimpleSelector::PseudoElement(pseudo_element)
                 if pseudo_element.pseudo_element == PseudoElementType::Part)
         })
     }
 
-    fn names_slotted(compound: &CompoundSelector) -> bool {
+    fn names_slotted(compound: &CompoundRef<'_>) -> bool {
         compound.simple_selectors.iter().any(|simple| {
             matches!(simple, SimpleSelector::PseudoElement(pseudo_element)
                 if pseudo_element.pseudo_element == PseudoElementType::Slotted)
@@ -527,7 +529,7 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
 
     fn compile_chain(
         &mut self,
-        compounds: &[CompoundSelector],
+        compounds: &[CompoundRef<'_>],
         index: usize,
         marker: &mut Option<CompilationMarker>,
     ) -> SelectorNodeID {
@@ -536,10 +538,10 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
 
     fn compile_chain_with_subject(
         &mut self,
-        compounds: &[CompoundSelector],
+        compounds: &[CompoundRef<'_>],
         index: usize,
         marker: &mut Option<CompilationMarker>,
-        subject: *const CompoundSelector,
+        subject: *const SimpleSelector,
     ) -> SelectorNodeID {
         let outer_subject = self.logical_pseudo_subject.replace(subject);
         let result = self.compile_chain(compounds, index, marker);
@@ -553,7 +555,7 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
     /// witness cannot say on their own.
     fn compile_chain_anchored(
         &mut self,
-        compounds: &[CompoundSelector],
+        compounds: &[CompoundRef<'_>],
         index: usize,
         marker: &mut Option<CompilationMarker>,
         leftmost: Option<SelectorNodeID>,
@@ -635,7 +637,7 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
 
     fn compile_compound(
         &mut self,
-        compound: &CompoundSelector,
+        compound: &CompoundRef<'_>,
         marker: &mut Option<CompilationMarker>,
     ) -> SelectorNodeID {
         self.compile_compound_hosted_by(compound, None, marker)
@@ -646,7 +648,7 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
     /// compound says, which is the shape `X::part(p)` takes when it arrives unsplit.
     fn compile_compound_hosted_by(
         &mut self,
-        compound: &CompoundSelector,
+        compound: &CompoundRef<'_>,
         host: Option<SelectorNodeID>,
         marker: &mut Option<CompilationMarker>,
     ) -> SelectorNodeID {
@@ -686,7 +688,7 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
             )
         });
         let outer_names_the_host = std::mem::replace(&mut self.compound_names_the_host, compound_names_the_host);
-        for simple in &compound.simple_selectors {
+        for simple in compound.simple_selectors {
             if let Some(operand) = self.compile_simple(simple, marker) {
                 match part.is_some() && matches!(simple, SimpleSelector::PseudoClass(_)) {
                     true => on_the_part.push(operand),
@@ -870,12 +872,12 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
             ));
             return Some(self.builder.push_never());
         };
-        let compounds = &argument.compound_selectors;
+        let compounds: SmallVec<[CompoundRef<'_>; 4]> = argument.compounds().collect();
         if compounds.is_empty() {
             marker.get_or_insert(CompilationMarker::KnownNeverMatches(CompilationMarkerReason::Malformed));
             return Some(self.builder.push_never());
         }
-        let inner = self.compile_chain(compounds, compounds.len() - 1, marker);
+        let inner = self.compile_chain(&compounds, compounds.len() - 1, marker);
         Some(self.builder.push(SelectorOp::Slotted(inner)))
     }
 
@@ -885,12 +887,12 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
     /// name carries the constraint already, and when the sheet declared no default.
     fn implied_default_namespace(
         &self,
-        compound: &CompoundSelector,
+        compound: &CompoundRef<'_>,
         compound_names_the_host: bool,
     ) -> Option<NamespaceTest> {
         if self.selector_escapes_its_namespace
             || compound_names_the_host
-            || self.logical_pseudo_subject == Some(compound as *const CompoundSelector)
+            || self.logical_pseudo_subject == Some(compound.simple_selectors.as_ptr())
         {
             return None;
         }
@@ -1284,22 +1286,22 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
         let mut arguments = pseudo_class
             .argument_selector_list
             .iter()
-            .filter(|argument| !argument.compound_selectors.is_empty() && argument.target_pseudo_element.is_none());
+            .filter(|argument| !(argument.compound_count() == 0) && argument.target_pseudo_element.is_none());
         let first = arguments.next()?;
-        let compounds = &first.compound_selectors;
+        let compounds: SmallVec<[CompoundRef<'_>; 4]> = first.compounds().collect();
         let subject_index = compounds.len() - 1;
-        let subject = &raw const compounds[subject_index];
-        let first = self.compile_chain_with_subject(compounds, subject_index, marker, subject);
+        let subject = compounds[subject_index].simple_selectors.as_ptr();
+        let first = self.compile_chain_with_subject(&compounds, subject_index, marker, subject);
         let Some(second) = arguments.next() else {
             return Some(first);
         };
         let mut branches = Vec::with_capacity(pseudo_class.argument_selector_list.len());
         branches.push(first);
         for argument in std::iter::once(second).chain(arguments) {
-            let compounds = &argument.compound_selectors;
+            let compounds: SmallVec<[CompoundRef<'_>; 4]> = argument.compounds().collect();
             let subject_index = compounds.len() - 1;
-            let subject = &raw const compounds[subject_index];
-            branches.push(self.compile_chain_with_subject(compounds, subject_index, marker, subject));
+            let subject = compounds[subject_index].simple_selectors.as_ptr();
+            branches.push(self.compile_chain_with_subject(&compounds, subject_index, marker, subject));
         }
         Some(self.builder.push_any_of(&branches))
     }
@@ -1353,7 +1355,7 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
         argument: &CompiledSelector,
         marker: &mut Option<CompilationMarker>,
     ) -> Option<SelectorNodeID> {
-        let compounds = &argument.compound_selectors;
+        let compounds: SmallVec<[CompoundRef<'_>; 4]> = argument.compounds().collect();
         if compounds.is_empty() {
             return None;
         }
@@ -1437,7 +1439,7 @@ impl<'a, A: AtomSpace> SelectorCompiler<'a, A> {
             }
         };
 
-        let compound = self.compile_chain_anchored(compounds, compounds.len() - 1, marker, leftmost);
+        let compound = self.compile_chain_anchored(&compounds, compounds.len() - 1, marker, leftmost);
         if !simple {
             // A query with more than one compound retains no witness, so it is answered by the
             // direct evaluator rather than by a replacement search.

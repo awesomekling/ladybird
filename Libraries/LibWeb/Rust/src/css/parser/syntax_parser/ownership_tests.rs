@@ -875,7 +875,7 @@ fn scope_presence_and_native_selector_names_survive_worker_exit() {
             ] {
                 unsafe {
                     assert_eq!(rust_parsed_selector_list_length(Arc::as_ptr(selectors)), 1);
-                    let selector = &selectors.selectors()[0].compound_selectors[0].simple_selectors[0];
+                    let selector = &selectors.selectors()[0].compound(0).simple_selectors[0];
                     let crate::css::selector::SimpleSelector::Class(name) = selector else {
                         panic!("expected class selector")
                     };

@@ -9,8 +9,8 @@
 use super::css_tokenizer::{ParserTokenKind, tokenize_for_parser};
 use super::retained_fly_string::RetainedUtf16FlyString;
 use super::selector::{
-    Combinator, CompiledSelector, CompoundSelector, PseudoClassSelector, PseudoClassType, PseudoElementType,
-    PseudoElementValue, RustSelector, SelectorList, SimpleSelector, pseudo_class_from_ffi,
+    Combinator, CompiledSelector, CompoundRef, CompoundSelector, PseudoClassSelector, PseudoClassType,
+    PseudoElementType, PseudoElementValue, RustSelector, SelectorList, SimpleSelector, pseudo_class_from_ffi,
 };
 use super::selector_parser::StyleNestingParent;
 
@@ -46,7 +46,7 @@ pub(crate) fn scope_root_selector_list() -> SelectorList {
 }
 
 pub(crate) fn contains_nesting(selector: &CompiledSelector) -> bool {
-    selector.compound_selectors.iter().any(|compound| {
+    selector.compounds().any(|compound| {
         compound.simple_selectors.iter().any(|simple| match simple {
             SimpleSelector::Nesting => true,
             SimpleSelector::PseudoClass(pseudo_class) => pseudo_class
@@ -62,7 +62,7 @@ pub(crate) fn contains_nesting(selector: &CompiledSelector) -> bool {
 }
 
 fn contains_pseudo_class(selector: &CompiledSelector, expected: PseudoClassType) -> bool {
-    selector.compound_selectors.iter().any(|compound| {
+    selector.compounds().any(|compound| {
         compound.simple_selectors.iter().any(|simple| {
             let SimpleSelector::PseudoClass(pseudo_class) = simple else {
                 return false;
@@ -78,8 +78,7 @@ fn contains_pseudo_class(selector: &CompiledSelector, expected: PseudoClassType)
 
 fn any_simple(selector: &CompiledSelector, predicate: &impl Fn(&SimpleSelector) -> bool) -> bool {
     selector
-        .compound_selectors
-        .iter()
+        .compounds()
         .any(|compound| compound.simple_selectors.iter().any(predicate))
 }
 
@@ -132,9 +131,9 @@ fn invalid_for_has(selector: &CompiledSelector) -> bool {
 
 fn absolutize(selector: &CompiledSelector, replacement: &SimpleSelector) -> Option<CompiledSelector> {
     if !contains_nesting(selector) {
-        return Some(CompiledSelector::new(selector.compound_selectors.clone()));
+        return Some(selector.clone());
     }
-    let mut compounds = selector.compound_selectors.clone();
+    let mut compounds = selector.to_compound_selectors();
     for compound in &mut compounds {
         let mut simples = Vec::with_capacity(compound.simple_selectors.len());
         for simple in &compound.simple_selectors {
@@ -166,17 +165,17 @@ fn absolutize(selector: &CompiledSelector, replacement: &SimpleSelector) -> Opti
         }
         compound.simple_selectors = simples.into_boxed_slice();
     }
-    Some(CompiledSelector::new(compounds))
+    Some(CompiledSelector::new(compounds.into_boxed_slice()))
 }
 
 pub(crate) fn relative_to(selector: &CompiledSelector, parent: SimpleSelector) -> CompiledSelector {
-    let mut compounds = Vec::with_capacity(selector.compound_selectors.len() + 1);
+    let mut compounds = Vec::with_capacity(selector.compound_count() + 1);
     compounds.push(CompoundSelector {
         combinator: Combinator::None,
         is_implicit_universal_anchor: false,
         simple_selectors: Box::new([parent]),
     });
-    compounds.extend(selector.compound_selectors.iter().cloned());
+    compounds.extend(selector.compounds().map(CompoundRef::to_owned));
     if let Some(second) = compounds.get_mut(1)
         && second.combinator == Combinator::None
     {
@@ -188,10 +187,10 @@ pub(crate) fn relative_to(selector: &CompiledSelector, parent: SimpleSelector) -
 /// Whether a selector is a lone universal selector, which every element matches. A query API has
 /// no default namespace, so `*` and `*|*` name the same elements there.
 fn matches_every_element(selector: &CompiledSelector) -> bool {
-    let [compound] = selector.compound_selectors.as_ref() else {
+    if selector.compound_count() != 1 {
         return false;
-    };
-    let [SimpleSelector::Universal(name)] = compound.simple_selectors.as_ref() else {
+    }
+    let [SimpleSelector::Universal(name)] = selector.compound(0).simple_selectors else {
         return false;
     };
     matches!(
@@ -253,8 +252,7 @@ pub(crate) fn absolutize_selector_list(
             || (parent == StyleNestingParent::Scope
                 && !matches!(
                     selector
-                        .compound_selectors
-                        .first()
+                        .first_compound()
                         .map_or(Combinator::None, |compound| compound.combinator),
                     Combinator::None | Combinator::Descendant
                 ))
@@ -271,8 +269,7 @@ pub(crate) fn absolutize_selector_list(
             .iter()
             .filter_map(|selector| {
                 let first = selector
-                    .compound_selectors
-                    .first()
+                    .first_compound()
                     .map_or(Combinator::None, |compound| compound.combinator);
                 if contains_nesting(selector) {
                     absolutize(selector, &replacement)
@@ -293,8 +290,7 @@ pub(crate) fn adapt_scope_end_selector_list(selectors: &SelectorList) -> Selecto
         .iter()
         .map(|selector| {
             let first = selector
-                .compound_selectors
-                .first()
+                .first_compound()
                 .map_or(Combinator::None, |compound| compound.combinator);
             if !matches!(first, Combinator::None | Combinator::Descendant)
                 || (!contains_nesting(selector) && !contains_pseudo_class(selector, PseudoClassType::Scope))
@@ -304,9 +300,9 @@ pub(crate) fn adapt_scope_end_selector_list(selectors: &SelectorList) -> Selecto
                     pseudo_class(PseudoClassType::Where, Box::new([scope_selector()])),
                 )
             } else if first == Combinator::Descendant {
-                let mut compounds = selector.compound_selectors.clone();
+                let mut compounds = selector.to_compound_selectors();
                 compounds[0].combinator = Combinator::None;
-                CompiledSelector::new(compounds)
+                CompiledSelector::new(compounds.into_boxed_slice())
             } else {
                 selector.clone()
             }

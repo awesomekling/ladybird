@@ -238,9 +238,38 @@ pub struct CompoundSelector {
 /// follows each compound's combinator toward the beginning of this slice.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompiledSelector {
-    pub compound_selectors: Box<[CompoundSelector]>,
+    /// Where each compound's simple selectors end in `simple_selectors`, with how it relates to the compound before.
+    compound_headers: Box<[CompoundHeader]>,
+    /// The simple selectors of every compound, in one allocation rather than one per compound.
+    simple_selectors: Box<[SimpleSelector]>,
     /// The pseudo-element required on the initial match target, if this selector ends in one.
     pub target_pseudo_element: Option<PseudoElementType>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CompoundHeader {
+    end: u16,
+    combinator: Combinator,
+    is_implicit_universal_anchor: bool,
+}
+
+/// One compound of a `CompiledSelector`, as `CompoundSelector` holds an owned one.
+#[derive(Clone, Copy, Debug)]
+pub struct CompoundRef<'a> {
+    pub combinator: Combinator,
+    pub is_implicit_universal_anchor: bool,
+    pub simple_selectors: &'a [SimpleSelector],
+}
+
+impl CompoundRef<'_> {
+    #[must_use]
+    pub fn to_owned(self) -> CompoundSelector {
+        CompoundSelector {
+            combinator: self.combinator,
+            is_implicit_universal_anchor: self.is_implicit_universal_anchor,
+            simple_selectors: self.simple_selectors.into(),
+        }
+    }
 }
 
 /// Selector specificity, compared component by component.
@@ -282,11 +311,11 @@ pub fn search_text_match_filter_of_pseudo_class(pseudo_class: &PseudoClassSelect
             let [argument] = &*pseudo_class.argument_selector_list else {
                 return None;
             };
-            let [compound] = &*argument.compound_selectors else {
+            if argument.compound_count() != 1 {
                 return None;
-            };
+            }
             matches!(
-                &*compound.simple_selectors,
+                argument.compound(0).simple_selectors,
                 [SimpleSelector::PseudoClass(inner)] if inner.pseudo_class == PseudoClassType::Current
             )
             .then_some(SearchTextMatchFilter::NotCurrent)
@@ -334,15 +363,73 @@ impl CompiledSelector {
                 }
             });
 
+        let mut simple_selectors = Vec::with_capacity(
+            compound_selectors
+                .iter()
+                .map(|compound| compound.simple_selectors.len())
+                .sum(),
+        );
+        let compound_headers = compound_selectors
+            .into_vec()
+            .into_iter()
+            .map(|compound| {
+                simple_selectors.extend(compound.simple_selectors.into_vec());
+                CompoundHeader {
+                    end: u16::try_from(simple_selectors.len()).expect("a selector cannot have 65536 simple selectors"),
+                    combinator: compound.combinator,
+                    is_implicit_universal_anchor: compound.is_implicit_universal_anchor,
+                }
+            })
+            .collect();
         Self {
-            compound_selectors,
+            compound_headers,
+            simple_selectors: simple_selectors.into_boxed_slice(),
             target_pseudo_element,
         }
     }
 
+    #[must_use]
+    pub fn compound_count(&self) -> usize {
+        self.compound_headers.len()
+    }
+
+    #[must_use]
+    pub fn compound(&self, index: usize) -> CompoundRef<'_> {
+        let header = self.compound_headers[index];
+        let start = index
+            .checked_sub(1)
+            .map_or(0, |previous| self.compound_headers[previous].end as usize);
+        CompoundRef {
+            combinator: header.combinator,
+            is_implicit_universal_anchor: header.is_implicit_universal_anchor,
+            simple_selectors: &self.simple_selectors[start..header.end as usize],
+        }
+    }
+
+    /// The compounds, left to right.
+    pub fn compounds(&self) -> impl DoubleEndedIterator<Item = CompoundRef<'_>> + ExactSizeIterator + Clone + '_ {
+        (0..self.compound_count()).map(|index| self.compound(index))
+    }
+
+    #[must_use]
+    pub fn first_compound(&self) -> Option<CompoundRef<'_>> {
+        (self.compound_count() != 0).then(|| self.compound(0))
+    }
+
+    #[must_use]
+    pub fn last_compound(&self) -> Option<CompoundRef<'_>> {
+        self.compound_count().checked_sub(1).map(|index| self.compound(index))
+    }
+
+    /// The compounds as owned ones, to build a changed selector from.
+    #[must_use]
+    pub fn to_compound_selectors(&self) -> Vec<CompoundSelector> {
+        self.compounds().map(CompoundRef::to_owned).collect()
+    }
+
     pub fn styles_every_search_text_match(&self) -> bool {
         self.target_pseudo_element == Some(PseudoElementType::SearchText)
-            && self.compound_selectors.last().is_some_and(|compound| {
+            && self.last_compound().is_some_and(|compound| {
                 compound
                     .simple_selectors
                     .iter()
@@ -362,8 +449,8 @@ impl CompiledSelector {
         }
 
         let mut specificity = Specificity::default();
-        for compound in &self.compound_selectors {
-            for simple_selector in &compound.simple_selectors {
+        for compound in self.compounds() {
+            for simple_selector in compound.simple_selectors {
                 let contribution = match simple_selector {
                     SimpleSelector::Id(_) => Specificity {
                         ids: 1,

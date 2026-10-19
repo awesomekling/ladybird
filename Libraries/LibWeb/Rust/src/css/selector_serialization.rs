@@ -237,7 +237,7 @@ fn serialize_simple_selector(sink: &mut TextSink, selector: &SimpleSelector, con
 }
 
 fn serialize_selector(sink: &mut TextSink, selector: &CompiledSelector, context: &NamespaceContext<'_>) {
-    if let Some(first) = selector.compound_selectors.first() {
+    if let Some(first) = selector.first_compound() {
         sink.push_ascii(match first.combinator {
             Combinator::ImmediateChild => "> ",
             Combinator::NextSibling => "+ ",
@@ -246,21 +246,20 @@ fn serialize_selector(sink: &mut TextSink, selector: &CompiledSelector, context:
             Combinator::None | Combinator::Descendant | Combinator::PseudoElement => "",
         });
     }
-    for (index, compound) in selector.compound_selectors.iter().enumerate() {
+    let next_compound = |index: usize| (index + 1 < selector.compound_count()).then(|| selector.compound(index + 1));
+    for (index, compound) in selector.compounds().enumerate() {
         if compound.simple_selectors.len() == 1
             && let SimpleSelector::Universal(qualified_name) = &compound.simple_selectors[0]
         {
-            let followed_by_pseudo = selector
-                .compound_selectors
-                .get(index + 1)
-                .is_some_and(|next| next.combinator == Combinator::PseudoElement);
+            let followed_by_pseudo =
+                next_compound(index).is_some_and(|next| next.combinator == Combinator::PseudoElement);
             if !(compound.is_implicit_universal_anchor
                 || followed_by_pseudo && should_skip_universal(qualified_name, context))
             {
                 serialize_simple_selector(sink, &compound.simple_selectors[0], context);
             }
         } else {
-            for simple in &compound.simple_selectors {
+            for simple in compound.simple_selectors {
                 if let SimpleSelector::Universal(qualified_name) = simple
                     && (compound.is_implicit_universal_anchor || should_skip_universal(qualified_name, context))
                 {
@@ -269,7 +268,7 @@ fn serialize_selector(sink: &mut TextSink, selector: &CompiledSelector, context:
                 serialize_simple_selector(sink, simple, context);
             }
         }
-        if let Some(next) = selector.compound_selectors.get(index + 1) {
+        if let Some(next) = next_compound(index) {
             sink.push_ascii(match next.combinator {
                 Combinator::Descendant => " ",
                 Combinator::ImmediateChild => " > ",

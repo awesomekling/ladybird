@@ -1059,7 +1059,7 @@ impl<'a> SelectorParser<'a> {
 }
 
 fn contains_pseudo_element(selector: &CompiledSelector) -> bool {
-    selector.compound_selectors.iter().any(|compound| {
+    selector.compounds().any(|compound| {
         compound
             .simple_selectors
             .iter()
@@ -1184,8 +1184,7 @@ impl RustParsedSelectorList {
         }
         for selector in &mut self.selectors {
             let first = selector
-                .compound_selectors
-                .first()
+                .first_compound()
                 .map_or(Combinator::None, |compound| compound.combinator);
             let insert_nesting = parent == StyleNestingParent::Style
                 && (!matches!(first, Combinator::None | Combinator::Descendant)
@@ -1193,9 +1192,9 @@ impl RustParsedSelectorList {
             if insert_nesting {
                 *selector = super::selector_operations::relative_to(selector, SimpleSelector::Nesting);
             } else if first == Combinator::Descendant {
-                let mut compounds = selector.compound_selectors.clone();
+                let mut compounds = selector.to_compound_selectors();
                 compounds[0].combinator = Combinator::None;
-                *selector = CompiledSelector::new(compounds);
+                *selector = CompiledSelector::new(compounds.into_boxed_slice());
             }
         }
         self
