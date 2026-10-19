@@ -2196,6 +2196,10 @@ struct SyntaxParseBuilder {
     parse_context: *const ParseContext,
     preserve_property_source_text: bool,
     dedup: DeclarationDedup,
+    /// The distinct media lists and supports conditions the sheet's rules have, which a sheet repeats: of YouTube's
+    /// 914 `@media` rules, 167 are distinct, and so are 7 of its 511 `@supports` rules.
+    shared_media_lists: crate::fast_hash::FastMap<Vec<u16>, Arc<MediaListData>>,
+    shared_supports_conditions: crate::fast_hash::FastMap<Vec<u16>, Arc<FfiQueryHandle>>,
     /// The names of the declarations, which their name offsets point into until `finish` moves the names of the
     /// declarations it keeps into `values`.
     declaration_names: Vec<u16>,
@@ -2768,6 +2772,25 @@ fn invalid_location_inner_name(rule: &Rule, rule_kind: ParsedRuleKind, outer_nam
 }
 
 impl SyntaxParseBuilder {
+    fn share_media_list(&mut self, list: MediaListData) -> Arc<MediaListData> {
+        let mut key = Vec::new();
+        for query in &list.queries {
+            key.extend(query.sharing_key());
+            key.push(u16::from(b','));
+        }
+        self.shared_media_lists
+            .entry(key)
+            .or_insert_with(|| Arc::new(list))
+            .clone()
+    }
+
+    fn share_supports_condition(&mut self, condition: Arc<FfiQueryHandle>) -> Arc<FfiQueryHandle> {
+        self.shared_supports_conditions
+            .entry(condition.sharing_key())
+            .or_insert(condition)
+            .clone()
+    }
+
     fn collect_declaration_errors(&self) -> Box<[usize]> {
         fn visit_item(sheet: &SyntaxParseBuilder, item: &ParsedRuleChild, errors: &mut Vec<usize>) {
             match item {
@@ -2911,6 +2934,8 @@ impl SyntaxParseBuilder {
             parse_context,
             preserve_property_source_text,
             dedup: DeclarationDedup::default(),
+            shared_media_lists: Default::default(),
+            shared_supports_conditions: Default::default(),
             declaration_names: Vec::new(),
         }
     }
@@ -3551,12 +3576,13 @@ impl SyntaxParseBuilder {
                 }));
             }
             ParsedRulePrelude::MediaQueries(queries) => {
-                media_list = Some(Arc::new(MediaListData {
+                media_list = Some(self.share_media_list(MediaListData {
                     queries: queries.into_iter().map(media_query_handle).collect(),
                 }));
             }
             ParsedRulePrelude::SupportsCondition(expression) => {
-                supports_condition = Some(expression_query_handle(expression, QueryKind::Supports));
+                supports_condition =
+                    Some(self.share_supports_condition(expression_query_handle(expression, QueryKind::Supports)));
             }
             ParsedRulePrelude::ContainerConditions(conditions) => {
                 container_conditions = Some(Arc::new(ContainerConditionsData {
@@ -4674,6 +4700,21 @@ mod tests {
         assert!(has_ignored_vendor_prefix(b"-webkit-unknown".into()));
         assert!(!has_ignored_vendor_prefix(b"-libweb-unknown".into()));
         assert_eq!(rule_kind(&parse_stylesheet(b"a {}")[0]), ParsedRuleKind::Qualified);
+    }
+
+    #[test]
+    fn rules_with_equal_preludes_share_their_queries() {
+        let rules = parse_stylesheet(
+            b"@media (max-width: 527.9px) {} @supports (display: grid) {} @media (max-width:527.9px) {} @supports (display: grid) {} @media (min-width: 1px) {}",
+        );
+        let mut parse = SyntaxParseBuilder::new(std::ptr::null(), false);
+        parse.append_roots(&rules);
+
+        let media = |index: usize| parse.rules[index].rare().media_list.clone().unwrap();
+        let supports = |index: usize| parse.rules[index].rare().supports_condition.clone().unwrap();
+        assert!(std::sync::Arc::ptr_eq(&media(0), &media(2)));
+        assert!(!std::sync::Arc::ptr_eq(&media(0), &media(4)));
+        assert!(std::sync::Arc::ptr_eq(&supports(1), &supports(3)));
     }
 
     #[test]

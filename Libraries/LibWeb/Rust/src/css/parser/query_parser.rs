@@ -1516,6 +1516,28 @@ impl FfiQueryHandle {
         Some(evaluate_supports_expression(expression))
     }
 
+    /// What two queries a sheet repeats have in common, so that its rules can share one: the query's text, with what
+    /// its parse decided that the text does not say.
+    pub(crate) fn sharing_key(&self) -> Vec<u16> {
+        match &self.tree {
+            QueryTree::MediaQuery(query) => {
+                let mut key = serialize_media_query(query);
+                key.push(u16::from(query.valid));
+                key
+            }
+            QueryTree::Expression { expression, kind } => {
+                let mut sink = TextSink::new();
+                serialize_expression(&mut sink, expression, *kind);
+                let mut key = sink.into_utf16();
+                key.push(*kind as u16);
+                if *kind == QueryKind::Supports {
+                    key.push(evaluate_supports_expression(expression) as u16);
+                }
+                key
+            }
+        }
+    }
+
     pub(crate) fn media_text(&self) -> Vec<u16> {
         let QueryTree::MediaQuery(query) = &self.tree else {
             unreachable!();
