@@ -2204,6 +2204,8 @@ struct SyntaxParseBuilder {
     /// 914 `@media` rules, 167 are distinct, and so are 7 of its 511 `@supports` rules.
     shared_media_lists: crate::fast_hash::FastMap<Vec<u16>, Arc<MediaListData>>,
     shared_supports_conditions: crate::fast_hash::FastMap<Vec<u16>, Arc<FfiQueryHandle>>,
+    /// The custom property names the sheet declares, each of which a large sheet repeats in many blocks.
+    custom_property_names: std::cell::RefCell<crate::fast_hash::FastMap<Vec<u16>, CssString>>,
     /// The names of the declarations, which their name offsets point into until `finish` moves the names of the
     /// declarations it keeps into `values`.
     declaration_names: Vec<u16>,
@@ -2940,6 +2942,7 @@ impl SyntaxParseBuilder {
             dedup: DeclarationDedup::default(),
             shared_media_lists: Default::default(),
             shared_supports_conditions: Default::default(),
+            custom_property_names: Default::default(),
             declaration_names: Vec::new(),
         }
     }
@@ -3250,7 +3253,17 @@ impl SyntaxParseBuilder {
             if declaration.property_id == property_id::CUSTOM {
                 let name =
                     &self.declaration_names[declaration.name_offset..declaration.name_offset + declaration.name_length];
-                block.set_custom_property(CssString::from_utf16(name), property);
+                let mut names = self.custom_property_names.borrow_mut();
+                let name = match names.get(name) {
+                    Some(shared) => shared.clone(),
+                    None => {
+                        let shared = CssString::from_utf16(name);
+                        names.insert(name.to_vec(), shared.clone());
+                        shared
+                    }
+                };
+                drop(names);
+                block.set_custom_property(name, property);
             } else {
                 block.append_in_specified_order(property);
             }
