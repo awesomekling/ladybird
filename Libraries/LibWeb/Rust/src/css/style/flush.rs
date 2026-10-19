@@ -497,6 +497,7 @@ impl StyleEngine {
         let mut transaction = self.drain_transaction();
         self.apply_staged_transaction(&mut transaction);
         self.retained.program.share_rule_storage();
+        self.host.dormant_rules.compact();
         self.retained.native_rules.targets.share();
         self.retained.programs.share_indices(&mut self.retained.memory);
         if transaction.is_empty() {

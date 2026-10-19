@@ -1252,6 +1252,21 @@ impl DormantRules {
     pub(super) fn keys(&self) -> impl Iterator<Item = StyleAtomID> + '_ {
         self.first_link_by_key.keys().copied()
     }
+
+    /// Moves the vectors, which grow by doubling as a sheet's rules arrive, into allocations of their length where
+    /// more than a quarter of one is unused.
+    pub(super) fn compact(&mut self) {
+        fn compact<T: Clone>(values: &mut Vec<T>) {
+            if values.capacity() > values.len() + values.len() / 4 {
+                shared_vector::compact(values);
+            }
+        }
+        compact(&mut self.links);
+        compact(&mut self.rules);
+        if self.first_link_by_key.capacity() > self.first_link_by_key.len() * 2 {
+            self.first_link_by_key.shrink_to_fit();
+        }
+    }
 }
 
 /// Whether style rules no element can match yet stay uncompiled, from LIBWEB_STYLE_LAZY_RULES (`0` to compile every
