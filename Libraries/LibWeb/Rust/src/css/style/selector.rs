@@ -4569,13 +4569,26 @@ impl RoutingRegistry {
         }
         let mut liveness = std::mem::take(&mut self.route_liveness);
         let mut geometry_routes = std::mem::take(&mut self.geometry_routes);
+        // NB: A rule's routes are registered together, so consecutive routes mostly ask about the same rule.
+        let mut last_rule: Option<(RuleID, bool, Option<SelectorProgramID>, bool)> = None;
         for index in 0..self.routes.headers.len() {
             let header = self.routes.headers[index];
+            let (can_decide, rule_program, may_affect_layout_geometry) = match last_rule {
+                Some((rule, can_decide, rule_program, geometry)) if rule == header.rule => {
+                    (can_decide, rule_program, geometry)
+                }
+                _ => {
+                    let can_decide = program.rule_can_decide(header.rule);
+                    let rule_program = program.rule_version(header.rule).selector_program;
+                    let geometry = can_decide && program.rule_may_affect_layout_geometry(header.rule);
+                    last_rule = Some((header.rule, can_decide, rule_program, geometry));
+                    (can_decide, rule_program, geometry)
+                }
+            };
             let (selector_program, _) = programs.entry_location(header.entry);
-            let live = program.rule_can_decide(header.rule)
-                && program.rule_version(header.rule).selector_program == Some(selector_program);
+            let live = can_decide && rule_program == Some(selector_program);
             liveness.set(index, live);
-            geometry_routes.set(index, live && program.rule_may_affect_layout_geometry(header.rule));
+            geometry_routes.set(index, live && may_affect_layout_geometry);
         }
         let mut live_relational_routes = std::mem::take(&mut self.live_relational_routes);
         live_relational_routes.clear();
