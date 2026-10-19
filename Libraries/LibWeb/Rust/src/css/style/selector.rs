@@ -2595,7 +2595,10 @@ struct SharedSelectorProgram {
     program: SelectorProgram,
     hash: u64,
     _memory: MemoryLease,
-    /// Each entry's transpose entry points, walked the first time a document routes the program.
+    /// How many times an entry's transpose entry points were visited before they were kept.
+    transpose_visits: std::sync::atomic::AtomicUsize,
+    /// Each entry's transpose entry points, walked once the program is routed a second time. Routing copies the sites
+    /// it visits, so keeping them only pays off for a program that more than one rule or document routes.
     transpose_sites: std::sync::OnceLock<TransposeSites>,
 }
 
@@ -2709,6 +2712,7 @@ fn share_selector_program(
         program,
         hash,
         _memory: program_memory,
+        transpose_visits: std::sync::atomic::AtomicUsize::new(0),
         transpose_sites: std::sync::OnceLock::new(),
     });
     pool.insert(hash, &program);
@@ -3088,7 +3092,7 @@ impl SelectorPrograms {
 
     /// Visit the transpose entry points of one entry of a program, as
     /// `SelectorProgram::collect_transpose_entry_points` does. A program the whole process shares
-    /// is walked once, for every document that routes it.
+    /// is walked once for every later rule or document that routes it.
     pub fn for_each_transpose_entry_point(
         &self,
         program: SelectorProgramID,
@@ -3100,6 +3104,16 @@ impl SelectorPrograms {
             .expect("a selector program identity must remain live while referenced")
         {
             SelectorProgramStorage::Process(shared) => {
+                // NB: Routing visits every entry once, so the visits pass the entry count at the second routing.
+                if shared.transpose_sites.get().is_none()
+                    && shared
+                        .transpose_visits
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        < shared.program.entries().len()
+                {
+                    shared.program.collect_transpose_entry_points(entry, visit);
+                    return;
+                }
                 let sites = shared.transpose_sites.get_or_init(|| {
                     let by_entry: Box<[Box<[OwnedTransposeSite]>]> = (0..shared.program.entries().len())
                         .map(|entry| {
