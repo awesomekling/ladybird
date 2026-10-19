@@ -2108,10 +2108,16 @@ struct ParsedRule {
     has_source_position: bool,
     start_line: usize,
     start_column: usize,
+    selector_list: Option<Arc<RustParsedSelectorList>>,
+    /// What only rules other than style rules have, so that the many style rules pay one pointer for it.
+    rare: Option<Box<RareRuleData>>,
+}
+
+#[derive(Default)]
+struct RareRuleData {
     page_selector_list: Option<Arc<PageSelectorList>>,
     import_rule: Option<Arc<ImportRuleData>>,
     supports_condition: Option<Arc<FfiQueryHandle>>,
-    selector_list: Option<Arc<RustParsedSelectorList>>,
     descriptor_block: Option<Arc<DescriptorBlockData>>,
     layer_names: Option<Arc<LayerNames>>,
     container_conditions: Option<Arc<ContainerConditionsData>>,
@@ -2124,6 +2130,30 @@ struct ParsedRule {
     namespace_rule: Option<Arc<NamespaceRuleData>>,
     property_rule: Option<Arc<PropertyRuleData>>,
     function_signature: Option<Arc<FunctionSignature>>,
+}
+
+static NO_RARE_RULE_DATA: RareRuleData = RareRuleData {
+    page_selector_list: None,
+    import_rule: None,
+    supports_condition: None,
+    descriptor_block: None,
+    layer_names: None,
+    container_conditions: None,
+    font_feature_values: None,
+    keyframe: None,
+    keyframes_name: None,
+    scope_selectors: None,
+    media_list: None,
+    counter_style: None,
+    namespace_rule: None,
+    property_rule: None,
+    function_signature: None,
+};
+
+impl ParsedRule {
+    fn rare(&self) -> &RareRuleData {
+        self.rare.as_deref().unwrap_or(&NO_RARE_RULE_DATA)
+    }
 }
 
 // Parser state is discarded before publishing the owned result.
@@ -2272,29 +2302,33 @@ impl ParsedStyleSheet {
                 rule.selector_list.as_ref().unwrap().clone(),
                 rule.declaration_block.as_ref().unwrap().clone(),
             )),
-            NativeRuleType::Keyframe => {
-                RulePayload::Keyframe(Box::new(FfiKeyframe::new(rule.keyframe.as_ref().unwrap().clone())))
-            }
+            NativeRuleType::Keyframe => RulePayload::Keyframe(Box::new(FfiKeyframe::new(
+                rule.rare().keyframe.as_ref().unwrap().clone(),
+            ))),
             NativeRuleType::Import => RulePayload::Import {
-                data: rule.import_rule.as_ref().unwrap().clone(),
+                data: rule.rare().import_rule.as_ref().unwrap().clone(),
                 media: list
                     .import_media_for(list.identity_for(rule.local_identity))
-                    .unwrap_or_else(|| MediaList::new(rule.media_list.as_ref().unwrap().clone())),
-                scope: rule.scope_selectors.clone(),
+                    .unwrap_or_else(|| MediaList::new(rule.rare().media_list.as_ref().unwrap().clone())),
+                scope: rule.rare().scope_selectors.clone(),
             },
             NativeRuleType::Media => RulePayload::Media {
-                list: MediaList::new(rule.media_list.as_ref().unwrap().clone()),
+                list: MediaList::new(rule.rare().media_list.as_ref().unwrap().clone()),
             },
-            NativeRuleType::Supports => RulePayload::Supports(rule.supports_condition.as_ref().unwrap().clone()),
-            NativeRuleType::Container => RulePayload::Container(rule.container_conditions.as_ref().unwrap().clone()),
-            NativeRuleType::Scope => RulePayload::Scope(rule.scope_selectors.as_ref().unwrap().clone()),
-            NativeRuleType::LayerBlock | NativeRuleType::LayerStatement => {
-                RulePayload::LayerNames(rule.layer_names.as_ref().unwrap().clone())
+            NativeRuleType::Supports => RulePayload::Supports(rule.rare().supports_condition.as_ref().unwrap().clone()),
+            NativeRuleType::Container => {
+                RulePayload::Container(rule.rare().container_conditions.as_ref().unwrap().clone())
             }
-            NativeRuleType::Function => RulePayload::Function(rule.function_signature.as_ref().unwrap().clone()),
+            NativeRuleType::Scope => RulePayload::Scope(rule.rare().scope_selectors.as_ref().unwrap().clone()),
+            NativeRuleType::LayerBlock | NativeRuleType::LayerStatement => {
+                RulePayload::LayerNames(rule.rare().layer_names.as_ref().unwrap().clone())
+            }
+            NativeRuleType::Function => RulePayload::Function(rule.rare().function_signature.as_ref().unwrap().clone()),
             NativeRuleType::Page => RulePayload::Page {
-                selectors: RefCell::new(rule.page_selector_list.as_ref().unwrap().clone()),
-                descriptors: Box::new(FfiDescriptorBlock::new(rule.descriptor_block.as_ref().unwrap().clone())),
+                selectors: RefCell::new(rule.rare().page_selector_list.as_ref().unwrap().clone()),
+                descriptors: Box::new(FfiDescriptorBlock::new(
+                    rule.rare().descriptor_block.as_ref().unwrap().clone(),
+                )),
             },
             NativeRuleType::Margin => {
                 let name: Vec<u16> = self.values[rule.name_offset..rule.name_offset + rule.name_length]
@@ -2313,19 +2347,19 @@ impl ParsedStyleSheet {
                 }
             }
             NativeRuleType::FontFace => RulePayload::FontFace(Box::new(FfiDescriptorBlock::new(
-                rule.descriptor_block.as_ref().unwrap().clone(),
+                rule.rare().descriptor_block.as_ref().unwrap().clone(),
             ))),
             NativeRuleType::FontFeatureValues => RulePayload::FontFeatureValues(Box::new(FontFeatureValuesRule::new(
-                rule.font_feature_values.as_ref().unwrap().clone(),
+                rule.rare().font_feature_values.as_ref().unwrap().clone(),
             ))),
             NativeRuleType::Keyframes => {
-                RulePayload::Keyframes(RefCell::new(rule.keyframes_name.as_ref().unwrap().clone()))
+                RulePayload::Keyframes(RefCell::new(rule.rare().keyframes_name.as_ref().unwrap().clone()))
             }
-            NativeRuleType::Namespace => RulePayload::Namespace(rule.namespace_rule.as_ref().unwrap().clone()),
+            NativeRuleType::Namespace => RulePayload::Namespace(rule.rare().namespace_rule.as_ref().unwrap().clone()),
             NativeRuleType::CounterStyle => RulePayload::CounterStyle(Box::new(FfiCounterStyle::new(
-                rule.counter_style.as_ref().unwrap().clone(),
+                rule.rare().counter_style.as_ref().unwrap().clone(),
             ))),
-            NativeRuleType::Property => RulePayload::Property(rule.property_rule.as_ref().unwrap().clone()),
+            NativeRuleType::Property => RulePayload::Property(rule.rare().property_rule.as_ref().unwrap().clone()),
             NativeRuleType::NestedDeclarations | NativeRuleType::FunctionDeclarations => unreachable!(),
         };
         Some(NativeRule::with_identity(
@@ -3587,22 +3621,41 @@ impl SyntaxParseBuilder {
             has_source_position: source_position.is_some(),
             start_line: source_position.map_or(0, |position| position.line),
             start_column: source_position.map_or(0, |position| position.column),
-            page_selector_list,
-            import_rule,
-            supports_condition,
             selector_list,
-            descriptor_block,
-            layer_names,
-            container_conditions,
-            font_feature_values,
-            keyframe,
-            keyframes_name,
-            scope_selectors,
-            media_list,
-            counter_style,
-            namespace_rule,
-            property_rule,
-            function_signature,
+            rare: (page_selector_list.is_some()
+                || import_rule.is_some()
+                || supports_condition.is_some()
+                || descriptor_block.is_some()
+                || layer_names.is_some()
+                || container_conditions.is_some()
+                || font_feature_values.is_some()
+                || keyframe.is_some()
+                || keyframes_name.is_some()
+                || scope_selectors.is_some()
+                || media_list.is_some()
+                || counter_style.is_some()
+                || namespace_rule.is_some()
+                || property_rule.is_some()
+                || function_signature.is_some())
+            .then(|| {
+                Box::new(RareRuleData {
+                    page_selector_list,
+                    import_rule,
+                    supports_condition,
+                    descriptor_block,
+                    layer_names,
+                    container_conditions,
+                    font_feature_values,
+                    keyframe,
+                    keyframes_name,
+                    scope_selectors,
+                    media_list,
+                    counter_style,
+                    namespace_rule,
+                    property_rule,
+                    function_signature,
+                })
+            }),
         })
     }
 
@@ -3639,7 +3692,7 @@ impl SyntaxParseBuilder {
             }
             ParsedRuleKind::Namespace if self.namespace_rules_valid => {
                 self.import_rules_valid = false;
-                let prefix = parsed.namespace_rule.as_ref().unwrap().prefix.units();
+                let prefix = parsed.rare().namespace_rule.as_ref().unwrap().prefix.units();
                 if !self
                     .declared_namespaces
                     .iter()
@@ -4176,7 +4229,7 @@ mod tests {
                 parse
                     .rules
                     .iter()
-                    .filter_map(|rule| rule.property_rule.as_ref()?.initial_value.as_ref()),
+                    .filter_map(|rule| rule.rare().property_rule.as_ref()?.initial_value.as_ref()),
             )
             .filter(|value| matches!(value.as_ref(), crate::css::style_value::StyleValueData::Length { .. }))
             .map(std::sync::Arc::downgrade)
@@ -4185,7 +4238,7 @@ mod tests {
         let syntaxes = parse
             .rules
             .iter()
-            .filter_map(|rule| rule.property_rule.as_ref().map(|rule| &rule.syntax))
+            .filter_map(|rule| rule.rare().property_rule.as_ref().map(|rule| &rule.syntax))
             .map(std::sync::Arc::downgrade)
             .collect::<Vec<_>>();
         assert!(!syntaxes.is_empty());
@@ -4525,7 +4578,7 @@ mod tests {
             panic!("expected nested style and scope rules")
         };
         assert!(child.selector_list.is_some());
-        let selectors = scope_rule.scope_selectors.as_ref().unwrap();
+        let selectors = scope_rule.rare().scope_selectors.as_ref().unwrap();
         assert!(selectors.start.is_some());
         assert!(selectors.end.is_some());
 
@@ -4537,7 +4590,7 @@ mod tests {
         };
         assert!(group_child.selector_list.is_none());
         assert_eq!(scope_rule.rule_kind, ParsedRuleKind::Invalid);
-        assert!(scope_rule.scope_selectors.is_none());
+        assert!(scope_rule.rare().scope_selectors.is_none());
     }
 
     #[test]
@@ -4590,15 +4643,15 @@ mod tests {
 
         let media = &parse.rules[0];
         assert_eq!(media.rule_kind, ParsedRuleKind::Media);
-        assert_eq!(media.media_list.as_ref().unwrap().queries.len(), 1);
+        assert_eq!(media.rare().media_list.as_ref().unwrap().queries.len(), 1);
 
         let supports = &parse.rules[1];
         assert_eq!(supports.rule_kind, ParsedRuleKind::Supports);
-        assert!(supports.supports_condition.is_some());
+        assert!(supports.rare().supports_condition.is_some());
 
         let container = &parse.rules[2];
         assert_eq!(container.rule_kind, ParsedRuleKind::Container);
-        let conditions = &container.container_conditions.as_ref().unwrap().conditions;
+        let conditions = &container.rare().container_conditions.as_ref().unwrap().conditions;
         assert_eq!(conditions.len(), 2);
         assert!(conditions[0].name.is_some());
         assert!(conditions[0].query.is_some());
@@ -4607,7 +4660,7 @@ mod tests {
 
         let invalid_supports = &parse.rules[3];
         assert_eq!(invalid_supports.rule_kind, ParsedRuleKind::Invalid);
-        assert!(invalid_supports.supports_condition.is_none());
+        assert!(invalid_supports.rare().supports_condition.is_none());
     }
 
     #[test]
@@ -4696,7 +4749,7 @@ mod tests {
         let sheet = parse_test_stylesheet(
             b"@page { margin: 1px 2px 3px 4px; @top-left { content: 'page'; } margin-right: 5px; size: a4; size: invalid; }",
         );
-        let descriptors = &sheet.rules[0].descriptor_block.as_ref().unwrap().descriptors;
+        let descriptors = &sheet.rules[0].rare().descriptor_block.as_ref().unwrap().descriptors;
         let id = |name: &str| descriptor_metadata(1, &utf16(name)).unwrap().id;
         assert_eq!(
             descriptors.iter().map(|descriptor| descriptor.id).collect::<Vec<_>>(),

@@ -101,7 +101,7 @@ fn builder_constructs_one_rule_tree_with_dense_unique_identities() {
         panic!("expected descriptors")
     };
     assert!(Arc::ptr_eq(
-        font.descriptor_block.as_ref().unwrap(),
+        font.rare().descriptor_block.as_ref().unwrap(),
         declarations.descriptor_block.as_ref().unwrap()
     ));
 }
@@ -150,8 +150,8 @@ fn counter_style_mutation_preserves_names_and_descriptor_snapshots() {
     use crate::css::counter_style::*;
     use crate::css::descriptor_block::{rust_descriptor_block_remove, rust_descriptor_block_set};
     let sheet = parse_shared_on_worker("@counter-style 初 { prefix: 'A'; } @counter-style 別 { prefix: 'B'; }");
-    let rule = FfiCounterStyle::new(sheet.rules[0].counter_style.clone().unwrap());
-    let other = FfiCounterStyle::new(sheet.rules[1].counter_style.clone().unwrap());
+    let rule = FfiCounterStyle::new(sheet.rules[0].rare().counter_style.clone().unwrap());
+    let other = FfiCounterStyle::new(sheet.rules[1].rare().counter_style.clone().unwrap());
     drop(sheet);
     assert_eq!(rule.name().units(), utf16("初"));
     unsafe {
@@ -291,7 +291,7 @@ fn keyframe_mutation_preserves_exposed_declarations_and_snapshots() {
     let ParsedRuleChild::Rule(first) = &sheet.rules[0].children[0] else {
         unreachable!()
     };
-    let data = first.keyframe.as_ref().unwrap();
+    let data = first.rare().keyframe.as_ref().unwrap();
     assert_eq!(&*data.keys, [0.0, 50.0]);
     assert_eq!(data.declarations.properties.len(), 1);
     assert_eq!(data.declarations.properties[0].property_id, property_id::HEIGHT);
@@ -501,7 +501,7 @@ fn worker_selector_normalization_survives_publication() {
             selectors.push(text(parsed));
         }
         if rule.rule_kind == ParsedRuleKind::Scope {
-            let scope = rule.scope_selectors.as_ref().unwrap();
+            let scope = rule.rare().scope_selectors.as_ref().unwrap();
             scopes.push(text(scope.start.as_ref().unwrap()));
             scopes.push(text(scope.end.as_ref().unwrap()));
         }
@@ -538,10 +538,10 @@ fn import_preludes_outlive_the_worker_and_shared_sheet() {
         "@import 'a.css' layer(雪) supports(display: grid); @import url('b.css') layer supports(display: unknown); @import 'c.css'; @supports (display: grid) {}",
     );
     assert_eq!(sheet.rules.len(), 4);
-    let named = sheet.rules[0].import_rule.clone().unwrap();
-    let anonymous = sheet.rules[1].import_rule.clone().unwrap();
-    let unlayered = sheet.rules[2].import_rule.clone().unwrap();
-    let supports = sheet.rules[3].supports_condition.clone().unwrap();
+    let named = sheet.rules[0].rare().import_rule.clone().unwrap();
+    let anonymous = sheet.rules[1].rare().import_rule.clone().unwrap();
+    let unlayered = sheet.rules[2].rare().import_rule.clone().unwrap();
+    let supports = sheet.rules[3].rare().supports_condition.clone().unwrap();
     drop(sheet);
     assert_eq!(named.layer.as_ref().unwrap().units(), utf16("雪"));
     assert!(anonymous.layer.as_ref().unwrap().units().is_empty());
@@ -568,8 +568,8 @@ fn page_text(selectors: &PageSelectorList) -> Vec<u16> {
 fn page_selectors_outlive_the_sheet_and_replace_independently() {
     let sheet = parse_shared_on_worker("@page 雪:left:first, :blank { margin: 7px; } @page {}");
     assert_eq!(sheet.rules.len(), 2);
-    let selectors = sheet.rules[0].page_selector_list.clone().unwrap();
-    let empty = sheet.rules[1].page_selector_list.clone().unwrap();
+    let selectors = sheet.rules[0].rare().page_selector_list.clone().unwrap();
+    let empty = sheet.rules[1].rare().page_selector_list.clone().unwrap();
     drop(sheet);
     assert_eq!(selectors.selectors.len(), 2);
     assert_eq!(page_text(&selectors), utf16("雪:left:first, :blank"));
@@ -595,8 +595,8 @@ fn function_signatures_own_parameters_after_the_sheet_is_dropped() {
         "@function --幅(--長さ <length>: 8px, --名: '雪', --未) returns <length> { result: var(--長さ); } @function --空() {}",
     );
     assert_eq!(sheet.rules.len(), 2);
-    let signature = sheet.rules[0].function_signature.clone().unwrap();
-    let empty = sheet.rules[1].function_signature.clone().unwrap();
+    let signature = sheet.rules[0].rare().function_signature.clone().unwrap();
+    let empty = sheet.rules[1].rare().function_signature.clone().unwrap();
     drop(sheet);
     assert_eq!(signature.name.units(), utf16("--幅"));
     assert_eq!(signature.parameters.len(), 3);
@@ -621,8 +621,8 @@ fn property_rules_own_syntax_and_initial_values_after_the_sheet_is_dropped() {
         "@property --色 { syntax: '<length>'; inherits: false; initial-value: 8px; } @property --自由 { syntax: '*'; inherits: true; }",
     );
     assert_eq!(sheet.rules.len(), 2);
-    let typed = sheet.rules[0].property_rule.clone().unwrap();
-    let universal = sheet.rules[1].property_rule.clone().unwrap();
+    let typed = sheet.rules[0].rare().property_rule.clone().unwrap();
+    let universal = sheet.rules[1].rare().property_rule.clone().unwrap();
     drop(sheet);
     assert_eq!(typed.name.units(), utf16("--色"));
     assert_eq!(typed.syntax_source.units(), utf16("<length>"));
@@ -643,8 +643,8 @@ fn namespace_rules_own_native_names_after_the_sheet_is_dropped() {
     let sheet = parse_shared_on_worker("@namespace ''; @namespace 色 'urn:名前'; 色|x {}");
     assert_eq!(sheet.rules.len(), 3);
     assert!(sheet.rules[2].selector_list.is_some());
-    let default = sheet.rules[0].namespace_rule.clone().unwrap();
-    let prefixed = sheet.rules[1].namespace_rule.clone().unwrap();
+    let default = sheet.rules[0].rare().namespace_rule.clone().unwrap();
+    let prefixed = sheet.rules[1].rare().namespace_rule.clone().unwrap();
     drop(sheet);
     assert!(default.prefix.units().is_empty());
     assert!(default.uri.units().is_empty());
@@ -814,7 +814,7 @@ fn independent_workers_read_the_same_immutable_graph() {
                     1
                 );
                 assert_eq!(
-                    css_query_evaluate_supports(sheet.rules[1].supports_condition.as_deref()),
+                    css_query_evaluate_supports(sheet.rules[1].rare().supports_condition.as_deref()),
                     1
                 );
             }
@@ -828,10 +828,19 @@ fn independent_workers_read_the_same_immutable_graph() {
                 )
             };
             assert_eq!(
-                *sheet.rules[2].property_rule.as_ref().unwrap().syntax,
+                *sheet.rules[2].rare().property_rule.as_ref().unwrap().syntax,
                 SyntaxNode::Type(SyntaxType::Length)
             );
-            assert_eq!(sheet.rules[3].page_selector_list.as_ref().unwrap().selectors.len(), 1);
+            assert_eq!(
+                sheet.rules[3]
+                    .rare()
+                    .page_selector_list
+                    .as_ref()
+                    .unwrap()
+                    .selectors
+                    .len(),
+                1
+            );
             drop(sheet);
             drop(expected_value);
             assert_eq!(crate::css::ffi_stats::THREAD_UNSAFE_CPP_CALLBACK_COUNT.get(), 0);
@@ -849,10 +858,10 @@ fn scope_presence_and_native_selector_names_survive_worker_exit() {
         "@import 'data:text/css,'; @import 'data:text/css,' scope; @import 'data:text/css,' scope((.親) to (.限界)); @scope {} @scope (.親) to (.限界) {}",
     );
     assert_eq!(sheet.rules.len(), 5);
-    assert!(sheet.rules[0].scope_selectors.is_none());
+    assert!(sheet.rules[0].rare().scope_selectors.is_none());
     let scopes: Vec<_> = sheet.rules[1..]
         .iter()
-        .map(|rule| rule.scope_selectors.clone().unwrap())
+        .map(|rule| rule.rare().scope_selectors.clone().unwrap())
         .collect();
     drop(sheet);
     for (index, scope) in scopes.iter().enumerate() {
@@ -920,7 +929,7 @@ fn container_conditions_own_names_and_queries_after_the_sheet_is_dropped() {
     let sheet =
         parse_shared_on_worker("@container 色😀 (width > 10px), 名前, style(--状態: 有効) { div { width: 13px } }");
     assert_eq!(sheet.rules.len(), 1);
-    let conditions = sheet.rules[0].container_conditions.clone().unwrap();
+    let conditions = sheet.rules[0].rare().container_conditions.clone().unwrap();
     drop(sheet);
     let entries = &conditions.conditions;
     assert_eq!(entries.len(), 3);
@@ -945,9 +954,9 @@ fn container_conditions_own_names_and_queries_after_the_sheet_is_dropped() {
 fn layer_names_outlive_the_shared_sheet() {
     let sheet = parse_shared_on_worker("@layer 色.子, emoji😀; @layer 色.子 {} @layer {}");
     assert_eq!(sheet.rules.len(), 3);
-    let statement = sheet.rules[0].layer_names.clone().unwrap();
-    let block = sheet.rules[1].layer_names.clone().unwrap();
-    let anonymous = sheet.rules[2].layer_names.clone().unwrap();
+    let statement = sheet.rules[0].rare().layer_names.clone().unwrap();
+    let block = sheet.rules[1].rare().layer_names.clone().unwrap();
+    let anonymous = sheet.rules[2].rare().layer_names.clone().unwrap();
     drop(sheet);
     assert_eq!(statement.names.len(), 2);
     assert_eq!(statement.names[0].units(), utf16("色.子"));
@@ -984,7 +993,7 @@ fn parsed_anchor_and_font_values_retain_their_children() {
     assert_eq!(serialize_style_value_to_utf16(second_fallback.data()), utf16("2px"));
 
     let sheet = parse_shared_on_worker("@font-face { font-family: Graph; src: local('Font Name'); }");
-    let descriptors = sheet.rules[0].descriptor_block.clone().unwrap();
+    let descriptors = sheet.rules[0].rare().descriptor_block.clone().unwrap();
     let value = &*descriptors.descriptors[1].value;
     assert_eq!(serialize_style_value_to_utf16(value), utf16("local(\"Font Name\")"));
     let StyleValueData::ValueList { values, .. } = value else {
@@ -1123,8 +1132,8 @@ fn media_mutation_preserves_live_owners_and_shared_snapshots() {
     }
     let sheet = parse_shared_on_worker("@import 'data:text/css,' screen, écran; @media all, print {}");
     assert_eq!(sheet.rules.len(), 2);
-    let imported = MediaList::new(sheet.rules[0].media_list.clone().unwrap());
-    let media = MediaList::new(sheet.rules[1].media_list.clone().unwrap());
+    let imported = MediaList::new(sheet.rules[0].rare().media_list.clone().unwrap());
+    let media = MediaList::new(sheet.rules[1].rare().media_list.clone().unwrap());
     drop(sheet);
     assert_eq!(text(&imported), utf16("screen, écran"));
     assert_eq!(text(&media), utf16("all, print"));
@@ -1225,9 +1234,9 @@ fn descriptor_mutation_forks_worker_parsed_data() {
         "@page { margin-top: 13px; margin-left: 29px; margin-top: 17px } @font-face { font-family: 色; src: local(色) }",
     );
     assert_eq!(sheet.rules.len(), 2);
-    let mut page = FfiDescriptorBlock::new(sheet.rules[0].descriptor_block.clone().unwrap());
-    let shared = FfiDescriptorBlock::new(sheet.rules[0].descriptor_block.clone().unwrap());
-    let font = sheet.rules[1].descriptor_block.clone().unwrap();
+    let mut page = FfiDescriptorBlock::new(sheet.rules[0].rare().descriptor_block.clone().unwrap());
+    let shared = FfiDescriptorBlock::new(sheet.rules[0].rare().descriptor_block.clone().unwrap());
+    let font = sheet.rules[1].rare().descriptor_block.clone().unwrap();
     drop(sheet);
     let data = page.data();
     assert_eq!(data.descriptors.len(), 2);

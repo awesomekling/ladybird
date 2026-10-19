@@ -191,7 +191,7 @@ impl ParsedRule {
             | ParsedRuleKind::Unknown
             | ParsedRuleKind::IgnoredVendor
             | ParsedRuleKind::FontFeatureValuesRule => return None,
-            ParsedRuleKind::Qualified if self.keyframe.is_some() => NativeRuleType::Keyframe,
+            ParsedRuleKind::Qualified if self.rare().keyframe.is_some() => NativeRuleType::Keyframe,
             ParsedRuleKind::Qualified => NativeRuleType::Style,
             ParsedRuleKind::Import => NativeRuleType::Import,
             ParsedRuleKind::Media => NativeRuleType::Media,
@@ -263,47 +263,47 @@ impl<'a> SharedRule<'a> {
         let SharedRuleData::Rule(rule) = self.data else {
             return None;
         };
-        rule.namespace_rule.as_ref()
+        rule.rare().namespace_rule.as_ref()
     }
 
     pub(crate) fn property(self) -> Option<&'a PropertyRuleData> {
         let SharedRuleData::Rule(rule) = self.data else {
             return None;
         };
-        rule.property_rule.as_deref()
+        rule.rare().property_rule.as_deref()
     }
 
     pub(crate) fn import(self) -> Option<&'a Arc<ImportRuleData>> {
         let SharedRuleData::Rule(rule) = self.data else {
             return None;
         };
-        rule.import_rule.as_ref()
+        rule.rare().import_rule.as_ref()
     }
 
     pub(crate) fn media_data(self) -> Arc<MediaListData> {
         let SharedRuleData::Rule(rule) = self.data else {
             unreachable!()
         };
-        rule.media_list.as_ref().unwrap().clone()
+        rule.rare().media_list.as_ref().unwrap().clone()
     }
 
     pub(crate) fn function_signature(self) -> Option<Arc<FunctionSignature>> {
         let SharedRuleData::Rule(rule) = self.data else {
             return None;
         };
-        rule.function_signature.clone()
+        rule.rare().function_signature.clone()
     }
 
     pub(crate) fn font_feature_values(self) -> Option<Arc<FontFeatureValuesData>> {
         let SharedRuleData::Rule(rule) = self.data else {
             return None;
         };
-        rule.font_feature_values.clone()
+        rule.rare().font_feature_values.clone()
     }
 
     pub(crate) fn descriptors(self) -> Option<Arc<DescriptorBlockData>> {
         match self.data {
-            SharedRuleData::Rule(rule) => rule.descriptor_block.clone(),
+            SharedRuleData::Rule(rule) => rule.rare().descriptor_block.clone(),
             SharedRuleData::Declarations(declarations) => declarations.descriptor_block.clone(),
         }
     }
@@ -312,7 +312,7 @@ impl<'a> SharedRule<'a> {
         let SharedRuleData::Rule(rule) = self.data else {
             return None;
         };
-        rule.keyframe.as_deref()
+        rule.rare().keyframe.as_deref()
     }
 
     pub(crate) fn selectors(self) -> Option<Arc<RustParsedSelectorList>> {
@@ -326,14 +326,14 @@ impl<'a> SharedRule<'a> {
         let SharedRuleData::Rule(rule) = self.data else {
             return None;
         };
-        rule.scope_selectors.clone()
+        rule.rare().scope_selectors.clone()
     }
 
     pub(crate) fn container(self) -> Option<&'a Arc<ContainerConditionsData>> {
         let SharedRuleData::Rule(rule) = self.data else {
             return None;
         };
-        rule.container_conditions.as_ref()
+        rule.rare().container_conditions.as_ref()
     }
 
     pub(crate) fn layer_name(self) -> Option<&'a [u16]> {
@@ -341,8 +341,8 @@ impl<'a> SharedRule<'a> {
             return None;
         };
         match self.rule_type {
-            NativeRuleType::LayerBlock => Some(rule.layer_names.as_ref().unwrap().names[0].units()),
-            NativeRuleType::Import => Some(rule.import_rule.as_ref().unwrap().layer.as_ref()?.units()),
+            NativeRuleType::LayerBlock => Some(rule.rare().layer_names.as_ref().unwrap().names[0].units()),
+            NativeRuleType::Import => Some(rule.rare().import_rule.as_ref().unwrap().layer.as_ref()?.units()),
             _ => None,
         }
     }
@@ -352,9 +352,9 @@ impl<'a> SharedRule<'a> {
             return None;
         };
         match self.rule_type {
-            NativeRuleType::Property => Some(rule.property_rule.as_ref().unwrap().name.clone()),
-            NativeRuleType::Keyframes => rule.keyframes_name.clone(),
-            NativeRuleType::CounterStyle => Some(rule.counter_style.as_ref().unwrap().name.clone()),
+            NativeRuleType::Property => Some(rule.rare().property_rule.as_ref().unwrap().name.clone()),
+            NativeRuleType::Keyframes => rule.rare().keyframes_name.clone(),
+            NativeRuleType::CounterStyle => Some(rule.rare().counter_style.as_ref().unwrap().name.clone()),
             _ => None,
         }
     }
@@ -363,14 +363,14 @@ impl<'a> SharedRule<'a> {
         let SharedRuleData::Rule(rule) = self.data else {
             return None;
         };
-        rule.layer_names.as_deref()
+        rule.rare().layer_names.as_deref()
     }
 
     pub(crate) fn media(self) -> Option<&'a MediaListData> {
         let SharedRuleData::Rule(rule) = self.data else {
             return None;
         };
-        rule.media_list.as_deref()
+        rule.rare().media_list.as_deref()
     }
 
     pub(crate) fn supports(self) -> Option<&'a Arc<FfiQueryHandle>> {
@@ -378,9 +378,9 @@ impl<'a> SharedRule<'a> {
             return None;
         };
         if self.rule_type == NativeRuleType::Import {
-            rule.import_rule.as_ref().unwrap().supports.as_ref()
+            rule.rare().import_rule.as_ref().unwrap().supports.as_ref()
         } else {
-            rule.supports_condition.as_ref()
+            rule.rare().supports_condition.as_ref()
         }
     }
 
