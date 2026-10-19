@@ -727,6 +727,13 @@ impl AtomSpace for QueryAtoms {
     const KEYS_ATTRIBUTE_VALUES: bool = false;
 }
 
+#[derive(Default, PartialEq, Eq, Hash)]
+struct RareSelectorProgramParts {
+    relative_queries: Vec<RelativeQuery>,
+    /// Ranges into the program's text, one per extended language range a `:lang()` names.
+    language_ranges: Vec<(u32, u32)>,
+}
+
 /// A compiled selector program: one rule's selector list.
 #[derive(Default, PartialEq, Eq, Hash)]
 pub struct SelectorProgram<A: AtomSpace = EngineAtoms> {
@@ -734,9 +741,8 @@ pub struct SelectorProgram<A: AtomSpace = EngineAtoms> {
     operands: Vec<SelectorNodeID>,
     text: Vec<u16>,
     entries: Vec<SelectorEntry>,
-    relative_queries: Vec<RelativeQuery>,
-    /// Ranges into `text`, one per extended language range a `:lang()` names.
-    language_ranges: Vec<(u32, u32)>,
+    /// What only programs with `:has()` or `:lang()` need, so that the others pay one pointer for it.
+    rare: Option<Box<RareSelectorProgramParts>>,
     /// Immutable dispatch analysis, retained so rebuilding scope dispatches never walks the IR.
     dispatch_metadata: CachedDispatchMetadata,
     /// Per selector node: the dispatch-bloom bits a node evaluated against that compound must
@@ -855,7 +861,7 @@ impl<A: AtomSpace> SelectorProgram<A> {
     #[must_use]
     pub fn contains_relational_selector(&self) -> bool {
         // Every relative query is pushed together with the one RelativeExists node evaluating it.
-        !self.relative_queries.is_empty()
+        !self.relative_queries().is_empty()
     }
 
     /// Whether any node in this subtree tests sibling position. A retained witness for a
@@ -880,8 +886,12 @@ impl<A: AtomSpace> SelectorProgram<A> {
         }
     }
 
+    fn relative_queries(&self) -> &[RelativeQuery] {
+        self.rare.as_ref().map_or(&[], |rare| &rare.relative_queries)
+    }
+
     pub fn relative_query(&self, id: RelativeQueryID) -> RelativeQuery {
-        self.relative_queries[id.0 as usize]
+        self.relative_queries()[id.0 as usize]
     }
 
     /// The query named by `id`, when a witness of it may be retained and later re-verified.
@@ -893,7 +903,7 @@ impl<A: AtomSpace> SelectorProgram<A> {
     /// wrote it, and a key nothing answers for is not a proof of anything.
     #[must_use]
     pub(super) fn retainable_relative_query(&self, id: RelativeQueryID) -> Option<RelativeQuery> {
-        let query = self.relative_queries.get(id.0 as usize).copied()?;
+        let query = self.relative_queries().get(id.0 as usize).copied()?;
         (query.is_simple() && self.node_is_prefix_local(query.compound)).then_some(query)
     }
 
@@ -904,7 +914,7 @@ impl<A: AtomSpace> SelectorProgram<A> {
 
     /// The extended language ranges one `:lang()` names.
     pub fn language_ranges(&self, first: u32, count: u32) -> impl Iterator<Item = &[u16]> {
-        self.language_ranges[first as usize..(first + count) as usize]
+        self.rare.as_ref().map_or(&[][..], |rare| &rare.language_ranges)[first as usize..(first + count) as usize]
             .iter()
             .map(|&(offset, length)| self.literal(offset, length))
     }
@@ -922,13 +932,16 @@ impl<A: AtomSpace> SelectorProgram<A> {
                 self.operands,
                 self.text,
                 self.entries,
-                self.relative_queries,
-                self.language_ranges,
                 self.dispatch_metadata.0,
             ];
             cached [];
             nested [
                 size_of::<bool>(),
+                self.rare.as_ref().map_or(0, |rare| {
+                    size_of::<RareSelectorProgramParts>() as u64
+                        + (rare.relative_queries.capacity() * size_of::<RelativeQuery>()) as u64
+                        + (rare.language_ranges.capacity() * size_of::<(u32, u32)>()) as u64
+                }),
                 self.dispatch_metadata.0
                     .iter()
                     .map(|metadata| {
@@ -990,14 +1003,16 @@ impl<A: AtomSpace> SelectorProgramBuilder<A> {
 
     /// Add the extended language ranges of one `:lang()` and return their range.
     pub fn push_language_ranges(&mut self, ranges: impl IntoIterator<Item = impl AsRef<[u16]>>) -> (u32, u32) {
-        let first = u32::try_from(self.program.language_ranges.len()).expect("language range space exhausted");
+        let first =
+            u32::try_from(self.program.rare_mut().language_ranges.len()).expect("language range space exhausted");
         for range in ranges {
             let literal = self.push_literal(range.as_ref());
-            self.program.language_ranges.push(literal);
+            self.program.rare_mut().language_ranges.push(literal);
         }
         (
             first,
-            u32::try_from(self.program.language_ranges.len() - first as usize).expect("language range space exhausted"),
+            u32::try_from(self.program.rare_mut().language_ranges.len() - first as usize)
+                .expect("language range space exhausted"),
         )
     }
 
@@ -1032,10 +1047,9 @@ impl<A: AtomSpace> SelectorProgramBuilder<A> {
 
     /// Add a relative query and return the operator that evaluates it.
     pub fn push_relative_exists(&mut self, query: RelativeQuery) -> SelectorNodeID {
-        self.program.relative_queries.push(query);
-        let id = RelativeQueryID(
-            u32::try_from(self.program.relative_queries.len() - 1).expect("relative query space exhausted"),
-        );
+        let relative_queries = &mut self.program.rare_mut().relative_queries;
+        relative_queries.push(query);
+        let id = RelativeQueryID(u32::try_from(relative_queries.len() - 1).expect("relative query space exhausted"));
         self.push(SelectorOp::RelativeExists(id))
     }
 
@@ -1159,13 +1173,19 @@ impl<A: AtomSpace> SelectorProgramBuilder<A> {
         self.program.operands.shrink_to_fit();
         self.program.text.shrink_to_fit();
         self.program.entries.shrink_to_fit();
-        self.program.relative_queries.shrink_to_fit();
-        self.program.language_ranges.shrink_to_fit();
+        if let Some(rare) = &mut self.program.rare {
+            rare.relative_queries.shrink_to_fit();
+            rare.language_ranges.shrink_to_fit();
+        }
         self.program
     }
 }
 
 impl<A: AtomSpace> SelectorProgram<A> {
+    fn rare_mut(&mut self) -> &mut RareSelectorProgramParts {
+        self.rare.get_or_insert_with(Box::default)
+    }
+
     fn cache_dispatch_metadata(&mut self) {
         // Only ancestor walks consult these blooms; other programs need no per-node array.
         let target_count = if self.nodes.iter().any(|node| matches!(node, SelectorOp::Ancestor(_))) {
@@ -2599,7 +2619,7 @@ struct SharedSelectorProgram {
     transpose_visits: std::sync::atomic::AtomicUsize,
     /// Each entry's transpose entry points, walked once the program is routed a second time. Routing copies the sites
     /// it visits, so keeping them only pays off for a program that more than one rule or document routes.
-    transpose_sites: std::sync::OnceLock<TransposeSites>,
+    transpose_sites: std::sync::OnceLock<Box<TransposeSites>>,
 }
 
 /// The transpose entry points of each entry of a shared program, charged to the process's program pools.
@@ -3132,10 +3152,10 @@ impl SelectorPrograms {
                             .sum::<u64>();
                     let mut memory = MemoryLease::new(MemoryCategory::RuleProgram);
                     memory.reconcile_committed(&mut selector_program_pools().programs.memory, bytes);
-                    TransposeSites {
+                    Box::new(TransposeSites {
                         by_entry,
                         _memory: memory,
-                    }
+                    })
                 });
                 for site in &sites.by_entry[entry] {
                     visit(site.site());
