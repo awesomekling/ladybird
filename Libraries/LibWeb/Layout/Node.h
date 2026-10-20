@@ -473,22 +473,25 @@ public:
     // One image per background layer, null where the layer has no image.
     ReadonlySpan<RefPtr<CSS::AbstractImageStyleValue const>> background_images() const
     {
-        if (!m_background_images.has_value())
-            m_background_images = style_group<CSS::ComputedValues::BackgroundValues>().background_images_value();
-        return *m_background_images;
+        auto& background_images = style_image_values().background_images;
+        if (!background_images.has_value())
+            background_images = style_group<CSS::ComputedValues::BackgroundValues>().background_images_value();
+        return *background_images;
     }
     // One image per mask layer, null where the layer has no image.
     ReadonlySpan<RefPtr<CSS::AbstractImageStyleValue const>> mask_images() const
     {
-        if (!m_mask_images.has_value())
-            m_mask_images = style_group<CSS::ComputedValues::MaskValues>().mask_images_value();
-        return *m_mask_images;
+        auto& mask_images = style_image_values().mask_images;
+        if (!mask_images.has_value())
+            mask_images = style_group<CSS::ComputedValues::MaskValues>().mask_images_value();
+        return *mask_images;
     }
     CSS::AbstractImageStyleValue const* list_style_image() const
     {
-        if (!m_list_style_image.has_value())
-            m_list_style_image = style_group<CSS::ComputedValues::InheritedListValues>().list_style_image_value();
-        return m_list_style_image->ptr();
+        auto& list_style_image = style_image_values().list_style_image;
+        if (!list_style_image.has_value())
+            list_style_image = style_group<CSS::ComputedValues::InheritedListValues>().list_style_image_value();
+        return list_style_image->ptr();
     }
     CSS::ComputedFilterView backdrop_filter() const { return style_group<CSS::ComputedValues::EffectsValues>().backdrop_filter_value(); }
     CSS::ComputedFilterView filter() const { return style_group<CSS::ComputedValues::EffectsValues>().filter_value(); }
@@ -501,9 +504,10 @@ public:
     CSS::BorderData const& border_bottom() const { return style_group<CSS::ComputedValues::BorderValues>().border_bottom_value(); }
     CSS::AbstractImageStyleValue const* border_image_source() const
     {
-        if (!m_border_image_source.has_value())
-            m_border_image_source = style_group<CSS::ComputedValues::BorderValues>().border_image_source_value();
-        return m_border_image_source->ptr();
+        auto& border_image_source = style_image_values().border_image_source;
+        if (!border_image_source.has_value())
+            border_image_source = style_group<CSS::ComputedValues::BorderValues>().border_image_source_value();
+        return border_image_source->ptr();
     }
     Color color() const { return style_group<CSS::ComputedValues::InheritedTextValues>().color_value(); }
     Color webkit_text_fill_color() const { return style_group<CSS::ComputedValues::InheritedTextValues>().webkit_text_fill_color_value(); }
@@ -593,10 +597,24 @@ private:
     // or has the arena adopt one it derived, and a job that derives one tells the layout node.
     bool m_has_layout_derived_style { false };
     CSS::StyleRecordID m_style_record_identity;
-    mutable Optional<Vector<RefPtr<CSS::AbstractImageStyleValue const>>> m_background_images;
-    mutable Optional<Vector<RefPtr<CSS::AbstractImageStyleValue const>>> m_mask_images;
-    mutable Optional<RefPtr<CSS::AbstractImageStyleValue const>> m_border_image_source;
-    mutable Optional<RefPtr<CSS::AbstractImageStyleValue const>> m_list_style_image;
+
+    // The image values of the style, each taken from the record the first time it is read.
+    struct StyleImageValues {
+        AK_ALLOC_WITH_KMALLOC_PARTITION(HeapPartition::Layout);
+
+        Optional<Vector<RefPtr<CSS::AbstractImageStyleValue const>>> background_images;
+        Optional<Vector<RefPtr<CSS::AbstractImageStyleValue const>>> mask_images;
+        Optional<RefPtr<CSS::AbstractImageStyleValue const>> border_image_source;
+        Optional<RefPtr<CSS::AbstractImageStyleValue const>> list_style_image;
+    };
+    StyleImageValues& style_image_values() const
+    {
+        if (!m_style_image_values)
+            m_style_image_values = make<StyleImageValues>();
+        return *m_style_image_values;
+    }
+    // NB: Only the boxes whose style holds images read them, so the others keep no room for them.
+    mutable OwnPtr<StyleImageValues> m_style_image_values;
 };
 
 template<>

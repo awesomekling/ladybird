@@ -350,10 +350,7 @@ void NodeWithStyle::apply_style(CSS::StyleRecordID style_record_identity)
 {
     bool const changes_published_record = m_style_record_identity != style_record_identity || m_has_layout_derived_style;
     release_pinned_style_record();
-    m_background_images.clear();
-    m_mask_images.clear();
-    m_border_image_source.clear();
-    m_list_style_image.clear();
+    m_style_image_values = nullptr;
     m_style_record_identity = style_record_identity;
     // OPTIMIZATION: Installing the DOM record already published a followed layout node's record. Applying its
     //               rendering consequences need not enqueue the same record again.
@@ -444,10 +441,7 @@ void NodeWithStyle::refresh_style_from_arena(CSS::StyleRecordID record, void con
     m_style_record_identity = record;
     m_style_payloads = payloads;
     m_has_layout_derived_style = derived;
-    m_background_images.clear();
-    m_mask_images.clear();
-    m_border_image_source.clear();
-    m_list_style_image.clear();
+    m_style_image_values = nullptr;
     did_update_style_record();
     if (should_attach_resources)
         attach_style_resources();
@@ -533,10 +527,7 @@ void NodeWithStyle::set_style_record_identity(CSS::InstalledStyle const& install
         || CSS::ComputedValues::layout_affecting_group_payloads_differ(old_record_view.payloads, new_record_view.payloads);
 
     release_pinned_style_record();
-    m_background_images.clear();
-    m_mask_images.clear();
-    m_border_image_source.clear();
-    m_list_style_image.clear();
+    m_style_image_values = nullptr;
     m_style_record_identity = style_record_identity;
     publish_style_record_to_node_data();
     if (should_repin_style_record)
