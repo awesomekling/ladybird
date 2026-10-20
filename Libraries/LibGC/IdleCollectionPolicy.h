@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Optional.h>
 #include <AK/StdLibExtras.h>
 #include <AK/Types.h>
 
@@ -19,18 +20,23 @@ namespace GC {
 // the peak rate seen so far this episode. The rate-drop trigger is gated on enough uncollected garbage having piled up
 // to be worth marking the whole live heap. The watchdog bounds how long garbage can sit when the rate-drop trigger
 // never fires, e.g. on a heap that allocates too steadily to show a drop or too slowly to clear the gate.
+//
+// A rate drop short of that gate still means the mutator went quiet, and the malloc heaps then hold whatever the work
+// before it freed. Those are given back without a collection, once per megabyte the mutator allocated since.
 class IdleCollectionPolicy {
 public:
     enum class Decision : u8 {
-        KeepWaiting, // No collection yet; leave the idle timer running.
-        Park,        // Nothing left to collect; stop the timer until allocation resumes.
-        Collect,     // Collect now.
+        KeepWaiting,            // No collection yet; leave the idle timer running.
+        ReleaseAllocatorCaches, // No collection yet, but give the allocator's freed memory back; leave the timer running.
+        Park,                   // Nothing left to collect; stop the timer until allocation resumes.
+        Collect,                // Collect now.
     };
 
     // Begins a fresh episode. `total_allocated_bytes` is the heap's monotonic allocation counter.
     void reset(u64 total_allocated_bytes)
     {
         m_total_allocated_at_last_check = total_allocated_bytes;
+        m_total_allocated_at_last_release = {};
         m_peak_delta = 0;
         m_tick_count = 0;
     }
@@ -52,6 +58,10 @@ public:
 
         if ((rate_dropped && enough_garbage) || watchdog_elapsed)
             return Decision::Collect;
+        if (rate_dropped && (!m_total_allocated_at_last_release.has_value() || total_allocated_bytes - *m_total_allocated_at_last_release >= min_allocation_between_releases)) {
+            m_total_allocated_at_last_release = total_allocated_bytes;
+            return Decision::ReleaseAllocatorCaches;
+        }
         return Decision::KeepWaiting;
     }
 
@@ -61,9 +71,12 @@ public:
     static constexpr size_t min_garbage_divisor = 16;
     // The watchdog forces a collection after this many ticks regardless of the rate or the gate.
     static constexpr u32 watchdog_ticks = 15;
+    // A rate drop gives the allocator's freed memory back again only once the mutator allocated this much since.
+    static constexpr u64 min_allocation_between_releases = 1 * MiB;
 
 private:
     u64 m_total_allocated_at_last_check { 0 };
+    Optional<u64> m_total_allocated_at_last_release;
     u64 m_peak_delta { 0 };
     u32 m_tick_count { 0 };
 };

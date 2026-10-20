@@ -29,8 +29,25 @@ TEST_CASE(rate_drop_is_gated_on_having_enough_garbage)
     // A burst far below the minimum-garbage gate (threshold / 16, i.e. 0.5 MiB here).
     EXPECT(policy.evaluate(64 * KiB, 64 * KiB, 8 * MiB) == Decision::KeepWaiting);
 
-    // The rate has dropped, but there still isn't enough garbage to be worth marking the whole live heap.
+    // The rate has dropped, but there still isn't enough garbage to be worth marking the whole live heap. The mutator
+    // went quiet though, so the allocator gives back what it freed.
+    EXPECT(policy.evaluate(64 * KiB, 64 * KiB, 8 * MiB) == Decision::ReleaseAllocatorCaches);
+}
+
+TEST_CASE(allocator_caches_are_released_again_only_after_more_allocation)
+{
+    GC::IdleCollectionPolicy policy;
+    policy.reset(0);
+
     EXPECT(policy.evaluate(64 * KiB, 64 * KiB, 8 * MiB) == Decision::KeepWaiting);
+    EXPECT(policy.evaluate(64 * KiB, 64 * KiB, 8 * MiB) == Decision::ReleaseAllocatorCaches);
+
+    // Still quiet: nothing more was freed since, so there is nothing to give back.
+    EXPECT(policy.evaluate(64 * KiB, 64 * KiB, 8 * MiB) == Decision::KeepWaiting);
+
+    // Another burst, still short of the gate, then quiet again.
+    EXPECT(policy.evaluate(1 * MiB + 128 * KiB, 1 * MiB, 32 * MiB) == Decision::KeepWaiting);
+    EXPECT(policy.evaluate(1 * MiB + 128 * KiB, 1 * MiB, 32 * MiB) == Decision::ReleaseAllocatorCaches);
 }
 
 TEST_CASE(watchdog_collects_when_the_rate_never_drops)

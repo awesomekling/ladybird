@@ -1571,6 +1571,9 @@ void Heap::idle_gc_on_timer()
     switch (m_idle_collection_policy.evaluate(m_total_allocated_bytes, m_allocated_bytes_since_last_gc, m_gc_bytes_threshold)) {
     case IdleCollectionPolicy::Decision::KeepWaiting:
         return;
+    case IdleCollectionPolicy::Decision::ReleaseAllocatorCaches:
+        ak_kmalloc_collect();
+        return;
     case IdleCollectionPolicy::Decision::Park:
         // Nothing left to collect; the next allocation will re-arm the timer.
         m_idle_gc_timer->stop();
