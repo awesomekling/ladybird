@@ -29,15 +29,9 @@ pub(crate) struct Fragment {
     pub(crate) table_column_index: u32,
     pub(crate) table_column_span: u32,
     pub(crate) hidden_by_collapsed_columns: bool,
-    pub(crate) collapsed_table_borders: Option<std::sync::Arc<table_formatting_context::OwnedCollapsedTableBorders>>,
     pub(crate) line_data: Option<std::sync::Arc<inline_content::InlineContent>>,
-    pub(crate) grid_layout_data: Option<std::sync::Arc<grid_formatting_context::GridLayoutData>>,
-    pub(crate) flex_layout_data: Option<std::sync::Arc<formatting_context::FlexLayoutData>>,
-    pub(crate) used_grid_tracks: Option<std::sync::Arc<grid_formatting_context::OwnedUsedGridTracks>>,
-    /// Boxed, as only SVG boxes have any and the facts are larger than the rest of the fragment's box.
-    pub(crate) svg: Option<Box<CommittedSvgFacts>>,
-    pub(crate) computed_svg_path: Option<std::sync::Arc<libgfx_rust::path::OwnedPath>>,
-    pub(crate) svg_text_character_cells: Option<std::sync::Arc<Vec<svg_formatting_context::FfiSvgTextCharacterCell>>>,
+    /// What only table, grid, flex and SVG boxes commit, which the other fragments keep no room for.
+    rare: Option<Box<CommittedRarePayloads>>,
     pub(crate) has_line_clamp_point: bool,
     pub(crate) is_invisible_for_line_clamp: bool,
     pub(crate) clamped_content_is_scrollable_overflow: bool,
@@ -67,6 +61,42 @@ fn same_allocation<T>(left: Option<&std::sync::Arc<T>>, right: Option<&std::sync
 }
 
 impl Fragment {
+    fn rare(&self) -> Option<&CommittedRarePayloads> {
+        self.rare.as_deref()
+    }
+
+    pub(crate) fn collapsed_table_borders(
+        &self,
+    ) -> Option<&std::sync::Arc<table_formatting_context::OwnedCollapsedTableBorders>> {
+        self.rare()?.collapsed_table_borders.as_ref()
+    }
+
+    pub(crate) fn grid_layout_data(&self) -> Option<&std::sync::Arc<grid_formatting_context::GridLayoutData>> {
+        self.rare()?.grid_layout_data.as_ref()
+    }
+
+    pub(crate) fn flex_layout_data(&self) -> Option<&std::sync::Arc<formatting_context::FlexLayoutData>> {
+        self.rare()?.flex_layout_data.as_ref()
+    }
+
+    pub(crate) fn used_grid_tracks(&self) -> Option<&std::sync::Arc<grid_formatting_context::OwnedUsedGridTracks>> {
+        self.rare()?.used_grid_tracks.as_ref()
+    }
+
+    pub(crate) fn svg(&self) -> Option<&CommittedSvgFacts> {
+        self.rare()?.svg.as_deref()
+    }
+
+    pub(crate) fn computed_svg_path(&self) -> Option<&std::sync::Arc<libgfx_rust::path::OwnedPath>> {
+        self.rare()?.computed_svg_path.as_ref()
+    }
+
+    pub(crate) fn svg_text_character_cells(
+        &self,
+    ) -> Option<&std::sync::Arc<Vec<svg_formatting_context::FfiSvgTextCharacterCell>>> {
+        self.rare()?.svg_text_character_cells.as_ref()
+    }
+
     fn builds_identically_to(&self, previous: &Fragment) -> bool {
         self.has_same_box_properties(previous)
             && same_allocation(self.line_data.as_ref(), previous.line_data.as_ref())
@@ -85,13 +115,7 @@ impl Fragment {
             && self.table_column_index == 0
             && self.table_column_span == 0
             && !self.hidden_by_collapsed_columns
-            && self.collapsed_table_borders.is_none()
-            && self.grid_layout_data.is_none()
-            && self.flex_layout_data.is_none()
-            && self.used_grid_tracks.is_none()
-            && self.svg.is_none()
-            && self.computed_svg_path.is_none()
-            && self.svg_text_character_cells.is_none()
+            && self.rare.is_none()
             && !self.has_line_clamp_point
             && !self.is_invisible_for_line_clamp
             && !self.clamped_content_is_scrollable_overflow
@@ -120,19 +144,13 @@ impl Fragment {
             && self.table_column_index == previous.table_column_index
             && self.table_column_span == previous.table_column_span
             && self.hidden_by_collapsed_columns == previous.hidden_by_collapsed_columns
-            && same_allocation(
-                self.collapsed_table_borders.as_ref(),
-                previous.collapsed_table_borders.as_ref(),
-            )
-            && same_allocation(self.grid_layout_data.as_ref(), previous.grid_layout_data.as_ref())
-            && same_allocation(self.flex_layout_data.as_ref(), previous.flex_layout_data.as_ref())
-            && same_allocation(self.used_grid_tracks.as_ref(), previous.used_grid_tracks.as_ref())
-            && self.svg == previous.svg
-            && same_allocation(self.computed_svg_path.as_ref(), previous.computed_svg_path.as_ref())
-            && same_allocation(
-                self.svg_text_character_cells.as_ref(),
-                previous.svg_text_character_cells.as_ref(),
-            )
+            && same_allocation(self.collapsed_table_borders(), previous.collapsed_table_borders())
+            && same_allocation(self.grid_layout_data(), previous.grid_layout_data())
+            && same_allocation(self.flex_layout_data(), previous.flex_layout_data())
+            && same_allocation(self.used_grid_tracks(), previous.used_grid_tracks())
+            && self.svg() == previous.svg()
+            && same_allocation(self.computed_svg_path(), previous.computed_svg_path())
+            && same_allocation(self.svg_text_character_cells(), previous.svg_text_character_cells())
             && self.has_line_clamp_point == previous.has_line_clamp_point
             && self.is_invisible_for_line_clamp == previous.is_invisible_for_line_clamp
             && self.clamped_content_is_scrollable_overflow == previous.clamped_content_is_scrollable_overflow
@@ -163,7 +181,7 @@ impl Fragment {
             && self.padding_top == previous.padding_top
             && self.padding_bottom == previous.padding_bottom
             && self.uses_collapsing_borders_model == previous.uses_collapsing_borders_model
-            && self.svg == previous.svg
+            && self.svg() == previous.svg()
             && self.has_line_clamp_point == previous.has_line_clamp_point
             && self.is_invisible_for_line_clamp == previous.is_invisible_for_line_clamp
             && same_line_data
@@ -225,14 +243,8 @@ impl FragmentLink {
                 table_column_index: 0,
                 table_column_span: 0,
                 hidden_by_collapsed_columns: false,
-                collapsed_table_borders: None,
                 line_data: None,
-                grid_layout_data: None,
-                flex_layout_data: None,
-                used_grid_tracks: None,
-                svg: None,
-                computed_svg_path: None,
-                svg_text_character_cells: None,
+                rare: None,
                 has_line_clamp_point: false,
                 is_invisible_for_line_clamp: false,
                 clamped_content_is_scrollable_overflow: false,
@@ -397,9 +409,22 @@ struct CommittedRarePayloads {
     grid_layout_data: Option<std::sync::Arc<grid_formatting_context::GridLayoutData>>,
     flex_layout_data: Option<std::sync::Arc<formatting_context::FlexLayoutData>>,
     used_grid_tracks: Option<std::sync::Arc<grid_formatting_context::OwnedUsedGridTracks>>,
-    svg: CommittedSvgFacts,
+    /// Boxed, as only some SVG boxes have any and the facts are larger than the rest of the payloads.
+    svg: Option<Box<CommittedSvgFacts>>,
     computed_svg_path: Option<std::sync::Arc<libgfx_rust::path::OwnedPath>>,
     svg_text_character_cells: Option<std::sync::Arc<Vec<svg_formatting_context::FfiSvgTextCharacterCell>>>,
+}
+
+impl CommittedRarePayloads {
+    fn is_empty(&self) -> bool {
+        self.collapsed_table_borders.is_none()
+            && self.grid_layout_data.is_none()
+            && self.flex_layout_data.is_none()
+            && self.used_grid_tracks.is_none()
+            && self.svg.is_none()
+            && self.computed_svg_path.is_none()
+            && self.svg_text_character_cells.is_none()
+    }
 }
 
 fn snapshot_fragment(
@@ -411,7 +436,7 @@ fn snapshot_fragment(
     static NEXT_IDENTITY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let children = with_exact_capacity(children);
     let line_data = used.finish_line_data(callbacks);
-    let rare_payloads = used
+    let rare = used
         .rare_data
         .get()
         .map(|cell| {
@@ -421,21 +446,13 @@ fn snapshot_fragment(
                 grid_layout_data: rare.grid_layout_data.take(),
                 flex_layout_data: rare.flex_layout_data.take(),
                 used_grid_tracks: rare.used_grid_tracks.take(),
-                svg: rare.svg,
+                svg: (rare.svg != CommittedSvgFacts::default()).then(|| Box::new(rare.svg)),
                 computed_svg_path: rare.computed_svg_path.take(),
                 svg_text_character_cells: rare.svg_text_character_cells.take(),
             }
         })
-        .unwrap_or_default();
-    let CommittedRarePayloads {
-        collapsed_table_borders,
-        grid_layout_data,
-        flex_layout_data,
-        used_grid_tracks,
-        svg,
-        computed_svg_path,
-        svg_text_character_cells,
-    } = rare_payloads;
+        .filter(|rare| !rare.is_empty())
+        .map(Box::new);
     let mut fragment = Fragment {
         identity: 0,
         node,
@@ -458,14 +475,8 @@ fn snapshot_fragment(
         table_column_index: used.table_column_index.get(),
         table_column_span: used.table_column_span.get(),
         hidden_by_collapsed_columns: used.hidden_by_collapsed_columns.get(),
-        collapsed_table_borders,
         line_data,
-        grid_layout_data,
-        flex_layout_data,
-        used_grid_tracks,
-        svg: (svg != CommittedSvgFacts::default()).then(|| Box::new(svg)),
-        computed_svg_path,
-        svg_text_character_cells,
+        rare,
         has_line_clamp_point: used.has_line_clamp_point.get(),
         is_invisible_for_line_clamp: used.is_invisible_for_line_clamp.get(),
         clamped_content_is_scrollable_overflow: used.clamped_content_is_scrollable_overflow.get(),

@@ -1786,7 +1786,7 @@ impl<'pass> SvgFormattingContext<'pass> {
                 self.run.box_,
                 |link| {
                     link.is_some_and(|link| {
-                        let committed = link.fragment.svg.as_deref().copied().unwrap_or_default();
+                        let committed = link.fragment.svg().copied().unwrap_or_default();
                         committed.view_box == attributes.has_active_view_box.then_some(attributes.active_view_box)
                             && committed.viewport_size
                                 == Some(FfiCssPixelSize {
@@ -1974,7 +1974,7 @@ impl<'pass> SvgFormattingContext<'pass> {
         else {
             return false;
         };
-        if fragment.computed_svg_path.is_none() {
+        if fragment.computed_svg_path().is_none() {
             return false;
         }
         let Some(committed_offset) = crate::painting::paint_read::GeometryRead::with_committed_fragment_link(
@@ -1986,7 +1986,7 @@ impl<'pass> SvgFormattingContext<'pass> {
         };
         // The transforms and the stroke's percentage basis are what the shape's facts take from outside its own
         // geometry.
-        let committed = fragment.svg.as_deref().copied().unwrap_or_default();
+        let committed = fragment.svg().copied().unwrap_or_default();
         if committed.element_transform != (!facts.element_transform.is_identity()).then_some(facts.element_transform)
             || committed.additional_element_transform
                 != (!facts.additional_element_transform.is_identity()).then_some(facts.additional_element_transform)
