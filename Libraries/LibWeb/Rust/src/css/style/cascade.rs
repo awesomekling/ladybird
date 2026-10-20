@@ -2354,15 +2354,18 @@ impl WinnerGroups {
             self.update_winner_rule_node_references(previous, node, false);
             self.release_state(previous);
         } else {
-            let capacity_before = self.pseudo_rows_by_node[index].capacity();
-            self.pseudo_rows_by_node[index].push(PseudoWinnerRow {
+            let rows = &mut self.pseudo_rows_by_node[index];
+            let capacity_before = rows.capacity();
+            // NB: An element mostly has a row for one or two pseudo-elements, so its rows grow one at a time.
+            rows.reserve_exact(1);
+            rows.push(PseudoWinnerRow {
                 pseudo,
                 state: (state, program_version),
                 priority_current: true,
                 stamp: self.stamp,
             });
             self.pseudo_row_capacity_bytes +=
-                ((self.pseudo_rows_by_node[index].capacity() - capacity_before) * size_of::<PseudoWinnerRow>()) as u64;
+                ((rows.capacity() - capacity_before) * size_of::<PseudoWinnerRow>()) as u64;
         }
         match reference {
             #[cfg(test)]
