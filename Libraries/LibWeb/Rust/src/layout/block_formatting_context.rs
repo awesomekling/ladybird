@@ -2338,7 +2338,7 @@ impl<'pass> BlockFormattingContext<'pass> {
         cells.content_offset = FfiCssPixelPoint::default();
         let content_offset = used.content_offset.get();
         let entry = in_flow_block_cache::InFlowBlockEntry {
-            key,
+            key: in_flow_block_cache::shared_key(key),
             validity,
             cells,
             offset_from_flow_position: FfiCssPixelPoint {

@@ -61,7 +61,8 @@ impl InFlowBlockKey {
 /// started at.
 #[derive(Clone)]
 pub(super) struct InFlowBlockEntry {
-    pub(super) key: InFlowBlockKey,
+    /// The key, which the entries of siblings laid out alike share.
+    pub(super) key: std::sync::Arc<InFlowBlockKey>,
     pub(super) validity: fc_run_cache::FcRunCacheValidity,
     /// The child's record as it was before its placement.
     pub(super) cells: used_values::UsedValuesCellState,
@@ -89,7 +90,7 @@ impl InFlowBlockCacheStore {
     ) -> Option<std::sync::Arc<InFlowBlockEntry>> {
         let entries = self.entries.borrow();
         let entry = entries.get(slot as usize)?.as_ref()?;
-        (entry.validity == validity && entry.key == *key).then(|| entry.clone())
+        (entry.validity == validity && *entry.key == *key).then(|| entry.clone())
     }
 
     pub(super) fn store(&self, slot: u32, entry: InFlowBlockEntry) {
@@ -110,6 +111,24 @@ impl InFlowBlockCacheStore {
             *entry = None;
         }
     }
+}
+
+/// `key` in an `Arc`, which is the one the store was last handed where they are the same. Siblings are laid out one
+/// after another, mostly from the same layout input, so their entries share one.
+pub(super) fn shared_key(key: InFlowBlockKey) -> std::sync::Arc<InFlowBlockKey> {
+    thread_local! {
+        static LAST: RefCell<Option<std::sync::Arc<InFlowBlockKey>>> = const { RefCell::new(None) };
+    }
+    LAST.with_borrow_mut(|last| {
+        if let Some(last) = last
+            && **last == key
+        {
+            return std::sync::Arc::clone(last);
+        }
+        let shared = std::sync::Arc::new(key);
+        *last = Some(std::sync::Arc::clone(&shared));
+        shared
+    })
 }
 
 /// Whether every in-flow reuse also lays the child out and checks that both agree.
