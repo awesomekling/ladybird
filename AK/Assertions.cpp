@@ -13,6 +13,7 @@
 #include <AK/Platform.h>
 #include <AK/StringView.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef AK_OS_WINDOWS
 #    include <Windows.h>
@@ -45,16 +46,23 @@
 static AK::AssertionFailureCallback s_assertion_failure_callback;
 static AK::AssertionBacktraceCallback s_assertion_backtrace_callback;
 
-static thread_local Array<char, 8193> s_rust_panic_message;
+static constexpr size_t rust_panic_message_capacity = 8193;
+// NB: A thread allocates the buffer for its panic message as it first panics. A thread-local array would be zeroed in
+//     every thread of every process.
+static thread_local char* s_rust_panic_message;
 static thread_local bool (*s_rust_is_panicking)();
 
 void ladybird_rust_panic(char const* message, size_t message_length, char const* filename, size_t filename_length, u32 line, u32 column, bool (*is_panicking)())
 {
     __atomic_store_n(&s_rust_is_panicking, nullptr, __ATOMIC_RELEASE);
+    if (!s_rust_panic_message)
+        s_rust_panic_message = static_cast<char*>(malloc(rust_panic_message_capacity));
+    if (!s_rust_panic_message)
+        return;
     size_t length = 0;
     auto append = [&](StringView text) {
         for (auto ch : text) {
-            if (length == s_rust_panic_message.size() - 1)
+            if (length == rust_panic_message_capacity - 1)
                 break;
             s_rust_panic_message[length++] = ch ? ch : '?';
         }
@@ -84,7 +92,7 @@ char const* AK::current_rust_panic_message()
 {
     auto is_panicking = __atomic_load_n(&s_rust_is_panicking, __ATOMIC_ACQUIRE);
     if (is_panicking && is_panicking())
-        return s_rust_panic_message.data();
+        return s_rust_panic_message;
     return nullptr;
 }
 
@@ -99,7 +107,7 @@ void ladybird_rust_panic_will_abort()
 
     if (__atomic_load_n(&s_rust_is_panicking, __ATOMIC_ACQUIRE)) {
         if (auto callback = __atomic_load_n(&s_assertion_failure_callback, __ATOMIC_ACQUIRE))
-            callback(AK::AssertionFailureKind::RustPanic, s_rust_panic_message.data());
+            callback(AK::AssertionFailureKind::RustPanic, s_rust_panic_message);
         dump_backtrace(1, 100);
     }
 }
