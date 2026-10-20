@@ -668,7 +668,7 @@ mod tests {
                     caret_offset: 0,
                     rect: CssPixelRect::default(),
                     caret_rect: CssPixelRect::default(),
-                    caret_line_index: Some(index as usize + content.version as usize * 100),
+                    caret_line_index: Some(u32::from(index) + u32::from(content.version) * 100),
                     block_container: NodeSlotId::INVALID,
                     context: ContextRef::default(),
                     border_radii: None,
@@ -789,7 +789,7 @@ mod tests {
         );
         assert_eq!(assembled.display_list.command_runs, fresh.display_list.command_runs);
         // Comparing whole items would compare their paths through the host's path equality.
-        let item_identities = |items: &[HitTestItem]| -> Vec<(NodeSlotId, Option<usize>)> {
+        let item_identities = |items: &[HitTestItem]| -> Vec<(NodeSlotId, Option<u32>)> {
             items
                 .iter()
                 .map(|item| (item.paintable, item.caret_line_index))

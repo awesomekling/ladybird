@@ -132,7 +132,7 @@ impl HitTestList {
                 } else {
                     FfiCaretBoundaryKind::Offset
                 },
-                offset: item.caret_offset,
+                offset: item.caret_offset as usize,
                 has_debug_rect: true,
                 debug_rect: item.caret_rect.into(),
                 ..Default::default()

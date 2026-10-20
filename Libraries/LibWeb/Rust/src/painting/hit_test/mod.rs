@@ -46,10 +46,10 @@ pub struct HitTestItem {
     pub chrome_widget_kind: u8,
     pub text_fragment_index: Option<u32>,
     pub caret_node: NodeSlotId,
-    pub caret_offset: usize,
+    pub caret_offset: u32,
     pub rect: CssPixelRect,
     pub caret_rect: CssPixelRect,
-    pub caret_line_index: Option<usize>,
+    pub caret_line_index: Option<u32>,
     pub block_container: NodeSlotId,
     pub context: ContextRef,
     /// The corner radii of a box that has any. Few do, so the items of the others keep no room for them.
@@ -66,7 +66,7 @@ pub struct HitTestItem {
 impl HitTestItem {
     fn recorded_caret_line(&self) -> Option<(ContextRef, NodeSlotId, usize)> {
         self.caret_line_index
-            .map(|index| (self.context, self.block_container, index))
+            .map(|index| (self.context, self.block_container, index as usize))
     }
 }
 

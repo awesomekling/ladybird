@@ -200,7 +200,7 @@ impl HitTestList {
                 let matches = if super::resolve::empty_line_is_anchored_to_its_forced_break(arena, item) {
                     query.boundary_precedes(node)
                 } else {
-                    item.caret_offset == offset && query.is_query_node(node)
+                    item.caret_offset as usize == offset && query.is_query_node(node)
                 };
                 if matches { CaretMatch::Direct } else { CaretMatch::None }
             }

@@ -452,7 +452,8 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
         context: ContextRef,
         border_radii: BorderRadii,
     ) {
-        let caret_line_index = paintable_geometry::committed_containing_line_box_index(self.source, paintable_box);
+        let caret_line_index = paintable_geometry::committed_containing_line_box_index(self.source, paintable_box)
+            .map(|index| u32::try_from(index).expect("a line box index fits in 32 bits"));
         let can_produce_caret_position = (self.is_atomic_inline(paintable_box) || self.is_replaced_box(paintable_box))
             && {
                 let negative_z =
@@ -526,7 +527,7 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
             text_fragment_index: Some(fragment_index),
             rect: text_fragment::absolute_rect(layout_arena, &fragment),
             caret_rect: text_fragment::whole_range_rect(layout_arena, &fragment, first_available_font),
-            caret_line_index: Some(fragment.line_index as usize),
+            caret_line_index: Some(fragment.line_index),
             block_container,
             containing_block: layout_arena
                 .node_containing_block_if_live(fragment.layout_node)
@@ -557,9 +558,9 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
         let item = HitTestItem {
             text_fragment_index: Some(sibling_fragment_index),
             caret_node: fragment.layout_node,
-            caret_offset,
+            caret_offset: u32::try_from(caret_offset).expect("a caret offset fits in 32 bits"),
             caret_rect: line_rect,
-            caret_line_index: Some(line_box_index),
+            caret_line_index: Some(u32::try_from(line_box_index).expect("a line box index fits in 32 bits")),
             block_container,
             containing_block: self
                 .source
@@ -584,7 +585,7 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
             caret_node,
             caret_offset: 0,
             caret_rect: line_rect,
-            caret_line_index: Some(caret_line_index),
+            caret_line_index: Some(u32::try_from(caret_line_index).expect("a line box index fits in 32 bits")),
             block_container,
             can_produce_caret_position: self.node_has_dom_node(caret_node),
             ..self.base_hit_test_item(HitTestItemKind::EmptyLine, block_container, context)
