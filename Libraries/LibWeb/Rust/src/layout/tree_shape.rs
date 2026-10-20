@@ -308,8 +308,11 @@ impl Chunk {
 
 /// How many rows a chunk of the published column holds. A node written after a publication copies
 /// the chunk the publication shares, while the nodes a layout writes lie scattered over the arena,
-/// so a chunk holds far fewer rows than one of the arena's own.
-pub(crate) const PUBLISHED_ROWS_PER_CHUNK: usize = 32;
+/// so a chunk holds far fewer rows than one of the arena's own. 36 rows and the counters of the chunk's `Arc` fill the
+/// size class they fall in, where 32 would leave an eighth of it unused.
+pub(crate) const PUBLISHED_ROWS_PER_CHUNK: usize = 36;
+
+const _: () = assert!(size_of::<PaintNode>() * PUBLISHED_ROWS_PER_CHUNK + 16 <= 2048);
 
 /// The arena's column of what the paint side reads of every node, which it publishes from.
 #[derive(Clone, Default)]
