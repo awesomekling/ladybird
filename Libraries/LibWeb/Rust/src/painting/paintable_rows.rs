@@ -325,13 +325,32 @@ pub(crate) struct PaintableRowStore {
     pub(crate) stacking_context_entries: RefCell<StackingContextEntryColumn>,
     pub(crate) stacking_context_roots_flagged_for_resort: RefCell<Vec<NodeSlotId>>,
     line_roots_needing_fragment_ownership: RefCell<Vec<NodeSlotId>>,
-    absolute_rect_memo: RefCell<Vec<Option<(NodeSlotId, u64, crate::css::css_pixels::CssPixelRect)>>>,
+    absolute_rect_memo: RefCell<Vec<MemoizedAbsoluteRect>>,
     absolute_rect_memo_epoch: Cell<u64>,
     committed_fragment_links: RefCell<CowColumn<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>>,
     image_map_areas: crate::painting::image_map_areas::ImageMapAreaColumn,
     unique_node_ids: UniqueNodeIdColumn,
     /// How many times a row was populated or reset, which moves whether a row is populated.
     population_writes: u64,
+}
+
+/// The absolute rect of the row `id` as the memo epoch whose low bits are `epoch` found it. A memo kept for every row
+/// is kept in 24 bytes, so the epoch is kept to its low bits, and the memo starts over when they wrap.
+#[derive(Clone, Copy)]
+struct MemoizedAbsoluteRect {
+    id: NodeSlotId,
+    epoch: u32,
+    rect: crate::css::css_pixels::CssPixelRect,
+}
+
+impl MemoizedAbsoluteRect {
+    fn none() -> Self {
+        Self {
+            id: NodeSlotId::INVALID,
+            epoch: 0,
+            rect: crate::css::css_pixels::CssPixelRect::default(),
+        }
+    }
 }
 
 pub(crate) type VisualContextNodeHandleColumn =
@@ -833,24 +852,33 @@ impl LayoutNodeArena {
 
     pub(crate) fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
         let store = &self.paintable_rows;
-        let (memoized_id, memoized_epoch, rect) = store
+        let memoized = store
             .absolute_rect_memo
             .borrow()
             .get(id.slot_index() as usize)
-            .copied()
-            .flatten()?;
-        (memoized_id == id && memoized_epoch == store.absolute_rect_memo_epoch.get()).then_some(rect)
+            .copied()?;
+        (!id.is_invalid() && memoized.id == id && memoized.epoch == store.absolute_rect_memo_epoch.get() as u32)
+            .then_some(memoized.rect)
     }
 
     pub(crate) fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
         let store = &self.paintable_rows;
-        store.absolute_rect_memo.borrow_mut()[id.slot_index() as usize] =
-            Some((id, store.absolute_rect_memo_epoch.get(), rect));
+        store.absolute_rect_memo.borrow_mut()[id.slot_index() as usize] = MemoizedAbsoluteRect {
+            id,
+            epoch: store.absolute_rect_memo_epoch.get() as u32,
+            rect,
+        };
     }
 
     pub(crate) fn clear_absolute_rect_memo(&self) {
         let epoch = &self.paintable_rows.absolute_rect_memo_epoch;
         epoch.set(epoch.get().checked_add(1).expect("absolute rect memo epoch overflowed"));
+        if epoch.get() as u32 == 0 {
+            self.paintable_rows
+                .absolute_rect_memo
+                .borrow_mut()
+                .fill(MemoizedAbsoluteRect::none());
+        }
     }
 
     pub(crate) fn paintable_row_count(&self) -> usize {
@@ -876,7 +904,7 @@ impl LayoutNodeArena {
         while side_data.len() <= index {
             side_data.push(PaintableSideData::default());
             row_paint_states.push(RowPaintState::default());
-            absolute_rect_memo.push(None);
+            absolute_rect_memo.push(MemoizedAbsoluteRect::none());
         }
 
         store.population_writes += 1;
@@ -896,7 +924,7 @@ impl LayoutNodeArena {
             .get_mut()
             .set(index, CommittedSideData::default());
         row_paint_states[index].clear();
-        absolute_rect_memo[index] = None;
+        absolute_rect_memo[index] = MemoizedAbsoluteRect::none();
         visual_context_records.set(index, None);
         set_visual_context_node_handles(store.visual_context_node_handles.get_mut(), index, None);
         drop_table(store.stacking_context_entries.get_mut(), index);
