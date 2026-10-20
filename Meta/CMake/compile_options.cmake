@@ -228,6 +228,7 @@ if (LINUX)
     add_cxx_compile_options(-fstack-clash-protection)
     add_cxx_link_option_if_supported(LINKER:-z,relro)
     add_cxx_link_option_if_supported(LINKER:-z,now)
+    add_cxx_link_option_if_supported(LINKER:-z,pack-relative-relocs)
 endif()
 
 if (APPLE)
