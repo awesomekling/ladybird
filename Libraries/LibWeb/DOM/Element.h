@@ -10,6 +10,7 @@
 #include <AK/Badge.h>
 #include <AK/Concepts.h>
 #include <AK/Error.h>
+#include <AK/FixedArray.h>
 #include <AK/Optional.h>
 #include <AK/Utf16String.h>
 #include <LibGC/RootVector.h>
@@ -324,7 +325,7 @@ public:
 
     bool has_class(Utf16View, CaseSensitivity = CaseSensitivity::CaseSensitive) const;
     bool has_class(Utf16FlyString const&, CaseSensitivity = CaseSensitivity::CaseSensitive) const;
-    ReadonlySpan<Utf16FlyString> class_names() const { return m_classes; }
+    ReadonlySpan<Utf16FlyString> class_names() const { return m_classes.span(); }
 
     // https://drafts.csswg.org/selectors/#child-index
     // The element's 1-based index among its inclusive element siblings, or among those with its type, counted from
@@ -1058,7 +1059,7 @@ private:
     // and the class of an element with one is stored in place.
     QualifiedName m_qualified_name;
     Optional<Utf16FlyString> m_id;
-    Vector<Utf16FlyString, 1> m_classes;
+    FixedArray<Utf16FlyString> m_classes;
     // NB: Only elements with presentational hints keep any, which SVG icons have many of, so they are kept in a block
     //     of their own rather than in the element's rare data.
     OwnPtr<Vector<CSS::StyleProperty>> m_published_presentational_hint_properties;

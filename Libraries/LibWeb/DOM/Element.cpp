@@ -6433,24 +6433,21 @@ void Element::attribute_changed(Utf16FlyString const& local_name, Optional<Utf16
     } else if (local_name == HTML::AttributeNames::class_) {
         // Elements without a StyleEngine identity have no feature state to update. Avoid moving
         // their class list out just for record_element_class_list_changed() to reject the update.
-        Optional<Vector<Utf16FlyString, 1>> old_style_engine_classes;
+        Optional<FixedArray<Utf16FlyString>> old_style_engine_classes;
         if (style_node_id().value() != 0)
             old_style_engine_classes = move(m_classes);
 
-        if (value_or_empty.is_empty()) {
-            m_classes.clear();
-        } else {
-            m_classes.clear();
-            for_each_ascii_whitespace_separated_token(value_or_empty, [&](auto new_class) {
-                m_classes.append(Utf16FlyString::from_utf16(new_class));
-                return IterationDecision::Continue;
-            });
-        }
+        Vector<Utf16FlyString, 4> classes;
+        for_each_ascii_whitespace_separated_token(value_or_empty, [&](auto new_class) {
+            classes.append(Utf16FlyString::from_utf16(new_class));
+            return IterationDecision::Continue;
+        });
+        m_classes = MUST(FixedArray<Utf16FlyString>::create(classes.span()));
         if (auto* rare_data = element_rare_data(); rare_data && rare_data->class_list)
             rare_data->class_list->associated_attribute_changed(value_or_empty);
 
         if (old_style_engine_classes.has_value())
-            CSS::record_element_class_list_changed(*this, *old_style_engine_classes, m_classes);
+            CSS::record_element_class_list_changed(*this, old_style_engine_classes->span(), m_classes.span());
         else if (is_connected())
             CSS::record_waiting_element_classes_changed(*this);
     } else if (local_name == HTML::AttributeNames::style) {
