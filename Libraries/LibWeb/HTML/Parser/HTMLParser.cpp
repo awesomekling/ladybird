@@ -2811,7 +2811,9 @@ extern "C" size_t ladybird_html_parser_create_document_type(void* parser, u16 co
 extern "C" size_t ladybird_html_parser_create_comment(void* parser, u16 const* data_ptr, size_t data_len)
 {
     auto& html_parser = parser_from_html_parser_ffi(parser);
-    auto comment = DOM::Comment::create(html_parser.document(), utf16_string_from_ffi(data_ptr, data_len));
+    // NB: The data is interned, as a document repeats its comments: a framework marks its templates with the same few.
+    auto data = data_ptr && data_len ? Utf16FlyString::from_utf16({ reinterpret_cast<char16_t const*>(data_ptr), data_len }).to_utf16_string() : Utf16String {};
+    auto comment = DOM::Comment::create(html_parser.document(), move(data));
     return reinterpret_cast<size_t>(comment.ptr());
 }
 
