@@ -304,7 +304,8 @@ pub(in crate::css::style) struct PrefixRelation {
     geometry_targets: [Vec<usize>; 4],
     old_previous: Vec<(usize, usize)>,
     sibling_order_is_preserved: bool,
-    answers: Vec<Vec<EntryID>>,
+    /// The entries each position answers with, which positions answering alike share: siblings mostly do.
+    answers: Vec<std::sync::Arc<[EntryID]>>,
     pub(in crate::css::style) changed_answers: Vec<(StyleNodeID, Vec<EntryID>, Vec<EntryID>)>,
     arrivals: Vec<usize>,
     /// A bit per position for the arrivals of the update in progress, which hold no membership yet: an arrival's slot
@@ -340,7 +341,7 @@ impl PrefixRelation {
                 panic!("a complete prefix relation must have a complete scalar answer");
             };
             assert_eq!(
-                self.answers[position],
+                &*self.answers[position],
                 scalar.matches_in(answer),
                 "prefix relation differs for {node:?}"
             );
@@ -475,7 +476,7 @@ impl PrefixRelation {
                     self.parents.push(usize::MAX);
                     self.previous.push(usize::MAX);
                     self.positional.push(0);
-                    self.answers.push(Vec::new());
+                    self.answers.push(no_answers());
                     self.nodes.len() - 1
                 };
                 self.positions.insert(node.raw() as usize, position);
@@ -1141,6 +1142,7 @@ impl PrefixRelation {
             let position = terminal_changes[cursor].0;
             old.clear();
             old.extend_from_slice(&self.answers[position]);
+            let mut entries = old.clone();
             while cursor < terminal_changes.len() && terminal_changes[cursor].0 == position {
                 let entry = terminal_changes[cursor].1;
                 // Multiple paths can produce the same terminal. Losing one path changes the
@@ -1148,25 +1150,28 @@ impl PrefixRelation {
                 let matched = self.program.terminal_steps[&entry]
                     .iter()
                     .any(|&step| self.matches[step].contains(position));
-                let entries = &mut self.answers[position];
                 match (entries.binary_search(&entry), matched) {
                     (Ok(index), false) => {
                         entries.remove(index);
                     }
                     (Err(index), true) => {
-                        let before = entries.shallow_capacity_bytes();
                         entries.insert(index, entry);
-                        self.nested_capacity_bytes += entries.shallow_capacity_bytes() - before;
                     }
                     _ => {}
                 }
                 cursor += 1;
             }
-            if self.live[position] && old != self.answers[position] {
+            if entries != old {
+                let before = self.answers[position].shallow_capacity_bytes();
+                self.answers[position] = shared_answers(&entries);
+                self.nested_capacity_bytes =
+                    self.nested_capacity_bytes - before + self.answers[position].shallow_capacity_bytes();
+            }
+            if self.live[position] && *old != *self.answers[position] {
                 self.changed_answers.push((
                     self.nodes[position],
                     std::mem::take(&mut old),
-                    self.answers[position].clone(),
+                    self.answers[position].to_vec(),
                 ));
             }
         }
@@ -1174,7 +1179,8 @@ impl PrefixRelation {
             targets.clear();
         }
         for &position in &self.departures {
-            self.answers[position].clear();
+            self.nested_capacity_bytes -= self.answers[position].shallow_capacity_bytes();
+            self.answers[position] = no_answers();
             self.positions[self.nodes[position].raw() as usize] = usize::MAX;
             self.parents[position] = usize::MAX;
             self.previous[position] = usize::MAX;
@@ -1536,7 +1542,20 @@ impl PrefixAutomaton {
             geometry_targets: std::array::from_fn(|_| Vec::new()),
             old_previous: Vec::new(),
             sibling_order_is_preserved: false,
-            answers: output,
+            answers: {
+                let mut previous: Option<std::sync::Arc<[EntryID]>> = None;
+                output
+                    .into_iter()
+                    .map(|entries| match &previous {
+                        Some(shared) if **shared == *entries => std::sync::Arc::clone(shared),
+                        _ => {
+                            let shared = shared_answers(&entries);
+                            previous = Some(std::sync::Arc::clone(&shared));
+                            shared
+                        }
+                    })
+                    .collect()
+            },
             changed_answers: Vec::new(),
             arrivals: Vec::new(),
             arrived: Vec::new(),
@@ -1549,6 +1568,19 @@ impl PrefixAutomaton {
         relation.verify_answers(evaluation);
         relation
     }
+}
+
+/// The answers of a position that answers with nothing, which all such positions share.
+fn no_answers() -> std::sync::Arc<[EntryID]> {
+    static NONE: std::sync::LazyLock<std::sync::Arc<[EntryID]>> = std::sync::LazyLock::new(|| std::sync::Arc::from([]));
+    std::sync::Arc::clone(&NONE)
+}
+
+fn shared_answers(entries: &[EntryID]) -> std::sync::Arc<[EntryID]> {
+    if entries.is_empty() {
+        return no_answers();
+    }
+    std::sync::Arc::from(entries)
 }
 
 // Walks only memoize stable relation slots. Reuse their storage across selector steps
