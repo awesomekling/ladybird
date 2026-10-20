@@ -33,6 +33,7 @@ use std::sync::Arc;
 use super::ScopeProgramID;
 use super::column::Column;
 use super::column::EpochColumn;
+use super::column::PagedRowColumn;
 use super::column::advance_epoch;
 use super::fast_hash::FastSet as HashSet;
 use super::index::AttributeFact;
@@ -1202,11 +1203,12 @@ pub(super) struct PrefixStates {
     result_ids: super::intern_table::InternTable<PrefixResultID, PrefixResult>,
     match_sets_by_hash: super::intern_table::InternTable<PrefixMatchSetID, ()>,
     local_fact_interner: LocalFactInterner,
-    transition_by_element: Column<PrefixTransition>,
-    entering_by_element: Column<EnteringStates>,
-    local_facts_by_element: Column<u32>,
+    // NB: Only the elements the automaton has stepped through hold rows, which can be a few at high identities.
+    transition_by_element: PagedRowColumn<PrefixTransition>,
+    entering_by_element: PagedRowColumn<EnteringStates>,
+    local_facts_by_element: PagedRowColumn<u32>,
     /// Per-element positional truth retained only for automata that test it.
-    positional_bits_by_element: Column<u32>,
+    positional_bits_by_element: PagedRowColumn<u32>,
     candidate_epoch: EpochColumn,
     comparison_epoch: u32,
     comparison_marks: EpochColumn,
@@ -1903,10 +1905,10 @@ impl PrefixStates {
             result_ids: super::intern_table::InternTable::default(),
             match_sets_by_hash: super::intern_table::InternTable::default(),
             local_fact_interner: LocalFactInterner::new(),
-            transition_by_element: Column::new(|| UNKNOWN_TRANSITION),
-            entering_by_element: Column::new(|| UNKNOWN_ENTERING_STATES),
-            local_facts_by_element: Column::default(),
-            positional_bits_by_element: Column::default(),
+            transition_by_element: PagedRowColumn::new(UNKNOWN_TRANSITION),
+            entering_by_element: PagedRowColumn::new(UNKNOWN_ENTERING_STATES),
+            local_facts_by_element: PagedRowColumn::new(0),
+            positional_bits_by_element: PagedRowColumn::new(0),
             candidate_epoch: EpochColumn::default(),
             comparison_epoch: 0,
             comparison_marks: EpochColumn::default(),
@@ -5705,14 +5707,12 @@ mod tests {
         states.truth_offsets.reserve(32);
         states.truth_steps.reserve(32);
         states.results.reserve(32);
-        states.transition_by_element.reserve(32);
         let capacities = [
             states.match_offsets.capacity(),
             states.match_entries.capacity(),
             states.truth_offsets.capacity(),
             states.truth_steps.capacity(),
             states.results.capacity(),
-            states.transition_by_element.capacity(),
         ];
 
         states.trim_for_retention();
@@ -5725,7 +5725,6 @@ mod tests {
                 states.truth_offsets.capacity(),
                 states.truth_steps.capacity(),
                 states.results.capacity(),
-                states.transition_by_element.capacity(),
             ]
         );
     }

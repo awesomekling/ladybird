@@ -400,6 +400,77 @@ impl<P: RemovablePagedColumnPage> PagedColumn<P> {
     }
 }
 
+/// A directly indexed column whose rows live in pages of 16, each allocated with its first written row, where a row
+/// no page holds is absent. A column of a few rows at high indices takes a page for each rather than every row below
+/// the highest, as the element identity space reaches past the rows the column names.
+// NB: The pages are small, as a column for a few elements, such as those of a small style scope, takes a page for each.
+const PAGED_ROW_PAGE_SHIFT: usize = 4;
+const PAGED_ROW_PAGE_SIZE: usize = 1 << PAGED_ROW_PAGE_SHIFT;
+
+#[derive(Clone)]
+pub(super) struct PagedRowColumn<T: Copy> {
+    pages: Vec<Option<Box<[T; PAGED_ROW_PAGE_SIZE]>>>,
+    vacant: T,
+    page_count: usize,
+}
+
+impl<T: Copy> PagedRowColumn<T> {
+    pub(super) fn new(vacant: T) -> Self {
+        Self {
+            pages: Vec::new(),
+            vacant,
+            page_count: 0,
+        }
+    }
+
+    /// The row at `index`, which is `vacant` in a page that holds another row, or `None` where no page holds it.
+    pub(super) fn get(&self, index: usize) -> Option<&T> {
+        let page = self.pages.get(index >> PAGED_ROW_PAGE_SHIFT)?.as_deref()?;
+        Some(&page[index & (PAGED_ROW_PAGE_SIZE - 1)])
+    }
+
+    pub(super) fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        let page = self.pages.get_mut(index >> PAGED_ROW_PAGE_SHIFT)?.as_deref_mut()?;
+        Some(&mut page[index & (PAGED_ROW_PAGE_SIZE - 1)])
+    }
+
+    pub(super) fn insert(&mut self, index: usize, value: T) {
+        let page_index = index >> PAGED_ROW_PAGE_SHIFT;
+        if self.pages.len() <= page_index {
+            self.pages.resize_with(page_index + 1, || None);
+        }
+        let vacant = self.vacant;
+        let page = self.pages[page_index].get_or_insert_with(|| {
+            self.page_count += 1;
+            Box::new([vacant; PAGED_ROW_PAGE_SIZE])
+        });
+        page[index & (PAGED_ROW_PAGE_SIZE - 1)] = value;
+    }
+
+    /// Every row of every page, including the vacant rows a page holds.
+    pub(super) fn iter(&self) -> impl Iterator<Item = &T> {
+        self.pages.iter().flatten().flat_map(|page| page.iter())
+    }
+
+    pub(super) fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.pages.iter_mut().flatten().flat_map(|page| page.iter_mut())
+    }
+}
+
+impl<T: Copy> std::ops::Index<usize> for PagedRowColumn<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &T {
+        self.get(index).expect("the column holds no page for the row")
+    }
+}
+
+impl<T: Copy> ShallowCapacityBytes for PagedRowColumn<T> {
+    fn shallow_capacity_bytes(&self) -> u64 {
+        self.pages.shallow_capacity_bytes() + (self.page_count * size_of::<[T; PAGED_ROW_PAGE_SIZE]>()) as u64
+    }
+}
+
 /// Dense marks compared against an externally owned epoch.
 #[derive(Clone, Default)]
 pub(super) struct EpochColumn {
