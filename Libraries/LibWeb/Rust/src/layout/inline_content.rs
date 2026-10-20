@@ -8,7 +8,7 @@ use super::CssPixels;
 use super::geometry::AvailableSize;
 use super::layout_node_arena::LayoutNodeArena;
 use super::node_data::NodeSlotId;
-use super::{formatting_context, inline_formatting_context, used_values};
+use super::{formatting_context, inline_formatting_context, used_values, with_exact_capacity};
 
 // Finalized inline output shared by committed fragments, formatting-context caches and painting.
 // Glyph buffers move here from the line builder and own their fonts. No borrowed text or mutable
@@ -180,7 +180,7 @@ impl InlineContent {
                 fragments.push(fragment.record);
             }
         }
-        let mut pieces = data.inline_box_pieces;
+        let mut pieces = with_exact_capacity(data.inline_box_pieces);
         for piece in &mut pieces {
             assert!((piece.first_fragment_index + piece.fragment_count) as usize <= fragments.len());
             piece.border_box_rect.x += piece.relpos_delta.x;

@@ -173,7 +173,7 @@ pub(crate) fn chunk_text(inputs: TextChunkInputs<'_>) -> Vec<TextChunk> {
     while let Some(chunk) = chunker.next_chunk() {
         chunks.push(chunk);
     }
-    chunks
+    with_exact_capacity(chunks)
 }
 
 pub(super) fn word_boundaries(text: &[u16], offset: usize) -> std::ops::Range<usize> {

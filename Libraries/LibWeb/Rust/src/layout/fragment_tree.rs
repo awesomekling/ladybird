@@ -409,6 +409,7 @@ fn snapshot_fragment(
     used: &UsedValues,
 ) -> std::sync::Arc<Fragment> {
     static NEXT_IDENTITY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let children = with_exact_capacity(children);
     let line_data = used.finish_line_data(callbacks);
     let rare_payloads = used
         .rare_data

@@ -108,3 +108,17 @@ pub(crate) use tree_builder::build_keeps_box;
 pub(crate) use update_layout::MainThreadFfiEntry as UpdateMainThreadFfiEntry;
 pub(crate) use update_layout::{ClockRound, ClockRoundDeclined, FlownRound, SealedRound};
 pub(crate) use used_values::{FfiCssPixelPoint, FfiCssPixelRect, FfiCssPixelSize, SizeConstraint, UsedValues};
+
+/// `values` in an allocation of their size, for a vector that layout keeps once it is done growing: as it grew it kept
+/// room for more, four values from the first one on.
+///
+/// NB: The allocator keeps a block that shrinks by less than half where it is, so shrinking the vector in place would
+///     not always give the room back.
+pub(crate) fn with_exact_capacity<T>(values: Vec<T>) -> Vec<T> {
+    if values.capacity() == values.len() {
+        return values;
+    }
+    let mut exact = Vec::with_capacity(values.len());
+    exact.extend(values);
+    exact
+}
