@@ -499,16 +499,28 @@ static ParentNode* tree_version_holder(Node const& node)
 
 static u64 s_last_tree_version = 0;
 
+// NB: A document counts its tree's versions itself. The trees that are in no document share one count, so that a node
+//     at the root of one keeps no counters of its own: a change to any of them changes the version of all of them.
+static u64 s_detached_dom_tree_version = 0;
+static u64 s_detached_character_data_version = 0;
+
+Node::TreeVersions Node::tree_versions(ParentNode const& holder)
+{
+    if (auto const* document = as_if<Document>(holder))
+        return TreeVersions { document->m_dom_tree_version, document->m_character_data_version };
+    return TreeVersions { s_detached_dom_tree_version, s_detached_character_data_version };
+}
+
 u64 Node::dom_tree_version() const
 {
     auto const* holder = tree_version_holder(*this);
-    return holder ? holder->m_dom_tree_version : 0;
+    return holder ? tree_versions(*holder).dom_tree_version : 0;
 }
 
 u64 Node::character_data_version() const
 {
     auto const* holder = tree_version_holder(*this);
-    return holder ? holder->m_character_data_version : 0;
+    return holder ? tree_versions(*holder).character_data_version : 0;
 }
 
 void Node::bump_dom_tree_version()
@@ -518,13 +530,13 @@ void Node::bump_dom_tree_version()
     document().set_needs_highlight_style_update(CSS::PseudoElement::SearchText);
     document().set_needs_highlight_style_update(CSS::PseudoElement::SpellingError);
     if (auto* holder = tree_version_holder(*this))
-        holder->m_dom_tree_version = ++s_last_tree_version;
+        tree_versions(*holder).dom_tree_version = ++s_last_tree_version;
 }
 
 void Node::bump_character_data_version()
 {
     if (auto* holder = tree_version_holder(*this))
-        holder->m_character_data_version = ++s_last_tree_version;
+        tree_versions(*holder).character_data_version = ++s_last_tree_version;
 }
 
 // OPTIMIZATION: Computing a node's index walks all preceding siblings, so the live range steps defer it until a live

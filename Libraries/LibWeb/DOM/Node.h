@@ -679,6 +679,12 @@ protected:
 
     virtual OwnPtr<RareData> create_rare_data() const;
     RareData& ensure_rare_data() const;
+
+    struct TreeVersions {
+        u64& dom_tree_version;
+        u64& character_data_version;
+    };
+    static TreeVersions tree_versions(ParentNode const& holder);
     RareData* rare_data() { return m_rare_data; }
     RareData const* rare_data() const { return m_rare_data; }
 

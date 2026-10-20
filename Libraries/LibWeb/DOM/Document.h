@@ -1692,6 +1692,12 @@ protected:
     void initialize_document();
 
 private:
+    friend class Node;
+
+    // The counters behind Node::dom_tree_version() and Node::character_data_version(), for the document's tree.
+    mutable u64 m_dom_tree_version { 0 };
+    mutable u64 m_character_data_version { 0 };
+
     bool update_is_fully_active() const;
     bool compute_is_fully_active() const;
 
