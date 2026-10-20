@@ -328,12 +328,27 @@ struct PayloadHandle {
     length: u32,
 }
 
+/// Makes room for `additional` more values in `values`, growing its room by a quarter at a time rather than doubling it.
+/// The primary facts keep a row and its payload for every element for as long as the document lives, and a doubled
+/// column keeps up to half of its room unused.
+fn reserve_gently<T>(values: &mut Vec<T>, additional: usize) {
+    if values.capacity() - values.len() < additional {
+        values.reserve_exact(additional.max(values.len() / 4));
+    }
+}
+
+fn resize_gently<T: Clone>(values: &mut Vec<T>, length: usize, value: T) {
+    reserve_gently(values, length.saturating_sub(values.len()));
+    values.resize(length, value);
+}
+
 impl PayloadHandle {
     fn appended_to<T>(payload: &mut Vec<T>, values: &[T]) -> Self
     where
         T: Clone,
     {
         let offset = u32::try_from(payload.len()).expect("fact payload offset overflow");
+        reserve_gently(payload, values.len());
         payload.extend_from_slice(values);
         Self {
             offset,
@@ -788,18 +803,18 @@ impl StyleNodeFacts {
         let mut stale_payload_bytes = 0_u64;
         if row >= self.tag.len() {
             let length = row.checked_add(1).expect("element fact row space exhausted");
-            self.tag.resize(length, StyleAtomID::NONE);
-            self.folded_tag.resize(length, StyleAtomID::NONE);
-            self.id.resize(length, StyleAtomID::NONE);
-            self.states.resize(length, StateSet::default());
-            self.directionality.resize(length, StyleAtomID::NONE);
-            self.language.resize(length, StyleAtomID::NONE);
-            self.has_text_content.resize(length, false);
-            self.language_text.resize(length, (0, 0));
-            self.namespace.resize(length, StyleAtomID::NONE);
-            self.class_handles.resize(length, PayloadHandle::default());
-            self.attribute_handles.resize(length, PayloadHandle::default());
-            self.dispatch_bloom.resize(length, 0);
+            resize_gently(&mut self.tag, length, StyleAtomID::NONE);
+            resize_gently(&mut self.folded_tag, length, StyleAtomID::NONE);
+            resize_gently(&mut self.id, length, StyleAtomID::NONE);
+            resize_gently(&mut self.states, length, StateSet::default());
+            resize_gently(&mut self.directionality, length, StyleAtomID::NONE);
+            resize_gently(&mut self.language, length, StyleAtomID::NONE);
+            resize_gently(&mut self.has_text_content, length, false);
+            resize_gently(&mut self.language_text, length, (0, 0));
+            resize_gently(&mut self.namespace, length, StyleAtomID::NONE);
+            resize_gently(&mut self.class_handles, length, PayloadHandle::default());
+            resize_gently(&mut self.attribute_handles, length, PayloadHandle::default());
+            resize_gently(&mut self.dispatch_bloom, length, 0);
         }
 
         self.tag[row] = facts.tag;
