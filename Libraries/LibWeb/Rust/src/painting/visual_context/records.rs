@@ -153,8 +153,37 @@ pub(crate) struct DescendantVisualContexts {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PaintableVisualContextRecord {
     pub inherited_input: DescendantVisualContexts,
-    pub output_for_descendants: DescendantVisualContexts,
+    /// What the box hands its descendants where that is not what it inherits. Most boxes hand on what they inherit,
+    /// and the paintable rows keep a record in place for every box.
+    output_differing_from_input: Option<Box<DescendantVisualContexts>>,
     pub owns_geometry_dependent_nodes: bool,
     pub subtree_may_own_geometry_dependent_nodes: bool,
     pub stacking_context: crate::painting::stacking_context::StackingContextFacts,
+}
+
+impl PaintableVisualContextRecord {
+    /// The record of a box that hands its descendants what it inherits.
+    pub(crate) fn new(
+        inherited_input: DescendantVisualContexts,
+        stacking_context: crate::painting::stacking_context::StackingContextFacts,
+    ) -> Self {
+        Self {
+            inherited_input,
+            output_differing_from_input: None,
+            owns_geometry_dependent_nodes: false,
+            subtree_may_own_geometry_dependent_nodes: false,
+            stacking_context,
+        }
+    }
+
+    pub(crate) fn output_for_descendants(&self) -> DescendantVisualContexts {
+        self.output_differing_from_input
+            .as_deref()
+            .copied()
+            .unwrap_or(self.inherited_input)
+    }
+
+    pub(crate) fn set_output_for_descendants(&mut self, output: DescendantVisualContexts) {
+        self.output_differing_from_input = (output != self.inherited_input).then(|| Box::new(output));
+    }
 }

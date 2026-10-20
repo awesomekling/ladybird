@@ -279,13 +279,10 @@ pub(crate) fn create_fresh_tree_with_viewport_nodes(
     let mut viewport_assignment = PaintableVisualContextAssignment::from_data(
         viewport,
         layout_arena.paintable_data(viewport),
-        PaintableVisualContextRecord {
-            inherited_input: viewport_contexts,
-            output_for_descendants: viewport_contexts,
-            owns_geometry_dependent_nodes: false,
-            subtree_may_own_geometry_dependent_nodes: false,
-            stacking_context: crate::painting::stacking_context::StackingContextFacts::for_viewport(),
-        },
+        PaintableVisualContextRecord::new(
+            viewport_contexts,
+            crate::painting::stacking_context::StackingContextFacts::for_viewport(),
+        ),
     );
     viewport_assignment.enclosing_scroll_node_index = VISUAL_VIEWPORT_NODE_INDEX;
     viewport_assignment.own_scroll_node_index = viewport_scroll_node;

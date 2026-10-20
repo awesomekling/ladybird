@@ -402,7 +402,7 @@ pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
     };
     let viewport_output = layout_arena
         .paintable_visual_context_record(viewport)
-        .map(|record| record.output_for_descendants);
+        .map(|record| record.output_for_descendants());
     let Some(viewport_output) = viewport_output else {
         return IncrementalUpdateResult::NeedsFullBuild(VisualContextUpdateScope::FreshTree);
     };
@@ -491,7 +491,7 @@ pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
         let (child_cascade, output_for_children) = if rebuild {
             let existing_record = layout_arena.paintable_visual_context_record(slot);
             let record_existed = existing_record.is_some();
-            let previous_output = existing_record.as_ref().map(|record| record.output_for_descendants);
+            let previous_output = existing_record.as_ref().map(|record| record.output_for_descendants());
             let previous_stacking_context_facts = existing_record.as_ref().map(|record| record.stacking_context);
             let tree = std::sync::Arc::make_mut(state.tree.as_mut().expect("the tree exists throughout the pass"));
             let existing_handles = layout_arena.paintable_visual_context_node_handles(slot);
@@ -508,7 +508,7 @@ pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
                 },
             );
             let (handles, reconcile) = writer.finish();
-            let new_output = assignment.record.output_for_descendants;
+            let new_output = assignment.record.output_for_descendants();
             assignment.node_handles = handles;
             assignment.record.owns_geometry_dependent_nodes =
                 box_owns_geometry_dependent_nodes(layout_arena, tree, slot, &assignment.node_handles);
@@ -583,7 +583,7 @@ pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
                 layout_arena
                     .paintable_visual_context_record(slot)
                     .expect("a box that was not rebuilt keeps its record")
-                    .output_for_descendants
+                    .output_for_descendants()
             });
             push_children(&mut stack, slot, output_for_children, child_cascade, visit_every_child);
         }

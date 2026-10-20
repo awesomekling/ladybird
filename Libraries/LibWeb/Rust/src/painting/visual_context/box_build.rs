@@ -252,13 +252,7 @@ pub(crate) fn build_box_visual_context_nodes<Arena: PaintableRowsRead>(
     let mut assignment = PaintableVisualContextAssignment::from_data(
         slot,
         layout_arena.paintable_data(slot),
-        PaintableVisualContextRecord {
-            inherited_input: inherited,
-            output_for_descendants: inherited,
-            owns_geometry_dependent_nodes: false,
-            subtree_may_own_geometry_dependent_nodes: false,
-            stacking_context: stacking_context_facts,
-        },
+        PaintableVisualContextRecord::new(inherited, stacking_context_facts),
     );
     assignment.enclosing_scroll_node_index = VISUAL_VIEWPORT_NODE_INDEX;
     assignment.own_scroll_node_index = VISUAL_VIEWPORT_NODE_INDEX;
@@ -616,6 +610,6 @@ pub(crate) fn build_box_visual_context_nodes<Arena: PaintableRowsRead>(
             inherited.enclosing_stacking_context
         },
     };
-    assignment.record.output_for_descendants = descendant_contexts;
+    assignment.record.set_output_for_descendants(descendant_contexts);
     assignment
 }
