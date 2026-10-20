@@ -40,7 +40,7 @@ use super::index::StyleAtomID;
 use super::index::StyleNodeFacts;
 use super::index::dispatch_bloom_bit;
 use super::instrumentation::Counters;
-use super::shared_vector::{SharedVector, SharedVectorPool};
+use super::shared_vector::{PagedSharedVector, SharedVector, SharedVectorPool};
 use super::weak_pool::WeakPool;
 use smallvec::SmallVec;
 use std::hash::Hash;
@@ -2886,15 +2886,15 @@ fn selector_program_pools() -> MutexGuard<'static, SelectorProgramPools> {
 /// attached rules, and every selector-result materialization remain document-local.
 #[derive(Clone)]
 pub struct SelectorPrograms {
-    programs: SharedVector<Option<SelectorProgramStorage>>,
+    programs: PagedSharedVector<Option<SelectorProgramStorage>>,
     vacant_programs: Vec<SelectorProgramID>,
-    entry_ids_by_program: SharedVector<Option<SelectorEntryIDs>>,
+    entry_ids_by_program: PagedSharedVector<Option<SelectorEntryIDs>>,
     entry_ids_bytes: usize,
-    entry_locations: SharedVector<Option<(NonZeroU32, u32)>>,
+    entry_locations: PagedSharedVector<Option<(NonZeroU32, u32)>>,
     vacant_entries: Vec<EntryID>,
     /// Open-addressed structural interning table. Reclamation rebuilds it, so lookup never has to
     /// carry tombstones for vacant program identities.
-    program_index: SharedVector<Option<NonZeroU32>>,
+    program_index: PagedSharedVector<Option<NonZeroU32>>,
     /// Whether the indices changed since `share_indices` last ran.
     indices_changed: bool,
     /// What the programs themselves reserve, accumulated as they arrive. A program is immutable
@@ -2909,13 +2909,13 @@ pub struct SelectorPrograms {
 impl Default for SelectorPrograms {
     fn default() -> Self {
         Self {
-            programs: SharedVector::default(),
+            programs: PagedSharedVector::default(),
             vacant_programs: Vec::new(),
-            entry_ids_by_program: SharedVector::default(),
+            entry_ids_by_program: PagedSharedVector::default(),
             entry_ids_bytes: 0,
-            entry_locations: SharedVector::default(),
+            entry_locations: PagedSharedVector::default(),
             vacant_entries: Vec::new(),
-            program_index: SharedVector::default(),
+            program_index: PagedSharedVector::default(),
             indices_changed: false,
             program_memory: MemoryLease::new(MemoryCategory::RuleProgram),
             memory: MemoryLease::new(MemoryCategory::RuleProgram),
@@ -3013,9 +3013,9 @@ impl SelectorPrograms {
         self.vacant_programs.pop();
         self.program_memory.grow_committed(program.document_capacity_bytes());
         if id.0 as usize == self.programs.len() {
-            self.programs.make_mut().push(Some(program));
+            self.programs.push(Some(program));
         } else {
-            self.programs.make_mut()[id.0 as usize] = Some(program);
+            self.programs.set(id.0 as usize, Some(program));
         }
         let recycled_count = entry_count.min(self.vacant_entries.len());
         let entries = if recycled_count == 0 {
@@ -3023,7 +3023,6 @@ impl SelectorPrograms {
             let count = u32::try_from(entry_count).expect("selector program entry space exhausted");
             first.0.checked_add(count).expect("selector entry space exhausted");
             self.entry_locations
-                .make_mut()
                 .extend((0..count).map(|index| Some((stored_id, index))));
             SelectorEntryIDs::Consecutive {
                 first: if count == 0 { EntryID(0) } else { first },
@@ -3045,9 +3044,9 @@ impl SelectorPrograms {
                         u32::try_from(index).expect("selector program entry space exhausted"),
                     ));
                     if entry.0 as usize == self.entry_locations.len() {
-                        self.entry_locations.make_mut().push(location);
+                        self.entry_locations.push(location);
                     } else {
-                        self.entry_locations.make_mut()[entry.0 as usize] = location;
+                        self.entry_locations.set(entry.0 as usize, location);
                     }
                     entry
                 })
@@ -3056,12 +3055,10 @@ impl SelectorPrograms {
         };
         self.entry_ids_bytes += entries.capacity_bytes();
         if self.entry_ids_by_program.len() <= id.0 as usize {
-            self.entry_ids_by_program
-                .make_mut()
-                .resize_with(id.0 as usize + 1, || None);
+            self.entry_ids_by_program.resize(id.0 as usize + 1, None);
         }
-        self.entry_ids_by_program.make_mut()[id.0 as usize] = Some(entries);
-        self.program_index.make_mut()[bucket] = Some(Self::stored_program_id(id));
+        self.entry_ids_by_program.set(id.0 as usize, Some(entries));
+        self.program_index.set(bucket, Some(Self::stored_program_id(id)));
         id
     }
 
@@ -3069,7 +3066,7 @@ impl SelectorPrograms {
         self.indices_changed = true;
         let capacity = ((self.programs.len() + 1) * 4).next_power_of_two().max(16);
         self.program_index.clear();
-        self.program_index.make_mut().resize(capacity, None);
+        self.program_index.resize(capacity, None);
         for (index, program) in self
             .programs
             .iter()
@@ -3081,7 +3078,7 @@ impl SelectorPrograms {
             while self.program_index[bucket].is_some() {
                 bucket = (bucket + 1) & (capacity - 1);
             }
-            self.program_index.make_mut()[bucket] = Some(Self::stored_program_id(id));
+            self.program_index.set(bucket, Some(Self::stored_program_id(id)));
         }
     }
 
@@ -3220,7 +3217,7 @@ impl SelectorPrograms {
     pub fn sweep_unreferenced(&mut self, referenced: &[bool]) {
         self.indices_changed = true;
         self.vacant_programs.clear();
-        for (index, slot) in self.programs.make_mut().iter_mut().enumerate() {
+        for (index, slot) in self.programs.iter_mut().enumerate() {
             if referenced.get(index).copied().unwrap_or(false) {
                 assert!(slot.is_some(), "a referenced selector program must remain live");
                 continue;
@@ -3228,10 +3225,10 @@ impl SelectorPrograms {
             if let Some(program) = slot.take() {
                 self.program_memory.shrink_committed(program.document_capacity_bytes());
             }
-            if let Some(entries) = self.entry_ids_by_program.make_mut()[index].take() {
+            if let Some(entries) = self.entry_ids_by_program.get_mut(index).take() {
                 self.entry_ids_bytes -= entries.capacity_bytes();
                 for entry in entries.iter() {
-                    self.entry_locations.make_mut()[entry.0 as usize] = None;
+                    self.entry_locations.set(entry.0 as usize, None);
                     self.vacant_entries.push(entry);
                 }
             }
@@ -8001,15 +7998,15 @@ mod tests {
         let program = programs.add(program);
 
         registry.add_rule(RuleID(1), program, &programs);
-        assert!(registry.finish_directories());
+        assert!(registry.finish_directories(false));
         assert!(registry.directories_are_flat());
 
         for rule in 2..=8 {
             registry.add_rule(RuleID(rule), program, &programs);
-            assert!(registry.finish_directories());
+            assert!(registry.finish_directories(false));
             assert!(!registry.directories_are_flat());
         }
-        assert!(registry.finish_directories());
+        assert!(registry.finish_directories(false));
         assert!(registry.directories_are_flat());
     }
 
@@ -8096,8 +8093,14 @@ mod tests {
             );
             programs.share_indices(&mut memory);
         }
-        assert_eq!(first.program_index.as_ptr(), second.program_index.as_ptr());
-        assert_eq!(first.entry_locations.as_ptr(), second.entry_locations.as_ptr());
+        assert_eq!(
+            first.program_index.page_pointers(),
+            second.program_index.page_pointers()
+        );
+        assert_eq!(
+            first.entry_locations.page_pointers(),
+            second.entry_locations.page_pointers()
+        );
         let entry = first.entry_id(SelectorProgramID(0), 0);
         second.sweep_unreferenced(&[false, true]);
         let recycled = second.add(make_program(9));

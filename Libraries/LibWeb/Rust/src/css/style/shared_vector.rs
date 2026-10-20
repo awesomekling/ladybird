@@ -225,6 +225,20 @@ impl<T> PagedSharedVector<T> {
         self.len
     }
 
+    pub(super) fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_shared(&self) -> bool {
+        self.pages.iter().all(SharedVector::is_shared)
+    }
+
+    #[cfg(test)]
+    pub(super) fn page_pointers(&self) -> Vec<*const T> {
+        self.pages.iter().map(|page| page.as_ptr()).collect()
+    }
+
     pub(super) fn iter(&self) -> impl Iterator<Item = &T> {
         self.pages.iter().flat_map(|page| page.iter())
     }
@@ -256,6 +270,49 @@ impl<T: Clone> PagedSharedVector<T> {
         values.reserve_exact(SHARED_VECTOR_PAGE_SIZE - values.len());
         values.push(value);
         self.len = next_len;
+    }
+}
+
+impl<T: Clone> PagedSharedVector<T> {
+    /// The value at `index`, whose page this copies out of the pool if it is shared there.
+    pub(super) fn get_mut(&mut self, index: usize) -> &mut T {
+        assert!(index < self.len);
+        &mut self.pages[index / SHARED_VECTOR_PAGE_SIZE].make_mut()[index % SHARED_VECTOR_PAGE_SIZE]
+    }
+
+    pub(super) fn set(&mut self, index: usize, value: T) {
+        *self.get_mut(index) = value;
+    }
+
+    pub(super) fn resize(&mut self, len: usize, value: T) {
+        if len <= self.len {
+            self.truncate(len);
+            return;
+        }
+        while self.len < len {
+            self.push(value.clone());
+        }
+    }
+
+    fn truncate(&mut self, len: usize) {
+        let pages = len.div_ceil(SHARED_VECTOR_PAGE_SIZE);
+        self.pages.truncate(pages);
+        if let Some(last) = self.pages.last_mut()
+            && !len.is_multiple_of(SHARED_VECTOR_PAGE_SIZE)
+        {
+            last.make_mut().truncate(len % SHARED_VECTOR_PAGE_SIZE);
+        }
+        self.len = len;
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.pages.clear();
+        self.len = 0;
+    }
+
+    /// Every value, copying each page out of the pool that it is shared in.
+    pub(super) fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.pages.iter_mut().flat_map(|page| page.make_mut().iter_mut())
     }
 }
 
