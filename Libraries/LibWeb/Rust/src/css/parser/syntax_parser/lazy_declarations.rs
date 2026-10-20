@@ -84,28 +84,53 @@ pub(crate) struct LazyDeclarationSource {
     pub(crate) context: LazyDeclarationContext,
 }
 
-/// A style rule's block, parsed into declarations the first time they are read.
+/// A style rule's block, parsed into declarations the first time they are read. A sheet keeps one for each distinct
+/// block of its style rules.
 pub(crate) struct LazyDeclarations {
     source: Arc<LazyDeclarationSource>,
-    range: Range<u32>,
-    is_ascii: bool,
-    parsed: OnceLock<Arc<DeclarationBlockData>>,
+    start: u32,
+    /// Where the block ends, with `ASCII_BLOCK` set where the block is in the ASCII text.
+    end_and_kind: u32,
+    /// The parsed declarations, from `Arc::into_raw`, or null until they are first read.
+    parsed: std::sync::atomic::AtomicPtr<DeclarationBlockData>,
+}
+
+const _: () = assert!(size_of::<LazyDeclarations>() == 3 * size_of::<usize>());
+
+const ASCII_BLOCK: u32 = 1 << 31;
+
+impl Drop for LazyDeclarations {
+    fn drop(&mut self) {
+        let parsed = *self.parsed.get_mut();
+        if !parsed.is_null() {
+            // SAFETY: A non-null pointer holds one strong reference from `Arc::into_raw`.
+            drop(unsafe { Arc::from_raw(parsed) });
+        }
+    }
 }
 
 impl LazyDeclarations {
     pub(crate) fn new(source: Arc<LazyDeclarationSource>, range: Range<usize>, is_ascii: bool) -> Self {
-        let range = u32::try_from(range.start).expect("a style sheet cannot have 4G code units")
-            ..u32::try_from(range.end).expect("a style sheet cannot have 4G code units");
+        let start = u32::try_from(range.start).expect("a style sheet cannot have 2G code units");
+        let end = u32::try_from(range.end).expect("a style sheet cannot have 2G code units");
+        assert!(end < ASCII_BLOCK, "a style sheet cannot have 2G code units");
         Self {
             source,
-            range,
-            is_ascii,
-            parsed: OnceLock::new(),
+            start,
+            end_and_kind: if is_ascii { end | ASCII_BLOCK } else { end },
+            parsed: std::sync::atomic::AtomicPtr::new(std::ptr::null_mut()),
         }
     }
 
     pub(crate) fn range(&self) -> (Range<usize>, bool) {
-        (self.range.start as usize..self.range.end as usize, self.is_ascii)
+        (
+            self.start as usize..(self.end_and_kind & !ASCII_BLOCK) as usize,
+            self.end_and_kind & ASCII_BLOCK != 0,
+        )
+    }
+
+    fn is_parsed(&self) -> bool {
+        !self.parsed.load(std::sync::atomic::Ordering::Acquire).is_null()
     }
 
     /// The block's text, between its braces.
@@ -115,19 +140,38 @@ impl LazyDeclarations {
             .text
             .get()
             .expect("a lazy block is read after its sheet's parse");
-        let range = self.range.start as usize..self.range.end as usize;
-        if self.is_ascii {
+        let (range, is_ascii) = self.range();
+        if is_ascii {
             TokenizerInput::Ascii(&text.ascii[range])
         } else {
             TokenizerInput::Utf16(&text.utf16[range])
         }
     }
 
-    pub(crate) fn data(&self) -> &Arc<DeclarationBlockData> {
-        self.parsed.get_or_init(|| {
+    pub(crate) fn data(&self) -> Arc<DeclarationBlockData> {
+        use std::sync::atomic::Ordering;
+        let mut parsed = self.parsed.load(Ordering::Acquire);
+        if parsed.is_null() {
             let context = self.source.context.parse_context();
-            super::parse_style_rule_block(self.text(), &context)
-        })
+            let new = Arc::into_raw(super::parse_style_rule_block(self.text(), &context)).cast_mut();
+            parsed = match self
+                .parsed
+                .compare_exchange(std::ptr::null_mut(), new, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => new,
+                Err(existing) => {
+                    // NB: Another thread parsed the block first, whose declarations every reader shares.
+                    // SAFETY: `new` holds the strong reference `Arc::into_raw` left it.
+                    drop(unsafe { Arc::from_raw(new) });
+                    existing
+                }
+            };
+        }
+        // SAFETY: The pointer holds one strong reference for as long as the block lives, which this one adds to.
+        unsafe {
+            Arc::increment_strong_count(parsed);
+            Arc::from_raw(parsed)
+        }
     }
 }
 
@@ -173,7 +217,7 @@ impl RuleDeclarations {
     /// The declarations, parsed now where they were still to be parsed.
     pub(crate) fn data(&self) -> Arc<DeclarationBlockData> {
         match self.as_lazy() {
-            Some(lazy) => lazy.data().clone(),
+            Some(lazy) => lazy.data(),
             None => {
                 let pointer = self.0.as_ptr().cast_const().cast::<DeclarationBlockData>();
                 // SAFETY: An untagged word holds one strong reference to its declarations.
@@ -193,7 +237,7 @@ impl RuleDeclarations {
     /// Whether the declarations may define transitions. A block still to be parsed may where its text names one.
     pub(crate) fn may_declare_transitions(&self) -> bool {
         match self.as_lazy() {
-            Some(lazy) if lazy.parsed.get().is_none() => contains_ascii_case_insensitive(lazy.text(), b"transition"),
+            Some(lazy) if !lazy.is_parsed() => contains_ascii_case_insensitive(lazy.text(), b"transition"),
             _ => crate::css::style::bridge::declares_transitions(&self.data().properties),
         }
     }
