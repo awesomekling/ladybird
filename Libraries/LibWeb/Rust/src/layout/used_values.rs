@@ -250,6 +250,18 @@ pub(crate) struct UsedValuesRareData {
 }
 
 impl UsedValuesRareData {
+    /// Whether no payload is present, so that installing the data changes nothing.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.computed_svg_path.is_none()
+            && self.svg_text_character_cells.is_none()
+            && self.svg == CommittedSvgFacts::default()
+            && self.grid_layout_data.is_none()
+            && self.flex_layout_data.is_none()
+            && self.used_grid_tracks.is_none()
+            && self.collapsed_table_borders.is_none()
+            && self.abspos_layout_inputs.is_none()
+    }
+
     pub(crate) fn install_present_payloads_into(self, record: &UsedValues) {
         let Self {
             computed_svg_path,
