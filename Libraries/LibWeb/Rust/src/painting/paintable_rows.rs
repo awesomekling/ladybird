@@ -24,7 +24,10 @@ use std::ffi::c_void;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-pub(crate) const PAINTABLE_SLOTS_PER_CHUNK: usize = 64;
+// NB: A chunk is an `Arc` of this many rows, whose two counters come on top of the rows, so a power of two of rows of a
+//     power-of-two size would take the next size class up. One row fewer keeps each column's chunks in the class
+//     their rows fill.
+pub(crate) const PAINTABLE_SLOTS_PER_CHUNK: usize = 63;
 
 #[cfg(test)]
 mod tests {
