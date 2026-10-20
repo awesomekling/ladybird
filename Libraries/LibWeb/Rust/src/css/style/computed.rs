@@ -140,10 +140,6 @@ struct RetainedLonghandTable {
 }
 
 impl RetainedLonghandTable {
-    fn value_view(&self) -> &[SharedPayload] {
-        SharedPayload::from_pointer_slice(self.table().value_pointers())
-    }
-
     fn table(&self) -> &ComputedLonghandTable {
         // SAFETY: The handle owns one reference to a live frozen table.
         unsafe { self.table.deref() }
@@ -176,7 +172,6 @@ pub(crate) struct StyleRecordView<'a> {
     pub base_payloads: &'a [SharedPayload],
     /// Always the base record's table: animation overlays store no table entries.
     pub longhand_table: Option<&'a ComputedLonghandTable>,
-    pub longhand_values: &'a [SharedPayload],
     pub animated_overlay: Option<&'a crate::css::animated_overlay::AnimatedOverlay>,
     pub pseudo_element_styles: u64,
     pub counter_style_environment_identity: u64,
@@ -3873,12 +3868,10 @@ impl ComputedGroupSets {
         // SAFETY: A retained table holds a reference to its table for as long as the table set
         //         holds the entry, which the view borrows.
         let longhand_table = retained_longhand_table.and_then(|table| unsafe { table.table.as_ref() });
-        let longhand_values = retained_longhand_table.map_or(&[][..], RetainedLonghandTable::value_view);
         Some(StyleRecordView {
             payloads,
             base_payloads,
             longhand_table,
-            longhand_values,
             animated_overlay,
             pseudo_element_styles: fixed_metadata.pseudo_element_styles,
             counter_style_environment_identity: fixed_metadata.counter_style_environment_identity,

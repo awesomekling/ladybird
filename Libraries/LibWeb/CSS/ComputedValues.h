@@ -474,10 +474,6 @@ public:
     // The drive's frozen computed longhand table (a Rust ComputedLonghandTable), or null when
     // this style holds only a borrowed span or no table at all.
     void const* computed_longhand_table() const { return m_computed_longhand_table; }
-    // One stored data pointer per longhand (null slots where the drive stored no value); empty
-    // when this style carries no table. The pointers stay valid while this ComputedValues is
-    // live (or, for a borrowed record view, while the style engine retains the record's table).
-    ReadonlySpan<void const*> computed_longhand_values() const { return m_longhand_values; }
 
     ~ComputedValues();
 
@@ -1222,9 +1218,9 @@ private:
     // The drive's frozen computed longhand table, retained when this style owns a reference;
     // null for borrowed style-record views and for styles built without a drive.
     void const* m_computed_longhand_table { nullptr };
-    // One stored data pointer per longhand (null where the drive stored none): the owned table's
-    // span, or the span borrowed from the style record's interned table. Empty without a table.
-    ReadonlySpan<void const*> m_longhand_values;
+    // The pages of one stored data pointer per longhand (null where the drive stored none) of the
+    // owned table, or of the table borrowed from the style record's interned one. Null without a table.
+    void const* const* const* m_longhand_value_pages { nullptr };
     RefPtr<ComputedValues const> m_base_values;
     ComputedValues const* m_borrowed_base_values { nullptr };
     RefPtr<AnimatedProperties const> m_animated_properties;

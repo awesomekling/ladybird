@@ -145,11 +145,54 @@ fn bitmap_rank(bits: &[u8; LONGHAND_BITMAP_BYTES], index: usize) -> usize {
     (below + (bits[byte] & ((1u8 << (index % 8)) - 1)).count_ones()) as usize
 }
 
-/// The per-slot arrays, kept on the heap so that a table moves as a handful of words rather than
-/// as the several kilobytes the slots occupy.
-struct DenseSlotStorage {
+/// How many slots a page of a table's slots holds.
+pub const COMPUTED_LONGHAND_SLOTS_PER_PAGE: usize = 32;
+const SLOT_PAGE_COUNT: usize = LONGHAND_COUNT.div_ceil(COMPUTED_LONGHAND_SLOTS_PER_PAGE);
+
+/// A run of a table's slots, which the tables that agree on all of them share.
+#[derive(Clone)]
+#[repr(C)]
+struct SlotPage {
     // Empty slots use the handle's null pointer; the same storage supplies the borrowed FFI view.
-    slots: [RetainedStyleValueData; LONGHAND_COUNT],
+    slots: [RetainedStyleValueData; COMPUTED_LONGHAND_SLOTS_PER_PAGE],
+}
+
+// The host reads a page's slots as data pointers.
+const _: () = assert!(size_of::<RetainedStyleValueData>() == size_of::<*const c_void>());
+
+impl SlotPage {
+    fn hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = crate::fast_hash::fast_hasher();
+        for slot in &self.slots {
+            slot.pointer().hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
+    fn holds_the_values_of(&self, other: &Self) -> bool {
+        self.slots
+            .iter()
+            .zip(&other.slots)
+            .all(|(slot, other)| slot.pointer() == other.pointer())
+    }
+}
+
+fn slot_pages() -> std::sync::MutexGuard<'static, crate::css::style::weak_pool::WeakPool<SlotPage>> {
+    // Every table interns through the same pool, from whichever thread freezes it. Pages never reach back into the pool
+    // when they are dropped, so the lock is only held while interning.
+    static SLOT_PAGES: OnceLock<std::sync::Mutex<crate::css::style::weak_pool::WeakPool<SlotPage>>> = OnceLock::new();
+    SLOT_PAGES.get_or_init(Default::default).lock().unwrap()
+}
+
+/// The per-slot arrays, kept on the heap so that a table moves as a handful of words rather than
+/// as the kilobytes the slots occupy. The slots are kept in pages, which a table shares with the
+/// table it was made from wherever it changed none of a page's slots: the styles of a document
+/// differ in few of their slots.
+struct DenseSlotStorage {
+    pages: [Arc<SlotPage>; SLOT_PAGE_COUNT],
+    /// Where each page's slots are, for the borrowed FFI view, once it is asked for.
+    page_view: OnceLock<[SharedPayload; SLOT_PAGE_COUNT]>,
     /// Cascade source slot for each longhand, or `-1` when its value carries
     /// no style sheet context. Allocate the dense sidecar only when a declaration needs it;
     /// both reads and writes remain direct slot lookups.
@@ -162,17 +205,63 @@ impl Clone for DenseSlotStorage {
         ffi_stats::count_table_copy(|| {
             (
                 LONGHAND_COUNT as u64,
-                self.slots.iter().filter(|value| !value.pointer().is_null()).count() as u64,
+                self.values().filter(|value| !value.pointer().is_null()).count() as u64,
             )
         });
         Self {
-            slots: self.slots.clone(),
+            pages: self.pages.clone(),
+            page_view: OnceLock::new(),
             source_slots: self.source_slots.clone(),
         }
     }
 }
 
 impl DenseSlotStorage {
+    fn value(&self, index: usize) -> &RetainedStyleValueData {
+        &self.pages[index / COMPUTED_LONGHAND_SLOTS_PER_PAGE].slots[index % COMPUTED_LONGHAND_SLOTS_PER_PAGE]
+    }
+
+    fn set_value(&mut self, index: usize, value: RetainedStyleValueData) {
+        let page = &mut self.pages[index / COMPUTED_LONGHAND_SLOTS_PER_PAGE];
+        if page.slots[index % COMPUTED_LONGHAND_SLOTS_PER_PAGE].pointer() == value.pointer() {
+            return;
+        }
+        Arc::make_mut(page).slots[index % COMPUTED_LONGHAND_SLOTS_PER_PAGE] = value;
+        self.page_view.take();
+    }
+
+    /// Every slot's value, in slot order.
+    fn values(&self) -> impl Iterator<Item = &RetainedStyleValueData> {
+        self.pages
+            .iter()
+            .flat_map(|page| page.slots.iter())
+            .take(LONGHAND_COUNT)
+    }
+
+    /// Shares each page only this storage holds with an equal one another table holds, as the storage is frozen: the
+    /// styles of a document mostly agree with one another on a page's slots, though not with the style each was made
+    /// from.
+    fn share_pages(&mut self) {
+        let mut pool = None;
+        for page in &mut self.pages {
+            if Arc::strong_count(page) != 1 {
+                continue;
+            }
+            let pool = pool.get_or_insert_with(slot_pages);
+            let hash = page.hash();
+            match pool.find(hash, |candidate| candidate.holds_the_values_of(page)) {
+                Some(found) => *page = found,
+                None => pool.insert(hash, page),
+            }
+        }
+        self.page_view.take();
+    }
+
+    fn page_view(&self) -> &[SharedPayload; SLOT_PAGE_COUNT] {
+        self.page_view
+            .get_or_init(|| std::array::from_fn(|page| SharedPayload::new(self.pages[page].slots.as_ptr().cast())))
+    }
+
     fn source_slot(&self, index: usize) -> i32 {
         self.source_slots.as_ref().map_or(-1, |slots| slots[index])
     }
@@ -199,18 +288,14 @@ impl DenseSlotStorage {
     }
 
     fn new_shared() -> Arc<Self> {
-        let mut storage = Arc::<Self>::new_uninit();
-        let pointer = Arc::get_mut(&mut storage).unwrap().as_mut_ptr();
-        // SAFETY: Every field is initialized in place below, so the allocation holds a complete value
-        // when it is assumed initialized; nothing is moved through the stack.
-        unsafe {
-            let slots = std::ptr::addr_of_mut!((*pointer).slots).cast::<RetainedStyleValueData>();
-            for index in 0..LONGHAND_COUNT {
-                slots.add(index).write(RetainedStyleValueData::none());
-            }
-            std::ptr::addr_of_mut!((*pointer).source_slots).write(None);
-            storage.assume_init()
-        }
+        let empty = Arc::new(SlotPage {
+            slots: std::array::from_fn(|_| RetainedStyleValueData::none()),
+        });
+        Arc::new(Self {
+            pages: std::array::from_fn(|_| empty.clone()),
+            page_view: OnceLock::new(),
+            source_slots: None,
+        })
     }
 }
 
@@ -228,7 +313,7 @@ struct ChangedSlot {
 /// The slot values of a table in slot order: a delta's changes, which are kept in slot order, are
 /// merged over its base as the walk reaches them.
 struct SlotValues<'a> {
-    base: &'a [RetainedStyleValueData; LONGHAND_COUNT],
+    base: &'a DenseSlotStorage,
     changes: &'a [ChangedSlot],
     index: usize,
 }
@@ -238,7 +323,10 @@ impl<'a> Iterator for SlotValues<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let index = self.index;
-        let base = self.base.get(index)?;
+        if index == LONGHAND_COUNT {
+            return None;
+        }
+        let base = self.base.value(index);
         self.index += 1;
         match self.changes.split_first() {
             Some((change, rest)) if usize::from(change.index) == index => {
@@ -265,8 +353,6 @@ struct SlotDelta {
     changes: SmallVec<[ChangedSlot; 16]>,
     changed_bits: [u8; LONGHAND_BITMAP_BYTES],
     preserve_sources: bool,
-    // Only consumers explicitly asking for the contiguous ABI span pay for it.
-    view: OnceLock<Box<[SharedPayload; LONGHAND_COUNT]>>,
 }
 
 impl SlotStorage {
@@ -276,7 +362,7 @@ impl SlotStorage {
 
     fn slot(&self, index: usize) -> (&RetainedStyleValueData, i32) {
         match self {
-            Self::Dense(storage) => (&storage.slots[index], storage.source_slot(index)),
+            Self::Dense(storage) => (storage.value(index), storage.source_slot(index)),
             Self::Delta(delta) => {
                 let SlotDelta {
                     base,
@@ -287,10 +373,10 @@ impl SlotStorage {
                 } = &**delta;
                 if bitmap_bit(changed_bits, index) {
                     let change = &changes[bitmap_rank(changed_bits, index)];
-                    return (change.value.as_ref().unwrap_or(&base.slots[index]), change.source_slot);
+                    return (change.value.as_ref().unwrap_or(base.value(index)), change.source_slot);
                 }
                 (
-                    &base.slots[index],
+                    base.value(index),
                     if *preserve_sources { base.source_slot(index) } else { -1 },
                 )
             }
@@ -299,16 +385,10 @@ impl SlotStorage {
 
     fn change(&mut self, index: usize) -> &mut ChangedSlot {
         let source_slot = self.slot(index).1;
-        let Self::Delta(delta) = self else {
-            unreachable!()
-        };
+        let Self::Delta(delta) = self else { unreachable!() };
         let SlotDelta {
-            changes,
-            changed_bits,
-            view,
-            ..
+            changes, changed_bits, ..
         } = &mut **delta;
-        view.take();
         // Changes stay in slot order, so a rank names an entry directly. A drive that writes
         // its slots in order only ever appends.
         let rank = bitmap_rank(changed_bits, index);
@@ -328,7 +408,11 @@ impl SlotStorage {
 
     fn set_value(&mut self, index: usize, value: RetainedStyleValueData) {
         match self {
-            Self::Dense(storage) => Arc::make_mut(storage).slots[index] = value,
+            Self::Dense(storage) => {
+                if storage.value(index).pointer() != value.pointer() {
+                    Arc::make_mut(storage).set_value(index, value);
+                }
+            }
             Self::Delta(_) => self.change(index).value = Some(value),
         }
     }
@@ -399,7 +483,6 @@ impl SlotStorage {
             changes,
             changed_bits,
             preserve_sources: preserve_sources && old_preserve_sources,
-            view: OnceLock::new(),
         };
         if !preserve_sources {
             for change in &mut delta.changes {
@@ -412,8 +495,8 @@ impl SlotStorage {
     /// Every slot's value, in slot order, without locating each change by rank.
     fn values(&self) -> SlotValues<'_> {
         let (base, changes) = match self {
-            Self::Dense(storage) => (&storage.slots, &[][..]),
-            Self::Delta(delta) => (&delta.base.slots, &delta.changes[..]),
+            Self::Dense(storage) => (&**storage, &[][..]),
+            Self::Delta(delta) => (&*delta.base, &delta.changes[..]),
         };
         debug_assert!(changes.windows(2).all(|pair| pair[0].index < pair[1].index));
         SlotValues {
@@ -439,18 +522,21 @@ impl SlotStorage {
                     change.value.as_ref().is_none_or(|value| {
                         equal(
                             value.pointer().cast(),
-                            base.slots[usize::from(change.index)].pointer().cast(),
+                            base.value(usize::from(change.index)).pointer().cast(),
                         )
                     })
                 })
             }
             (Self::Dense(first), Self::Dense(second)) => {
                 Arc::ptr_eq(first, second)
-                    || first
-                        .slots
-                        .iter()
-                        .zip(second.slots.iter())
-                        .all(|(first, second)| equal(first.pointer().cast(), second.pointer().cast()))
+                    || first.pages.iter().zip(&second.pages).all(|(first, second)| {
+                        Arc::ptr_eq(first, second)
+                            || first
+                                .slots
+                                .iter()
+                                .zip(&second.slots)
+                                .all(|(first, second)| equal(first.pointer().cast(), second.pointer().cast()))
+                    })
             }
             (Self::Delta(first_delta), Self::Delta(second_delta))
                 if Arc::ptr_eq(&first_delta.base, &second_delta.base) =>
@@ -463,7 +549,7 @@ impl SlotStorage {
                     let first_index = first_changes.get(first).map_or(u16::MAX, |change| change.index);
                     let second_index = second_changes.get(second).map_or(u16::MAX, |change| change.index);
                     let index = usize::from(first_index.min(second_index));
-                    let base = &first_base.slots[index];
+                    let base = first_base.value(index);
                     let mut first_value = base;
                     let mut second_value = base;
                     if usize::from(first_index) == index {
@@ -487,48 +573,44 @@ impl SlotStorage {
         }
     }
 
-    fn value_pointers(&self) -> &[*const c_void] {
+    /// Where each page of the slots of a dense table is.
+    fn value_pages(&self) -> &[*const c_void] {
         match self {
-            Self::Dense(storage) => RetainedStyleValueData::pointer_slice(&storage.slots),
-            Self::Delta(delta) => HostShared::as_pointer_slice(
-                delta.view.get_or_init(|| {
-                    Box::new(std::array::from_fn(|index| {
-                        SharedPayload::new(self.slot(index).0.pointer().cast())
-                    }))
-                })
-                .as_slice(),
-            ),
+            Self::Dense(storage) => HostShared::as_pointer_slice(storage.page_view()),
+            Self::Delta(_) => panic!("only a dense table hands out its value pages"),
         }
     }
 
     fn materialize(&mut self) {
-        if matches!(self, Self::Dense(_)) {
+        if let Self::Dense(storage) = self {
+            if let Some(storage) = Arc::get_mut(storage) {
+                storage.share_pages();
+            }
             return;
         }
-        let dense = DenseSlotStorage::new_shared();
-        let old = std::mem::replace(self, Self::Dense(dense));
-        let Self::Delta(delta) = old else {
-            unreachable!()
-        };
+        let Self::Delta(delta) = self else { unreachable!() };
         let SlotDelta {
             base,
             changes,
             preserve_sources,
             ..
-        } = *delta;
-        let Self::Dense(dense) = self else { unreachable!() };
-        let storage = Arc::get_mut(dense).unwrap();
-        let mut owned_bits = [0; LONGHAND_BITMAP_BYTES];
-        storage.source_slots = if preserve_sources {
-            base.source_slots.clone()
-        } else {
-            None
+        } = &mut **delta;
+        // The pages no change writes to stay the base's.
+        let mut storage = DenseSlotStorage {
+            pages: base.pages.clone(),
+            page_view: OnceLock::new(),
+            source_slots: if *preserve_sources {
+                base.source_slots.clone()
+            } else {
+                None
+            },
         };
-        for change in changes {
+        let mut owned_bits = [0; LONGHAND_BITMAP_BYTES];
+        for change in std::mem::take(changes) {
             let index = usize::from(change.index);
             storage.set_source_slot(index, change.source_slot);
             if let Some(value) = change.value {
-                storage.slots[index] = value;
+                storage.set_value(index, value);
                 set_bitmap_bit(&mut owned_bits, index, true);
             }
         }
@@ -538,29 +620,28 @@ impl SlotStorage {
             for index in 0..LONGHAND_COUNT {
                 if !bitmap_bit(&owned_bits, index) {
                     slots += 1;
-                    retains += u64::from(!base.slots[index].pointer().is_null());
+                    retains += u64::from(!base.value(index).pointer().is_null());
                 }
             }
             (slots, retains)
         });
-        for index in 0..LONGHAND_COUNT {
-            if !bitmap_bit(&owned_bits, index) {
-                storage.slots[index] = base.slots[index].clone();
-            }
-        }
+        storage.share_pages();
+        *self = Self::Dense(Arc::new(storage));
     }
 
     fn owned_capacity_bytes(&self) -> usize {
         match self {
-            Self::Dense(_) => size_of::<DenseSlotStorage>(),
+            Self::Dense(storage) => {
+                size_of::<DenseSlotStorage>()
+                    + storage.pages.iter().filter(|page| Arc::strong_count(page) == 1).count() * size_of::<SlotPage>()
+            }
             Self::Delta(delta) => {
                 size_of::<SlotDelta>()
-                    + (if delta.changes.spilled() {
+                    + if delta.changes.spilled() {
                         delta.changes.capacity() * size_of::<ChangedSlot>()
                     } else {
                         0
-                    })
-                    + delta.view.get().map_or(0, |view| size_of_val(view.as_ref()))
+                    }
             }
         }
     }
@@ -1000,15 +1081,11 @@ impl ComputedLonghandTable {
         }
         let source_slot = source.storage.slot(slot).1;
         if let SlotStorage::Delta(delta) = &mut self.storage
-            && delta.base.slots[slot].pointer().cast::<c_void>() == replacement
+            && delta.base.value(slot).pointer().cast::<c_void>() == replacement
         {
             let SlotDelta {
-                changes,
-                changed_bits,
-                view,
-                ..
+                changes, changed_bits, ..
             } = &mut **delta;
-            view.take();
             if bitmap_bit(changed_bits, slot) {
                 changes.remove(bitmap_rank(changed_bits, slot));
                 set_bitmap_bit(changed_bits, slot, false);
@@ -1096,6 +1173,7 @@ impl ComputedLonghandTable {
         Arc::into_raw(Arc::new(self))
     }
 
+    #[cfg(test)]
     fn copy_from_values(&mut self, values: &[*const c_void]) {
         assert!(
             !self.frozen,
@@ -1429,10 +1507,21 @@ impl ComputedLonghandTable {
         u32::try_from(self.storage.slot(Self::slot_index(property_id)).1).ok()
     }
 
-    /// One raw data pointer per longhand slot, null where the drive stored no
-    /// value. The span is stable for the table's lifetime once frozen.
-    pub(crate) fn value_pointers(&self) -> &[*const c_void] {
-        self.storage.value_pointers()
+    /// The raw data pointer of a longhand slot, null where the drive stored no value.
+    pub(crate) fn value_pointer(&self, slot: usize) -> *const c_void {
+        self.storage.slot(slot).0.pointer().cast()
+    }
+
+    /// One raw data pointer per longhand slot, null where the drive stored no value.
+    #[cfg(test)]
+    pub(crate) fn value_pointers(&self) -> Vec<*const c_void> {
+        (0..LONGHAND_COUNT).map(|slot| self.value_pointer(slot)).collect()
+    }
+
+    /// Where each page of a dense table's slots is: the slot `i` is the entry `i % COMPUTED_LONGHAND_SLOTS_PER_PAGE` of
+    /// the page `i / COMPUTED_LONGHAND_SLOTS_PER_PAGE`. The pages stay where they are while the table is frozen.
+    pub(crate) fn value_pages(&self) -> &[*const c_void] {
+        self.storage.value_pages()
     }
 
     pub(crate) fn is_frozen(&self) -> bool {
@@ -1513,31 +1602,16 @@ pub extern "C" fn rust_computed_longhand_table_copy_from(
     table.copy_from(source);
 }
 
-/// Replaces the table's values with a complete borrowed value span, retaining
-/// every non-null entry. The style-sheet-context sidecar is cleared: a span
-/// borrowed from a published style record carries no usable cascade slots.
-///
-/// # Safety
-/// `table` must be a valid, unfrozen, uniquely owned table and `values` must
-/// have exactly one readable entry per longhand, each null or pointing at
-/// live `StyleValueData`.
+/// Returns where each page of the table's slots is, which hold one borrowed data pointer per longhand, null where the
+/// drive stored no value: the longhand at slot `i` is the entry `i % COMPUTED_LONGHAND_SLOTS_PER_PAGE` of the page
+/// `i / COMPUTED_LONGHAND_SLOTS_PER_PAGE`. The pages stay valid while the caller's table reference is live and the table
+/// stays frozen.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_computed_longhand_table_copy_from_values(
-    table: &mut ComputedLonghandTable,
-    values: *const *const c_void,
-    count: usize,
-) {
-    let values = unsafe { std::slice::from_raw_parts(values, count) };
-    table.copy_from_values(values);
-}
-
-/// Returns the table's value span: one borrowed data pointer per longhand,
-/// null where the drive stored no value. The span stays valid while the
-/// caller's table reference is live and the table stays frozen.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_computed_longhand_table_values(table: &ComputedLonghandTable) -> *const *const c_void {
-    debug_assert!(table.frozen, "only frozen tables hand out their value span");
-    table.value_pointers().as_ptr()
+pub extern "C" fn rust_computed_longhand_table_value_pages(
+    table: &ComputedLonghandTable,
+) -> *const *const *const c_void {
+    debug_assert!(table.frozen, "only frozen tables hand out their value pages");
+    table.value_pages().as_ptr().cast()
 }
 
 /// Whether two frozen tables have equal values and publication metadata.
@@ -1843,10 +1917,10 @@ mod tests {
         assert!(table.storage.has_source_slots());
         assert_eq!(table.source_slot(FIRST_LONGHAND_PROPERTY_ID), Some(7));
         table.set(FIRST_LONGHAND_PROPERTY_ID, retained_number(42.0), -1);
-        let pointers = table.value_pointers().as_ptr();
+        let pages = table.value_pages().to_vec();
         table.freeze();
         assert!(!table.storage.has_source_slots());
-        assert_eq!(table.value_pointers().as_ptr(), pointers);
+        assert_eq!(table.value_pages(), pages);
         assert_eq!(table.source_slot(FIRST_LONGHAND_PROPERTY_ID), None);
     }
 
@@ -1925,7 +1999,7 @@ mod tests {
         assert_eq!(seeded.slot_hash_sum(), source.slot_hash_sum());
 
         let mut copied = ComputedLonghandTable::new();
-        copied.copy_from_values(source.value_pointers());
+        copied.copy_from_values(&source.value_pointers());
         assert_eq!(copied.slot_hash_sum(), source.slot_hash_sum());
     }
 

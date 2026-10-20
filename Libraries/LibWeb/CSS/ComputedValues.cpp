@@ -563,7 +563,7 @@ void ComputedValues::refresh_computed_longhand_table_views()
 {
     VERIFY(m_computed_longhand_table);
     auto const* table = static_cast<ComputedValuesFFI::ComputedLonghandTable const*>(m_computed_longhand_table);
-    m_longhand_values = { ComputedValuesFFI::rust_computed_longhand_table_values(table), number_of_longhand_properties };
+    m_longhand_value_pages = ComputedValuesFFI::rust_computed_longhand_table_value_pages(table);
     m_property_important.copy_from({ ComputedValuesFFI::rust_computed_longhand_table_importance_bits(table), m_property_important.size_in_bytes() });
     m_property_inherited.copy_from({ ComputedValuesFFI::rust_computed_longhand_table_inheritance_bits(table), m_property_inherited.size_in_bytes() });
     size_t inheritance_dependent_value_count = 0;
@@ -576,7 +576,7 @@ void ComputedValues::clear_computed_longhand_table()
     if (m_computed_longhand_table)
         ComputedValuesFFI::rust_computed_longhand_table_release(const_cast<ComputedValuesFFI::ComputedLonghandTable*>(static_cast<ComputedValuesFFI::ComputedLonghandTable const*>(m_computed_longhand_table)));
     m_computed_longhand_table = nullptr;
-    m_longhand_values = {};
+    m_longhand_value_pages = nullptr;
     m_inheritance_dependent_specified_values = {};
 }
 
@@ -587,16 +587,6 @@ void ComputedValues::copy_computed_longhand_table_from(ComputedValues const& oth
         return;
     }
     clear_computed_longhand_table();
-    if (other.m_longhand_values.is_empty())
-        return;
-    auto* table = ComputedValuesFFI::rust_computed_longhand_table_create();
-    ComputedValuesFFI::rust_computed_longhand_table_copy_from_values(table, other.m_longhand_values.data(), other.m_longhand_values.size());
-    for (auto const& entry : other.m_inheritance_dependent_specified_values)
-        ComputedValuesFFI::rust_computed_longhand_table_add_inheritance_dependent_value(table, entry.property, entry.value);
-    ComputedValuesFFI::rust_computed_longhand_table_freeze(table);
-    // The freshly created table already carries the one reference this style owns.
-    m_computed_longhand_table = table;
-    refresh_computed_longhand_table_views();
 }
 
 void ComputedValues::Mutator::set_animated_properties(AnimatedProperties const* value)
@@ -717,9 +707,10 @@ RefPtr<StyleValue const> ComputedValues::computed_style_value(PropertyID propert
         && ComputedValuesFFI::rust_animated_overlay_effective_value(m_animated_properties->overlay(), to_underlying(property_id), is_property_important(property_id)))
         return m_animated_properties->property(property_id);
 
-    if (m_longhand_values.is_empty())
+    if (!m_longhand_value_pages)
         return {};
-    auto const* stored = m_longhand_values[to_underlying(property_id) - to_underlying(first_longhand_property_id)];
+    auto slot = to_underlying(property_id) - to_underlying(first_longhand_property_id);
+    auto const* stored = m_longhand_value_pages[slot / ComputedValuesFFI::COMPUTED_LONGHAND_SLOTS_PER_PAGE][slot % ComputedValuesFFI::COMPUTED_LONGHAND_SLOTS_PER_PAGE];
     if (!stored)
         return {};
     if (m_style_value_cache) {

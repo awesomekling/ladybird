@@ -659,7 +659,7 @@ fn effective_value<'a>(view: &super::computed::StyleRecordView<'a>, property: u1
     {
         return entry.value();
     }
-    unsafe { view.longhand_values[index].cast::<StyleValueData>().deref() }
+    unsafe { &*table.value_pointer(index).cast::<StyleValueData>() }
 }
 
 /// The value of `property` in the record whose table `table` is, with `overlay` over it in place of the record's own.
@@ -1033,16 +1033,16 @@ impl RetainedState {
                         new_writing_mode,
                         new_direction,
                     );
-                    let old_base = unsafe {
-                        old_record.longhand_values[usize::from(old_physical - FIRST_LONGHAND_PROPERTY_ID)]
-                            .cast::<StyleValueData>()
-                            .deref()
+                    let base_value = |record: &super::computed::StyleRecordView<'_>, physical: u16| {
+                        let table = record.longhand_table.expect("a live record carries a longhand table");
+                        unsafe {
+                            &*table
+                                .value_pointer(usize::from(physical - FIRST_LONGHAND_PROPERTY_ID))
+                                .cast::<StyleValueData>()
+                        }
                     };
-                    let new_base = unsafe {
-                        new_record.longhand_values[usize::from(new_physical - FIRST_LONGHAND_PROPERTY_ID)]
-                            .cast::<StyleValueData>()
-                            .deref()
-                    };
+                    let old_base = base_value(&old_record, old_physical);
+                    let new_base = base_value(&new_record, new_physical);
                     if std::ptr::eq(old_base, new_base) || old_base == new_base {
                         continue;
                     }

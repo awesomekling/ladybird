@@ -24,7 +24,7 @@ const MINIMUM_SWEEP_THRESHOLD: usize = 64;
 /// when its bucket is next searched or by a full sweep, which runs whenever the references have
 /// doubled since the last one, so dead references never outnumber the live ones by much. Shared
 /// values are charged once to the pool's own ledger.
-pub(super) struct WeakPool<T> {
+pub(crate) struct WeakPool<T> {
     by_hash: HashMap<u64, Bucket<T>>,
     references: usize,
     sweep_threshold: usize,
@@ -44,7 +44,7 @@ impl<T> Default for WeakPool<T> {
 
 impl<T> WeakPool<T> {
     /// A live value stored under `hash` that `matches` accepts.
-    pub(super) fn find(&mut self, hash: u64, mut matches: impl FnMut(&T) -> bool) -> Option<Arc<T>> {
+    pub(crate) fn find(&mut self, hash: u64, mut matches: impl FnMut(&T) -> bool) -> Option<Arc<T>> {
         let bucket = self.by_hash.get_mut(&hash)?;
         let before = bucket.len();
         bucket.retain(|candidate| candidate.strong_count() != 0);
@@ -60,7 +60,7 @@ impl<T> WeakPool<T> {
     }
 
     /// Remember `value` under `hash`, for a later equal value to find.
-    pub(super) fn insert(&mut self, hash: u64, value: &Arc<T>) {
+    pub(crate) fn insert(&mut self, hash: u64, value: &Arc<T>) {
         self.by_hash.entry(hash).or_default().push(Arc::downgrade(value));
         self.references += 1;
         if self.references >= self.sweep_threshold {

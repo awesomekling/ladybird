@@ -547,13 +547,12 @@ impl RetainedState {
         {
             return Ok(PartialDrive::DriverInputMoved);
         }
-        let old_values = old_table.value_pointers();
         for &property in property_computation_order_for_phase(LONGHAND_DRIVE_PHASE_REMAINING) {
             if !is_required_driver_input(property) {
                 continue;
             }
             let slot = usize::from(property - crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID);
-            let old_value = old_values[slot];
+            let old_value = old_table.value_pointer(slot);
             let new_value = table
                 .get(property)
                 .map_or(std::ptr::null(), |value| value.pointer().cast());

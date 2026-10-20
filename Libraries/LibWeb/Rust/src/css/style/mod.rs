@@ -141,7 +141,7 @@ mod specified_value;
 pub mod transaction;
 mod transaction_view;
 pub mod tree;
-mod weak_pool;
+pub(crate) mod weak_pool;
 
 use atoms::DocumentAtoms;
 use atoms::ReclaimedStyleAtom;

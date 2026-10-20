@@ -76,15 +76,11 @@ NonnullRefPtr<ComputedStyleWorkingSet> ComputedStyleWorkingSet::create_with_base
     auto const& base = style.base_values();
     // Seed the table with the previous drive's computed values so unevaluated longhands read
     // and publish without reverse-materialization; the funnel overwrites what this drive
-    // evaluates. A borrowed record view seeds from its interned value span. The base always
+    // evaluates. A borrowed record view seeds from its interned table. The base always
     // carries a table: property() has no other source for an unevaluated longhand's value.
-    if (auto const* table = base.computed_longhand_table()) {
-        ComputedValuesFFI::rust_computed_longhand_table_copy_from(working_set->m_computed_longhand_table, static_cast<ComputedValuesFFI::ComputedLonghandTable const*>(table));
-    } else {
-        auto longhand_values = base.computed_longhand_values();
-        VERIFY(!longhand_values.is_empty());
-        ComputedValuesFFI::rust_computed_longhand_table_copy_from_values(working_set->m_computed_longhand_table, longhand_values.data(), longhand_values.size());
-    }
+    auto const* table = base.computed_longhand_table();
+    VERIFY(table);
+    ComputedValuesFFI::rust_computed_longhand_table_copy_from(working_set->m_computed_longhand_table, static_cast<ComputedValuesFFI::ComputedLonghandTable const*>(table));
     // A fresh drive starts with nothing evaluated and re-records its own inheritance-dependent
     // specified values; the flag bitmaps seed from the base style's published bitmaps, which a
     // borrowed record view carries even though it owns no table.
