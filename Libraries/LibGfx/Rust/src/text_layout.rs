@@ -240,9 +240,12 @@ struct ShapeForParams {
     shape: CachedShape,
 }
 
+// NB: A text is nearly always shaped with one set of parameters, so the first shape is kept in place and only the others
+//     take an allocation of their own.
 struct ShapesForText {
     last_used_tick: u64,
-    shapes: Vec<ShapeForParams>,
+    first: ShapeForParams,
+    others: Vec<ShapeForParams>,
 }
 
 type FastMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
@@ -285,31 +288,36 @@ impl FontShapeCache {
             if self.shapes_by_text.len() >= MAX_SHAPE_CACHE_TEXTS_PER_FONT {
                 self.evict_least_recently_used_texts();
             }
-            self.shapes_by_text.insert(
-                Box::from(text),
-                ShapesForText {
-                    last_used_tick: tick,
-                    shapes: Vec::new(),
+            let entry = self.shapes_by_text.entry(Box::from(text)).insert_entry(ShapesForText {
+                last_used_tick: tick,
+                first: ShapeForParams {
+                    params,
+                    shape: shape_uncached(),
                 },
-            );
+                others: Vec::new(),
+            });
+            return &entry.into_mut().first.shape;
         }
         let entry = self
             .shapes_by_text
             .get_mut(text)
-            .expect("the entry was inserted just above");
+            .expect("the entry was checked just above");
         entry.last_used_tick = tick;
-        let shapes = &mut entry.shapes;
-        let index = shapes
+        if entry.first.params.matches(&params) {
+            return &entry.first.shape;
+        }
+        let others = &mut entry.others;
+        let index = others
             .iter()
             .position(|entry| entry.params.matches(&params))
             .unwrap_or_else(|| {
-                shapes.push(ShapeForParams {
+                others.push(ShapeForParams {
                     params,
                     shape: shape_uncached(),
                 });
-                shapes.len() - 1
+                others.len() - 1
             });
-        &shapes[index].shape
+        &others[index].shape
     }
 
     fn evict_least_recently_used_texts(&mut self) {
