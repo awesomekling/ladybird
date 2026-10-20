@@ -100,10 +100,125 @@ pub(crate) struct CustomPropertyEntry {
     pub(crate) important: bool,
 }
 
+/// The custom properties a store holds itself, each once, which the store finds by the identity of their name and by
+/// its text.
+#[derive(Clone, Default)]
+pub(crate) struct OwnCustomProperties {
+    entries: Vec<(usize, CustomPropertyEntry)>,
+    by_identity: hashbrown::HashTable<u32>,
+    by_name: hashbrown::HashTable<u32>,
+}
+
+impl OwnCustomProperties {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(capacity),
+            by_identity: hashbrown::HashTable::with_capacity(capacity),
+            by_name: hashbrown::HashTable::with_capacity(capacity),
+        }
+    }
+
+    fn hash_of(value: &(impl std::hash::Hash + ?Sized)) -> u64 {
+        use std::hash::Hasher;
+        let mut hasher = crate::fast_hash::fast_hasher();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn index_of(&self, name_raw: usize) -> Option<usize> {
+        self.by_identity
+            .find(Self::hash_of(&name_raw), |&index| {
+                self.entries[index as usize].0 == name_raw
+            })
+            .map(|&index| index as usize)
+    }
+
+    pub(crate) fn get(&self, name_raw: &usize) -> Option<&CustomPropertyEntry> {
+        self.index_of(*name_raw).map(|index| &self.entries[index].1)
+    }
+
+    fn get_by_name(&self, name: &[u16]) -> Option<&CustomPropertyEntry> {
+        self.by_name
+            .find(Self::hash_of(name), |&index| {
+                *self.entries[index as usize].1.name == *name
+            })
+            .map(|&index| &self.entries[index as usize].1)
+    }
+
+    pub(crate) fn contains_key(&self, name_raw: &usize) -> bool {
+        self.index_of(*name_raw).is_some()
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&usize, &CustomPropertyEntry)> {
+        self.entries.iter().map(|(name_raw, entry)| (name_raw, entry))
+    }
+
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &usize> {
+        self.entries.iter().map(|(name_raw, _)| name_raw)
+    }
+
+    pub(crate) fn values(&self) -> impl Iterator<Item = &CustomPropertyEntry> {
+        self.entries.iter().map(|(_, entry)| entry)
+    }
+
+    /// Holds `entry` as the value of `name_raw`, in place of any held before.
+    fn insert(&mut self, name_raw: usize, entry: CustomPropertyEntry) {
+        match self.index_of(name_raw) {
+            Some(index) => self.entries[index].1 = entry,
+            None => self.insert_new(name_raw, entry),
+        }
+    }
+
+    /// Holds `entry` as the value of `name_raw` where no value of it is held.
+    fn insert_if_missing(&mut self, name_raw: usize, entry: &CustomPropertyEntry) {
+        if self.index_of(name_raw).is_none() {
+            self.insert_new(name_raw, entry.clone());
+        }
+    }
+
+    fn insert_new(&mut self, name_raw: usize, entry: CustomPropertyEntry) {
+        let Self {
+            entries,
+            by_identity,
+            by_name,
+        } = self;
+        let index = u32::try_from(entries.len()).expect("custom property count exceeds u32");
+        by_identity.insert_unique(Self::hash_of(&name_raw), index, |&index| {
+            Self::hash_of(&entries[index as usize].0)
+        });
+        by_name.insert_unique(Self::hash_of(&*entry.name), index, |&index| {
+            Self::hash_of(&*entries[index as usize].1.name)
+        });
+        entries.push((name_raw, entry));
+    }
+}
+
+impl std::ops::Index<&usize> for OwnCustomProperties {
+    type Output = CustomPropertyEntry;
+
+    fn index(&self, name_raw: &usize) -> &CustomPropertyEntry {
+        self.get(name_raw).expect("custom property must be an own value")
+    }
+}
+
+impl FromIterator<(usize, CustomPropertyEntry)> for OwnCustomProperties {
+    fn from_iter<I: IntoIterator<Item = (usize, CustomPropertyEntry)>>(entries: I) -> Self {
+        let entries = entries.into_iter();
+        let mut own = Self::with_capacity(entries.size_hint().0);
+        for (name_raw, entry) in entries {
+            own.insert(name_raw, entry);
+        }
+        own
+    }
+}
+
 pub struct CustomPropertyStore {
-    pub(crate) own_values: HashMap<usize, CustomPropertyEntry>,
+    pub(crate) own_values: OwnCustomProperties,
     pub(crate) declared_names: Vec<usize>,
-    own_names: HashMap<Arc<[u16]>, usize>,
     parent: Option<Arc<CustomPropertyStore>>,
     inheritance_parent: Option<Arc<CustomPropertyStore>>,
     ancestor_count: u8,
@@ -567,26 +682,23 @@ impl CustomPropertyStore {
         animated: impl ExactSizeIterator<Item = (usize, CustomPropertyEntry)>,
         base: Option<&Self>,
     ) -> Self {
-        let (mut own_values, mut own_names, parent, inheritance_parent, ancestor_count) = match base {
+        let (mut own_values, parent, inheritance_parent, ancestor_count) = match base {
             Some(base) => (
                 base.own_values.clone(),
-                base.own_names.clone(),
                 base.parent.clone(),
                 base.inheritance_parent.clone(),
                 base.ancestor_count,
             ),
-            None => (HashMap::new(), HashMap::new(), None, None, 0),
+            None => (OwnCustomProperties::default(), None, None, 0),
         };
         let mut declared_names = Vec::with_capacity(animated.len());
         for (name_raw, entry) in animated {
             declared_names.push(name_raw);
-            own_names.insert(entry.name.clone(), name_raw);
             own_values.insert(name_raw, entry);
         }
         Self {
             own_values,
             declared_names,
-            own_names,
             ancestor_count,
             parent,
             inheritance_parent,
@@ -613,17 +725,14 @@ impl CustomPropertyStore {
     }
 
     fn get_by_name_with_owner(&self, name: &[u16]) -> Option<(&CustomPropertyEntry, &CustomPropertyStore)> {
-        self.own_names
-            .get(name)
-            .and_then(|name_raw| self.own_values.get(name_raw))
+        self.own_values
+            .get_by_name(name)
             .map(|entry| (entry, self))
             .or_else(|| self.parent.as_ref()?.get_by_name_with_owner(name))
     }
 
     fn get_own_by_name(&self, name: &[u16]) -> Option<&CustomPropertyEntry> {
-        self.own_names
-            .get(name)
-            .and_then(|name_raw| self.own_values.get(name_raw))
+        self.own_values.get_by_name(name)
     }
 
     /// What a child inherits of this store: the store without the entries a registration keeps
@@ -633,17 +742,13 @@ impl CustomPropertyStore {
         if self.own_values.values().all(inherits) {
             return None;
         }
-        let own_values: HashMap<usize, CustomPropertyEntry> = self
+        let own_values: OwnCustomProperties = self
             .own_values
             .iter()
             .filter(|(_, entry)| inherits(entry))
             .map(|(&name_raw, entry)| (name_raw, entry.clone()))
             .collect();
         Some(Arc::new(Self {
-            own_names: own_values
-                .iter()
-                .map(|(&name_raw, entry)| (entry.name.clone(), name_raw))
-                .collect(),
             declared_names: self
                 .declared_names
                 .iter()
@@ -679,12 +784,10 @@ impl CustomPropertyStore {
         mut parent: Option<Arc<CustomPropertyStore>>,
         entries: Vec<(usize, CustomPropertyEntry)>,
     ) -> *const c_void {
-        let mut own_names = HashMap::with_capacity(entries.len());
-        let mut own_values = HashMap::with_capacity(entries.len());
+        let mut own_values = OwnCustomProperties::with_capacity(entries.len());
         let mut declared_names = Vec::with_capacity(entries.len());
         for (name_raw, entry) in entries {
             declared_names.push(name_raw);
-            own_names.insert(entry.name.clone(), name_raw);
             own_values.insert(name_raw, entry);
         }
 
@@ -693,22 +796,16 @@ impl CustomPropertyStore {
             if current_parent.ancestor_count >= MAX_ANCESTOR_COUNT - 1 {
                 let mut ancestor = Some(current_parent.as_ref());
                 while let Some(current) = ancestor {
-                    for (&name_raw, entry) in &current.own_values {
-                        if let std::collections::hash_map::Entry::Vacant(slot) = own_values.entry(name_raw) {
-                            own_names.insert(entry.name.clone(), name_raw);
-                            slot.insert(entry.clone());
-                        }
+                    for (&name_raw, entry) in current.own_values.iter() {
+                        own_values.insert_if_missing(name_raw, entry);
                     }
                     ancestor = current.parent.as_deref();
                 }
                 parent = None;
                 0
             } else if current_parent.own_values.len() <= ABSORB_THRESHOLD {
-                for (&name_raw, entry) in &current_parent.own_values {
-                    if let std::collections::hash_map::Entry::Vacant(slot) = own_values.entry(name_raw) {
-                        own_names.insert(entry.name.clone(), name_raw);
-                        slot.insert(entry.clone());
-                    }
+                for (&name_raw, entry) in current_parent.own_values.iter() {
+                    own_values.insert_if_missing(name_raw, entry);
                 }
                 parent = current_parent.parent.clone();
                 parent.as_ref().map_or(0, |parent| parent.ancestor_count + 1)
@@ -722,7 +819,6 @@ impl CustomPropertyStore {
         Arc::into_raw(Arc::new(CustomPropertyStore {
             own_values,
             declared_names,
-            own_names,
             inheritance_parent,
             parent,
             ancestor_count,
@@ -1272,8 +1368,11 @@ fn compute_element_custom_property(
     context: &mut ASFResolutionContext,
     recursion_depth: u32,
 ) -> Result<(RetainedStyleValueData, bool), ()> {
-    let name_raw = store.own_names[name];
-    let entry = &store.own_values[&name_raw];
+    let entry = store
+        .own_values
+        .get_by_name(name)
+        .expect("computed custom property must be an own value");
+    let name_raw = entry._name.raw();
     let (tokens, includes_substitution, tainted) = cached_tokens_for_custom_property_value(entry.value.data(), context);
 
     let (value, is_cyclic) = if includes_substitution {
@@ -3904,14 +4003,16 @@ pub unsafe extern "C" fn rust_custom_property_store_create(
         unsafe { Arc::increment_strong_count(inheritance_parent) };
         Some(unsafe { Arc::from_raw(inheritance_parent) })
     };
-    let mut own_names = HashMap::with_capacity(entries.len());
     let own_values = entries
         .iter()
         .map(|entry| {
-            let name: Arc<[u16]> = unsafe { entry.name.to_utf16() }
-                .expect("invalid custom property name")
-                .into();
-            own_names.insert(name.clone(), entry.name_raw);
+            // NB: An element mostly declares the custom properties its ancestors do, whose names it can share.
+            let name = match parent.as_ref().and_then(|parent| parent.get(entry.name_raw)) {
+                Some(inherited) => inherited.name.clone(),
+                None => unsafe { entry.name.to_utf16() }
+                    .expect("invalid custom property name")
+                    .into(),
+            };
             (
                 entry.name_raw,
                 CustomPropertyEntry {
@@ -3926,7 +4027,6 @@ pub unsafe extern "C" fn rust_custom_property_store_create(
     Arc::into_raw(Arc::new(CustomPropertyStore {
         own_values,
         declared_names: entries[..declared_count].iter().map(|entry| entry.name_raw).collect(),
-        own_names,
         ancestor_count: parent.as_ref().map_or(0, |parent| parent.ancestor_count + 1),
         parent,
         inheritance_parent,
