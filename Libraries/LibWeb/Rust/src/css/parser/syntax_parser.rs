@@ -163,6 +163,8 @@ pub(crate) struct QualifiedRule {
     pub source_position: Option<SourcePosition>,
     /// The text of the rule's block, between its braces, in the source its tokens share.
     block_source: BlockSource,
+    /// Whether the parser stepped over the block, which holds declarations only, for the parse to keep as its text.
+    block_skipped: bool,
 }
 
 /// Where a rule's block is in the source its tokens share, which a parse of tokens that share none has no idea of.
@@ -1128,6 +1130,9 @@ struct Parser {
     position: usize,
     rule_context: Vec<RuleContext>,
     rule_names: Vec<Option<ParserString>>,
+    /// Whether the parse keeps the blocks of style rules that hold declarations only as their text, so that the
+    /// parser can step over their tokens.
+    skips_style_blocks: bool,
 }
 
 // How many tokens a feed adds to a token window at once.
@@ -1416,6 +1421,7 @@ impl Parser {
             position: 0,
             rule_context,
             rule_names,
+            skips_style_blocks: false,
         }
     }
 
@@ -1437,6 +1443,32 @@ impl Parser {
 
     fn next_kind(&mut self) -> Option<&ParserTokenKind> {
         self.tokens.token(self.position).map(|token| &token.kind)
+    }
+
+    /// Where the block that opens at the parser's position ends, where it holds declarations only, which a parse may
+    /// read later from its text: no nested rule, no `{}` block in a value, and nothing the sheet's parse has to see.
+    fn skippable_style_block_end(&mut self) -> Option<usize> {
+        let mut position = self.position + 1;
+        let mut depth = 0_usize;
+        let mut holds_anything = false;
+        loop {
+            match self.tokens.token(position).map(|token| &token.kind)? {
+                ParserTokenKind::OpenCurly | ParserTokenKind::AtKeyword(_) => return None,
+                ParserTokenKind::CloseCurly => return (depth == 0 && holds_anything).then_some(position),
+                ParserTokenKind::Function(name) => {
+                    let name = name.as_ref();
+                    if equals_ascii_case_insensitive(name, b"random") || equals_ascii_case_insensitive(name, b"attr") {
+                        return None;
+                    }
+                    depth += 1;
+                }
+                ParserTokenKind::OpenParen | ParserTokenKind::OpenSquare => depth += 1,
+                ParserTokenKind::CloseParen | ParserTokenKind::CloseSquare => depth = depth.checked_sub(1)?,
+                ParserTokenKind::Whitespace => {}
+                _ => holds_anything = true,
+            }
+            position += 1;
+        }
     }
 
     /// The source the token at `position` shares, and its range there.
@@ -1601,6 +1633,7 @@ impl Parser {
             children: Vec::new(),
             source_position: None,
             block_source: BlockSource::default(),
+            block_skipped: false,
         };
         loop {
             let Some(kind) = self.next_kind() else {
@@ -1625,6 +1658,19 @@ impl Parser {
                             self.consume_block();
                         }
                         return Err(QualifiedRuleResult::Invalid);
+                    }
+                    if self.skips_style_blocks
+                        && qualified_context == RuleContext::Style
+                        && rule.nesting_parent == StyleNestingParent::None
+                        && let Some(end) = self.skippable_style_block_end()
+                        && let (Some((storage, open)), Some((_, close))) =
+                            (self.shared_token_source(self.position), self.shared_token_source(end))
+                    {
+                        rule.block_source = BlockSource(Some((storage, open.end..close.start)));
+                        rule.block_skipped = true;
+                        self.position = end + 1;
+                        rule.valid_in_context = self.qualified_rule_is_valid();
+                        return Ok(rule);
                     }
                     self.rule_context.push(qualified_context);
                     self.rule_names.push(context_rule_name(qualified_context));
@@ -3527,7 +3573,7 @@ impl SyntaxParseBuilder {
         if !rule.prelude_is_selector
             || rule.nesting_parent != StyleNestingParent::None
             || !rule.children.is_empty()
-            || rule.declarations.is_empty()
+            || (rule.declarations.is_empty() && !rule.block_skipped)
         {
             return None;
         }
@@ -4019,6 +4065,7 @@ pub(crate) unsafe fn parse_shared_stylesheet(
             let mut parse = SyntaxParseBuilder::new(parse_context, false);
             if lazy_declarations_enabled() {
                 parse.lazy_blocks = LazyDeclarationContext::capture(parse_context.as_ref()).map(LazyBlocks::new);
+                parser.skips_style_blocks = parse.lazy_blocks.is_some();
             }
             while let Some(rule) = parser.consume_next_stylesheet_rule() {
                 parse.append_root(&rule);
