@@ -16,12 +16,6 @@
 
 namespace Web::CSS {
 
-void StyleValueList::set_style_sheet(StyleSheetState* style_sheet)
-{
-    for (auto& value : values())
-        const_cast<StyleValue&>(*value).set_style_sheet(style_sheet);
-}
-
 // https://drafts.css-houdini.org/css-typed-om-1/#reify-a-transform-list
 static GC::Ptr<CSSStyleValue> reify_a_transform_list(ReadonlySpan<ValueComparingNonnullRefPtr<StyleValue const>> values)
 {

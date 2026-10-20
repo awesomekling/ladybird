@@ -3228,8 +3228,7 @@ fn retained_new(value: StyleValueData) -> RetainedStyleValueData {
 }
 
 fn needs_computed_style_sheet_context(value: &RetainedStyleValueData) -> bool {
-    // NB: Keep this traversal aligned with StyleValue::set_style_sheet(). Only image
-    //     wrappers consume the context; container wrappers forward it to their children.
+    // NB: Only image values consume the context; container values need it for the images among their children.
     match value.optional_data() {
         Some(StyleValueData::Image { .. } | StyleValueData::ImageSet { .. }) => true,
         Some(StyleValueData::Content { content, alt_text }) => {

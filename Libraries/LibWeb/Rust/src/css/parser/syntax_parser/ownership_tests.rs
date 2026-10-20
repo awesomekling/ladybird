@@ -1051,24 +1051,6 @@ fn calculation_nodes_retain_native_function_values() {
 }
 
 #[test]
-fn declaration_image_traversal_skips_non_resource_values() {
-    use crate::css::declaration_block::visit_declaration_images;
-    use crate::css::style_value::StyleValueData;
-    let block = declarations(
-        "width: 13px; background-image: url(a), linear-gradient(red, blue); content: url(b) / 'text'; border-image-source: image-set(url(c) 1x, url(d) 2x); --ignored: url(e)",
-    );
-    let mut images = 0;
-    let mut image_sets = 0;
-    visit_declaration_images(&block.data(), &mut |value| match value {
-        StyleValueData::Image { .. } => images += 1,
-        StyleValueData::ImageSet { .. } => image_sets += 1,
-        _ => panic!("Image traversal visited a non-resource value"),
-    });
-    assert_eq!(images, 2);
-    assert_eq!(image_sets, 1);
-}
-
-#[test]
 fn declaration_mutation_does_not_change_cached_or_nested_shared_blocks() {
     use crate::css::declaration_block::{
         DeclarationBlock, rust_declaration_block_remove, rust_declaration_block_remove_custom,

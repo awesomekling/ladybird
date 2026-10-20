@@ -1108,7 +1108,7 @@ mod tests {
 
     #[test]
     fn shared_rule_traversal_preserves_identities_without_materializing_owners() {
-        use crate::css::rule::{RuleRef, rust_rule_list_count, rust_rule_list_visit_images};
+        use crate::css::rule::{RuleRef, rust_rule_list_count};
         use std::ops::ControlFlow;
 
         fn collect(rule: RuleRef<'_>, result: &mut Vec<(u64, u16)>) {
@@ -1126,9 +1126,6 @@ mod tests {
             });
             result
         }
-        unsafe extern "C" fn image(context: *mut c_void, _: *const c_void) {
-            unsafe { *context.cast::<usize>() += 1 };
-        }
 
         let source = sheet(
             "@namespace 色 url(urn:color); .対象 { background-image: url(image.png);
@@ -1145,9 +1142,6 @@ mod tests {
         let mut namespaces = 0;
         rules.for_each_namespace(|_| namespaces += 1);
         assert_eq!(namespaces, 1);
-        let mut images = 0_usize;
-        unsafe { rust_rule_list_visit_images(rules, (&raw mut images).cast(), image) };
-        assert_eq!(images, 1);
         let environment = FfiMediaEnvironment {
             values: std::ptr::null(),
             value_count: 0,

@@ -39,7 +39,6 @@ private:
 
     // NB: StyleValue dispatches operations by type tag, so it may call private impls.
     friend class StyleValue;
-    void set_style_sheet(StyleSheetState*);
 
     Optional<size_t> select_option_index(double device_pixels_per_css_pixel) const;
 

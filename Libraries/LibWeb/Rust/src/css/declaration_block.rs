@@ -393,32 +393,6 @@ impl DeclarationBlock {
     }
 }
 
-// Resource registration belongs to stylesheet attachment on the document thread,
-// not parsing. Keep the traversal native and expose only image-bearing values.
-pub(crate) fn visit_declaration_images(data: &DeclarationBlockData, visit: &mut impl FnMut(&StyleValueData)) {
-    fn visit_images(value: &StyleValueData, visit: &mut impl FnMut(&StyleValueData)) {
-        match value {
-            // Leave image-set type filtering to the document's image decoder support.
-            StyleValueData::Image { .. } | StyleValueData::ImageSet { .. } => visit(value),
-            StyleValueData::ValueList { values, .. } | StyleValueData::Shorthand { values, .. } => {
-                for value in values.as_slice() {
-                    visit_images(value.data(), visit);
-                }
-            }
-            StyleValueData::Content { content, alt_text } => {
-                visit_images(content.data(), visit);
-                if let Some(alt_text) = alt_text.optional_data() {
-                    visit_images(alt_text, visit);
-                }
-            }
-            _ => {}
-        }
-    }
-    for property in &data.properties {
-        visit_images(&property.value, visit);
-    }
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_declaration_block_is_empty(block: &DeclarationBlock) -> bool {
     let data = block.data();

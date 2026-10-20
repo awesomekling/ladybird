@@ -44,7 +44,6 @@ WebIDL::ExceptionOr<u32> CSSGroupingRule::insert_rule(Utf16View rule, u32 index)
     TRY(m_rules->insert_a_css_rule(rule, index, CSSRuleList::Nested::Yes, declared_namespaces));
 
     if (auto* sheet = parent_style_sheet()) {
-        sheet->invalidate_image_resource_registration();
         if (auto* function = Parser::ValueParserFFI::rust_rule_containing_function(native_rule().handle()))
             record_style_rule_declarations_changed(RustRule { function }, *sheet);
         else

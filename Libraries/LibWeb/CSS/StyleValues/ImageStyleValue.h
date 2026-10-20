@@ -91,14 +91,12 @@ public:
 private:
     friend class ImageStyleValueResource;
     friend class Client;
-    friend class StyleSheetState;
     ImageStyleValue(URL const&, Optional<::URL::URL> style_resource_base_url = {});
     explicit ImageStyleValue(StyleValueFFI::StyleValueData const*);
 
     void register_client(Client&) const;
     void unregister_client(Client&) const;
     void notify_clients_did_update() const;
-    void update_style_sheet_resource_context(StyleSheetState const&);
     GC::Ptr<HTML::SharedResourceRequest> fetch_image(DOM::Document&) const;
     Optional<::URL::URL> resolved_url(DOM::Document const&) const;
     ::URL::URL style_resource_base_url(DOM::Document const&) const;
@@ -106,7 +104,6 @@ private:
 
     // NB: StyleValue dispatches operations by type tag, so it may call private impls.
     friend class StyleValue;
-    void set_style_sheet(StyleSheetState*);
 
     URL url_value() const;
 

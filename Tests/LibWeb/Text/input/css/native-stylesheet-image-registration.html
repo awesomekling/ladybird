@@ -32,8 +32,8 @@ sheet.disabled = false;
 
 asyncTest(done => {
     window.addEventListener("load", async () => {
-        // Attachment requests delay load, even though these selectors never match. No timer or
-        // rendered image is needed to observe resource registration after each rule-list change.
+        // No element matches these selectors, so none of their images is requested, whichever rule-list change
+        // brought them in.
         for (const [index, path] of paths.entries()) {
             const response = await fetch(`/recorded-request-headers${path}`);
             println(`${["discarded", "initial", "inserted", "replaced"][index]} requested: ${response.ok}`);

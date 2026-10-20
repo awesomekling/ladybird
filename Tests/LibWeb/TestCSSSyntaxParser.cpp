@@ -259,37 +259,6 @@ TEST_CASE(native_function_fragments_preserve_declaration_context)
     EXPECT_EQ(block.at(0).type(), RustRule::Type::FunctionDeclarations);
 }
 
-TEST_CASE(native_rule_image_traversal_preserves_attachment_resources)
-{
-    ValueParserFFI::ParseContext context {};
-    auto source = u"@import 'imported.css'; .根 { background-image: url(root.png); & .子 { content: url(child.png); } background-image: url(nested-declaration.png); } @media not all { .隠 { border-image-source: image-set(url(one.png) 1x, url(two.png) 2x); } } @supports (unknown: value) { .無 { background-image: url(unsupported.png); } } @keyframes 動 { from { background-image: url(frame.png); } }"sv;
-    auto* parse = ValueParserFFI::rust_parse_css_stylesheet_syntax(ffi_utf16_view(source), &context);
-    RustRuleList rules { ValueParserFFI::rust_css_syntax_native_rules(parse) };
-    ValueParserFFI::rust_css_syntax_parse_free(parse);
-
-    auto images = [&] {
-        Vector<NonnullRefPtr<StyleValue const>> values;
-        ValueParserFFI::rust_rule_list_visit_images(rules.handle(), &values, [](void* context, void const* value) {
-            auto retained = StyleValueFFI::rust_style_value_retain(static_cast<StyleValueFFI::StyleValueData const*>(value));
-            static_cast<Vector<NonnullRefPtr<StyleValue const>>*>(context)->append(StyleValue::adopt_rust_style_value_data(retained));
-        });
-        return values;
-    };
-    auto retained_images = images();
-    EXPECT_EQ(retained_images.size(), 4u);
-    EXPECT(retained_images[0]->is_image());
-    EXPECT(retained_images[1]->is_image());
-    EXPECT(retained_images[2]->is_image_set());
-    EXPECT(retained_images[3]->is_image());
-
-    rules.remove(1);
-    EXPECT_EQ(images().size(), 2u);
-    rules.clear();
-    EXPECT(images().is_empty());
-    EXPECT_EQ(retained_images[0]->to_utf16_string(SerializationMode::Normal), u"url(\"child.png\")"sv);
-    EXPECT_EQ(retained_images[1]->to_utf16_string(SerializationMode::Normal), u"url(\"root.png\")"sv);
-}
-
 TEST_CASE(retained_descriptor_blocks_observe_replacement_and_keep_values_alive)
 {
     auto values = parse_native_declaration_block(u"width: 13px; height: 29px"sv);

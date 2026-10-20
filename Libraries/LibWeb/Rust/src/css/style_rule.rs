@@ -54,8 +54,7 @@ mod tests {
     use super::*;
     use crate::css::parser::syntax_parser::parse_shared_stylesheet;
     use crate::css::parser::value_parser::ParseContext;
-    use crate::css::rule::{NativeRuleList, rust_rule_list_visit_images};
-    use std::ffi::c_void;
+    use crate::css::rule::NativeRuleList;
     use std::rc::Rc;
 
     fn rules(source: &str) -> Rc<NativeRuleList> {
@@ -68,7 +67,7 @@ mod tests {
     }
 
     #[test]
-    fn native_publication_and_image_discovery_keep_style_data_immutable() {
+    fn native_publication_keeps_style_data_immutable() {
         use crate::css::style::StyleEngine;
         use crate::css::style::bridge::publish_rule_declarations;
         use crate::css::style::program::{CascadeOrigin, RuleKind, StyleSheetObjectID};
@@ -83,16 +82,6 @@ mod tests {
         let sheet = engine.add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
         let id = engine.add_non_matching_rule(sheet, None, RuleKind::Style);
         assert!(publish_rule_declarations(&mut engine, id.0 + 1, &declarations));
-        extern "C" fn image(context: *mut c_void, _: *const c_void) {
-            unsafe {
-                *context.cast::<usize>() += 1;
-            }
-        }
-        let mut images = 0_usize;
-        unsafe {
-            rust_rule_list_visit_images(&rules, (&raw mut images).cast(), image);
-        }
-        assert_eq!(images, 1);
         assert!(style.declarations.is_immutable());
     }
 

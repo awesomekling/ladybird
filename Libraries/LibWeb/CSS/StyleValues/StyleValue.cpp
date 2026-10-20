@@ -287,27 +287,6 @@ ValueComparingNonnullRefPtr<StyleValue const> StyleValue::create_guaranteed_inva
     return instance;
 }
 
-void StyleValue::set_style_sheet(StyleSheetState* style_sheet)
-{
-    m_has_style_sheet_context = !!style_sheet;
-
-    // Only the types holding nested values with document-associated state care.
-    switch (type()) {
-    case Type::Content:
-        return as_content().set_style_sheet(style_sheet);
-    case Type::Image:
-        return as_image().set_style_sheet(style_sheet);
-    case Type::ImageSet:
-        return as_image_set().set_style_sheet(style_sheet);
-    case Type::Shorthand:
-        return as_shorthand().set_style_sheet(style_sheet);
-    case Type::ValueList:
-        return as_value_list().set_style_sheet(style_sheet);
-    default:
-        return;
-    }
-}
-
 bool StyleValue::is_computationally_independent() const
 {
     return ComputedValuesFFI::rust_style_value_is_computationally_independent(m_value.operator->());

@@ -12,11 +12,4 @@
 
 namespace Web::CSS {
 
-void ContentStyleValue::set_style_sheet(StyleSheetState* style_sheet)
-{
-    const_cast<StyleValueList&>(content()).set_style_sheet(style_sheet);
-    if (auto const* alt_text_list = alt_text())
-        const_cast<StyleValueList&>(*alt_text_list).set_style_sheet(style_sheet);
-}
-
 }

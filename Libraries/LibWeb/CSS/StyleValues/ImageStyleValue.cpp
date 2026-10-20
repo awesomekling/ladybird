@@ -192,27 +192,6 @@ ImageStyleValueResource* ImageStyleValue::resource_registered_by_clients(DOM::Do
     return nullptr;
 }
 
-void ImageStyleValue::set_style_sheet(StyleSheetState* style_sheet)
-{
-    m_style_resource_base_url.clear();
-    m_resolved_url.clear();
-    m_parent_style_sheet_origin_clean.clear();
-    m_should_absolutize_url_for_computed_value = false;
-
-    if (style_sheet) {
-        update_style_sheet_resource_context(*style_sheet);
-        style_sheet->register_pending_image_value(*this);
-    }
-}
-
-void ImageStyleValue::update_style_sheet_resource_context(StyleSheetState const& style_sheet)
-{
-    m_style_resource_base_url = style_sheet.style_resource_base_url();
-    m_resolved_url.clear();
-    m_parent_style_sheet_origin_clean = style_sheet.is_origin_clean();
-    m_should_absolutize_url_for_computed_value = true;
-}
-
 void ImageStyleValue::register_client(Client& client) const
 {
     auto result = m_clients.set(&client);

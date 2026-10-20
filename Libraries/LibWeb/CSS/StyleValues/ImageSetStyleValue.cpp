@@ -5,7 +5,6 @@
  */
 
 #include <LibWeb/CSS/Resolution.h>
-#include <LibWeb/CSS/StyleSheetState.h>
 #include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ImageSetStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ResolutionStyleValue.h>
@@ -102,19 +101,6 @@ bool ImageSetStyleValue::is_paintable(GC::Ptr<HTML::DecodedImageData> decoded_im
     if (auto const* selected_image = this->selected_image())
         return selected_image->is_paintable(decoded_image_data);
     return false;
-}
-
-void ImageSetStyleValue::set_style_sheet(StyleSheetState* style_sheet)
-{
-
-    // Propagate the style sheet to candidate images whose type() filter does not exclude them. This ensures the
-    // candidate images register themselves as pending image resources on the style sheet, so their fetches start when
-    // the style sheet is associated with the document, properly delaying the document's load event.
-    for (auto const& option : options()) {
-        if (option.type.has_value() && !HTML::is_supported_image_type(*option.type))
-            continue;
-        const_cast<AbstractImageStyleValue&>(*option.image).set_style_sheet(style_sheet);
-    }
 }
 
 }

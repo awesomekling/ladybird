@@ -29,10 +29,4 @@ ValueComparingRefPtr<StyleValue const> ShorthandStyleValue::longhand(PropertyID 
     return nullptr;
 }
 
-void ShorthandStyleValue::set_style_sheet(StyleSheetState* style_sheet)
-{
-    for (auto& value : values())
-        const_cast<StyleValue&>(*value).set_style_sheet(style_sheet);
-}
-
 }

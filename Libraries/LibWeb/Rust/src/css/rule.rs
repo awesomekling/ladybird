@@ -8,7 +8,7 @@ use crate::css::container_conditions::ContainerConditionsData;
 use crate::css::counter_style::FfiCounterStyle;
 use crate::css::css_string::CssString;
 use crate::css::css_tokenizer::TokenizerInput;
-use crate::css::declaration_block::{DeclarationBlock, visit_declaration_images};
+use crate::css::declaration_block::DeclarationBlock;
 use crate::css::descriptor_block::FfiDescriptorBlock;
 use crate::css::ffi_support::FfiUtf16View;
 use crate::css::font_feature_values::FontFeatureValuesRule;
@@ -912,39 +912,6 @@ pub unsafe extern "C" fn rust_rule_internal_layer_name(
 pub enum FfiRuleTraversalOrder {
     Preorder,
     Postorder,
-}
-
-/// Visit attachment images in postorder, including styles in inactive groups.
-/// Imports register images when their own sheets are attached. Other declaration-bearing rule
-/// types load resources when their values are consumed, rather than preloading them here.
-///
-/// # Safety
-/// The callback must not mutate the rule tree and must retain any values it keeps after returning.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_rule_list_visit_images(
-    list: &NativeRuleList,
-    context: *mut c_void,
-    visit: unsafe extern "C" fn(*mut c_void, *const c_void),
-) {
-    unsafe fn visit_rule(
-        rule: RuleRef<'_>,
-        context: *mut c_void,
-        visit: unsafe extern "C" fn(*mut c_void, *const c_void),
-    ) {
-        let _ = rule.visit_children(&mut |child| {
-            unsafe { visit_rule(child, context, visit) };
-            std::ops::ControlFlow::Continue(())
-        });
-        if rule.rule_type() == NativeRuleType::Style {
-            visit_declaration_images(&rule.cascade_declarations().unwrap(), &mut |value| unsafe {
-                visit(context, std::ptr::from_ref(value).cast());
-            });
-        }
-    }
-    let _ = list.visit_rules(&mut |rule| {
-        unsafe { visit_rule(rule, context, visit) };
-        std::ops::ControlFlow::Continue(())
-    });
 }
 
 #[unsafe(no_mangle)]
