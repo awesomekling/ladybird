@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/ByteBuffer.h>
 #include <AK/Checked.h>
 #include <AK/ScopeGuard.h>
 #include <LibCore/EventLoop.h>
@@ -342,7 +343,9 @@ void Request::set_up_internal_stream_data(DataReceived on_data_available)
 
     m_internal_stream_data->read_notifier->on_activation = [this]() {
         static constexpr size_t buffer_size = 256 * KiB;
-        static thread_local char buffer[buffer_size];
+        // NB: A thread-local array would be zeroed in the thread-local storage of every thread of every process that
+        //     loads this library, so only the threads that read a body allocate the buffer.
+        static thread_local auto buffer = MUST(ByteBuffer::create_uninitialized(buffer_size));
 
         // If the request was stopped while this IPC was in-flight, just bail.
         if (!m_internal_stream_data || !m_internal_stream_data->read_stream)
@@ -360,7 +363,7 @@ void Request::set_up_internal_stream_data(DataReceived on_data_available)
                 bytes_to_read = min(bytes_to_read, *m_internal_stream_data->body_delivery_remaining_byte_count);
             }
 
-            auto result = m_internal_stream_data->read_stream->read_some({ buffer, bytes_to_read });
+            auto result = m_internal_stream_data->read_stream->read_some(buffer.bytes().trim(bytes_to_read));
             if (result.is_error() && (!result.error().is_errno() || (result.error().is_errno() && result.error().code() != EINTR)))
                 break;
             if (result.is_error())
