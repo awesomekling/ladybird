@@ -61,8 +61,6 @@ impl QualifiedName {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NameSelector {
     pub name: RetainedUtf16FlyString,
-    /// The ASCII-lowercase name used for quirks-mode id and class matching.
-    pub lowercase_name: RetainedUtf16FlyString,
 }
 
 impl NameSelector {
@@ -73,10 +71,26 @@ impl NameSelector {
         self.name.optional_raw()
     }
 
-    /// The interned identity of this name's ASCII-lowercase folding.
+    /// The interned identity of this name's ASCII-lowercase folding, which quirks-mode documents
+    /// match ids and classes by.
     #[must_use]
     pub fn interned_lowercase_name_identity(&self) -> Option<usize> {
-        self.lowercase_name.optional_raw()
+        let raw = self.name.optional_raw()?;
+        let units = self.name.to_utf16();
+        if units.iter().all(|&unit| ascii_lowercase(unit) == unit) {
+            return Some(raw);
+        }
+        // NB: Only quirks-mode documents ask, so a name is folded the first time one does rather than as every sheet
+        //     is parsed. The table keeps the name it is keyed by alive, so that no other name takes its identity.
+        static LOWERCASE_NAMES: std::sync::LazyLock<
+            std::sync::Mutex<std::collections::HashMap<usize, (RetainedUtf16FlyString, RetainedUtf16FlyString)>>,
+        > = std::sync::LazyLock::new(Default::default);
+        let mut names = LOWERCASE_NAMES.lock().unwrap();
+        let (_, lowercase_name) = names.entry(raw).or_insert_with(|| {
+            let lowercase = units.iter().map(|&unit| ascii_lowercase(unit)).collect::<Vec<_>>();
+            (self.name.clone(), RetainedUtf16FlyString::from_utf16(&lowercase))
+        });
+        lowercase_name.optional_raw()
     }
 }
 

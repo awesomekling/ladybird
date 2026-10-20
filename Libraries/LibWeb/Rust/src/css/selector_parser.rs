@@ -62,14 +62,21 @@ fn lowercase(value: &[u16]) -> SelectorString {
         .into()
 }
 
-fn selector_name(value: &[u16]) -> NameSelector {
+/// A qualified name's name, with its ASCII-lowercase folding.
+fn qualified_name_parts(value: &[u16]) -> (RetainedUtf16FlyString, RetainedUtf16FlyString) {
     let name = RetainedUtf16FlyString::from_utf16(value);
     let lowercase_name = if value.iter().all(|&unit| ascii_lowercase(unit) == unit) {
         name.clone()
     } else {
         RetainedUtf16FlyString::from_utf16(&value.iter().map(|&unit| ascii_lowercase(unit)).collect::<Vec<_>>())
     };
-    NameSelector { name, lowercase_name }
+    (name, lowercase_name)
+}
+
+fn selector_name(value: &[u16]) -> NameSelector {
+    NameSelector {
+        name: RetainedUtf16FlyString::from_utf16(value),
+    }
 }
 
 fn pseudo_class_selector(pseudo_class: PseudoClassType) -> PseudoClassSelector {
@@ -485,7 +492,7 @@ impl<'a> SelectorParser<'a> {
                 stream.position = original;
                 return None;
             }
-            let NameSelector { name, lowercase_name } = selector_name(parsed_name);
+            let (name, lowercase_name) = qualified_name_parts(parsed_name);
             return Some(QualifiedName {
                 namespace_type: NamespaceType::None,
                 namespace: RetainedUtf16FlyString::none(),
@@ -524,7 +531,7 @@ impl<'a> SelectorParser<'a> {
                 stream.position = original;
                 return None;
             }
-            let NameSelector { name, lowercase_name } = selector_name(parsed_name);
+            let (name, lowercase_name) = qualified_name_parts(parsed_name);
             return Some(QualifiedName {
                 namespace_type,
                 namespace: if namespace_type == NamespaceType::Named {
@@ -540,7 +547,7 @@ impl<'a> SelectorParser<'a> {
             stream.position = original;
             return None;
         }
-        let NameSelector { name, lowercase_name } = selector_name(first_name);
+        let (name, lowercase_name) = qualified_name_parts(first_name);
         Some(QualifiedName {
             namespace_type: NamespaceType::Default,
             namespace: RetainedUtf16FlyString::none(),
