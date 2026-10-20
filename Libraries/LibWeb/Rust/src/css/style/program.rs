@@ -217,6 +217,9 @@ struct Sheet {
     live: bool,
 }
 
+/// The version slot of a rule that holds the version a style rule starts with, which it has no slot for.
+const DEFAULT_STYLE_RULE_VERSION_SLOT: u32 = u32::MAX;
+
 #[derive(Clone)]
 struct Rule {
     sheet: SheetID,
@@ -414,7 +417,7 @@ impl StyleSheetProgram {
                 visited += 1;
                 atoms.insert(declaration.name);
             }
-            let version = self.rule_versions.get(rule.version_slot as usize);
+            let version = self.stored_rule_version(rule);
             if let Some(name) = version.declared_name {
                 atoms.insert(name);
             }
@@ -858,7 +861,11 @@ impl StyleSheetProgram {
         live: bool,
     ) -> RuleID {
         let id = RuleID(u32::try_from(self.rules.len()).expect("rule identity space exhausted"));
-        let version_slot = self.allocate_rule_version(RuleVersion::new(id, kind));
+        // NB: Most style rules of a large sheet never match, and keep the version they start with.
+        let version_slot = match kind {
+            RuleKind::Style => DEFAULT_STYLE_RULE_VERSION_SLOT,
+            _ => self.allocate_rule_version(RuleVersion::new(id, kind)),
+        };
         let previous_rule_capacity = self.rules.shallow_capacity_bytes();
         self.rules.push(Rule {
             sheet,
@@ -950,7 +957,7 @@ impl StyleSheetProgram {
 
     pub fn live_selector_programs(&self) -> impl Iterator<Item = (RuleID, SelectorProgramID)> + '_ {
         self.rules.iter().enumerate().filter_map(|(index, rule)| {
-            let version = self.rule_versions.get(rule.version_slot as usize);
+            let version = self.stored_rule_version(rule);
             (rule.live).then_some((
                 RuleID(u32::try_from(index).expect("rule identity space exhausted")),
                 version.selector_program?,
@@ -960,8 +967,35 @@ impl StyleSheetProgram {
 
     #[must_use]
     pub fn rule_version(&self, rule: RuleID) -> RuleVersion {
-        self.rule_versions
-            .get(self.rules[rule.0 as usize].version_slot as usize)
+        let mut version = self.stored_rule_version(&self.rules[rule.0 as usize]);
+        version.rule = rule;
+        version
+    }
+
+    /// The version `rule` holds, which names rule zero where the rule holds the default version of a style rule.
+    fn stored_rule_version(&self, rule: &Rule) -> RuleVersion {
+        match rule.version_slot {
+            DEFAULT_STYLE_RULE_VERSION_SLOT => RuleVersion::new(RuleID(0), RuleKind::Style),
+            slot => self.rule_versions.get(slot as usize),
+        }
+    }
+
+    /// Stores `contents` as the version of `rule`, giving a rule that held the default version of a style rule a
+    /// slot of its own, and answers whether the selector program changed.
+    fn store_rule_version(&mut self, rule: RuleID, contents: RuleVersion) -> bool {
+        assert_eq!(contents.rule, rule, "a rule version must name its own rule");
+        let slot = self.rules[rule.0 as usize].version_slot;
+        if slot == DEFAULT_STYLE_RULE_VERSION_SLOT {
+            if contents == RuleVersion::new(rule, RuleKind::Style) {
+                return false;
+            }
+            let slot = self.allocate_rule_version(contents);
+            self.rules[rule.0 as usize].version_slot = slot;
+            return contents.selector_program.is_some();
+        }
+        let selector_changed = self.rule_versions.get(slot as usize).selector_program != contents.selector_program;
+        self.rule_versions.set(slot as usize, contents);
+        selector_changed
     }
 
     /// Replace one rule's semantic contents after the transaction carrying its previous value has
@@ -969,10 +1003,7 @@ impl StyleSheetProgram {
     /// did not change are preserved, so a consumer can tell a declaration edit from a selector edit
     /// by comparing components.
     pub fn replace_rule_version(&mut self, rule: RuleID, contents: RuleVersion) {
-        assert_eq!(contents.rule, rule, "a rule version must name its own rule");
-        let slot = self.rules[rule.0 as usize].version_slot;
-        let selector_changed = self.rule_versions.get(slot as usize).selector_program != contents.selector_program;
-        self.rule_versions.set(slot as usize, contents);
+        let selector_changed = self.store_rule_version(rule, contents);
         self.bump_rule_sheet_dispatch_version(rule);
         if selector_changed {
             self.bump_routing_liveness_version();
@@ -984,10 +1015,7 @@ impl StyleSheetProgram {
     /// `replace_rule_version` does, without changing its sheet's dispatch version or the program's
     /// version: the ranked dispatches of the sheet take the rule in place (see `extend_with_late_rules`).
     pub(crate) fn replace_woken_rule_version(&mut self, rule: RuleID, contents: RuleVersion) {
-        assert_eq!(contents.rule, rule, "a rule version must name its own rule");
-        let slot = self.rules[rule.0 as usize].version_slot;
-        let selector_changed = self.rule_versions.get(slot as usize).selector_program != contents.selector_program;
-        self.rule_versions.set(slot as usize, contents);
+        let selector_changed = self.store_rule_version(rule, contents);
         if selector_changed {
             self.bump_routing_liveness_version();
         }
@@ -996,9 +1024,7 @@ impl StyleSheetProgram {
     }
 
     pub(crate) fn replace_reserved_rule_version(&mut self, rule: RuleID, contents: RuleVersion) {
-        assert_eq!(contents.rule, rule, "a rule version must name its own rule");
-        let slot = self.rules[rule.0 as usize].version_slot;
-        self.rule_versions.set(slot as usize, contents);
+        self.store_rule_version(rule, contents);
         self.bump_rule_sheet_dispatch_version(rule);
     }
 
@@ -1926,6 +1952,10 @@ mod tests {
     fn repeated_rule_version_replacement_keeps_program_storage_flat() {
         let (mut program, sheet) = program_with_sheet();
         let rule = program.append_rule(sheet, None, RuleKind::Style);
+        // NB: A style rule takes a version slot as it first leaves the version it starts with.
+        let mut contents = program.rule_version(rule);
+        contents.selector_program = Some(SelectorProgramID(1));
+        program.replace_rule_version(rule, contents);
         let initial_bytes = program.capacity_bytes();
 
         for index in 0..128_u32 {
