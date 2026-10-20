@@ -239,7 +239,7 @@ pub struct CompoundSelector {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompiledSelector {
     /// Where each compound's simple selectors end in `simple_selectors`, with how it relates to the compound before.
-    compound_headers: Box<[CompoundHeader]>,
+    compound_headers: CompoundHeaders,
     /// The simple selectors of every compound, in one allocation rather than one per compound.
     simple_selectors: Box<[SimpleSelector]>,
     /// The pseudo-element required on the initial match target, if this selector ends in one.
@@ -252,6 +252,55 @@ struct CompoundHeader {
     combinator: Combinator,
     is_implicit_universal_anchor: bool,
 }
+
+/// The compound headers of a selector, held in the selector where they are as few as those of almost every selector.
+#[derive(Clone, Debug)]
+enum CompoundHeaders {
+    Inline { len: u8, headers: [CompoundHeader; 3] },
+    Spilled(Box<Box<[CompoundHeader]>>),
+}
+
+impl CompoundHeaders {
+    fn new(headers: &[CompoundHeader]) -> Self {
+        match *headers {
+            [] | [_] | [_, _] | [_, _, _] => {
+                let mut inline = [CompoundHeader {
+                    end: 0,
+                    combinator: Combinator::None,
+                    is_implicit_universal_anchor: false,
+                }; 3];
+                inline[..headers.len()].copy_from_slice(headers);
+                Self::Inline {
+                    len: headers.len() as u8,
+                    headers: inline,
+                }
+            }
+            _ => Self::Spilled(Box::new(headers.into())),
+        }
+    }
+}
+
+impl std::ops::Deref for CompoundHeaders {
+    type Target = [CompoundHeader];
+
+    fn deref(&self) -> &[CompoundHeader] {
+        match self {
+            Self::Inline { len, headers } => &headers[..usize::from(*len)],
+            Self::Spilled(headers) => headers,
+        }
+    }
+}
+
+impl PartialEq for CompoundHeaders {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+
+impl Eq for CompoundHeaders {}
+
+// The inline headers take no more than the two words of a boxed slice.
+const _: () = assert!(size_of::<CompoundHeaders>() == 2 * size_of::<usize>());
 
 /// One compound of a `CompiledSelector`, as `CompoundSelector` holds an owned one.
 #[derive(Clone, Copy, Debug)]
@@ -430,9 +479,9 @@ impl CompiledSelector {
                     is_implicit_universal_anchor: compound.is_implicit_universal_anchor,
                 }
             })
-            .collect();
+            .collect::<smallvec::SmallVec<[CompoundHeader; 3]>>();
         Self {
-            compound_headers,
+            compound_headers: CompoundHeaders::new(&compound_headers),
             simple_selectors: simple_selectors.into_boxed_slice(),
             target_pseudo_element,
         }
