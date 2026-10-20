@@ -15,21 +15,27 @@
 
 namespace Web {
 
-NonnullRefPtr<CSS::StyleSheetState> parse_css_stylesheet(CSS::Parser::ParsingParams const& context, StringView css, Optional<::URL::URL> location, CSS::RustMediaList media_list)
+static NonnullRefPtr<CSS::StyleSheetState> parse_css_stylesheet_from_source(CSS::Parser::ParsingParams const& context, Utf16String source, Optional<::URL::URL> location, CSS::RustMediaList media_list)
 {
-    return parse_css_stylesheet(context, Utf16String::from_utf8(css), move(location), move(media_list));
-}
-
-NonnullRefPtr<CSS::StyleSheetState> parse_css_stylesheet(CSS::Parser::ParsingParams const& context, Utf16View css, Optional<::URL::URL> location, CSS::RustMediaList media_list)
-{
-    if (css.is_empty()) {
+    if (source.is_empty()) {
         auto style_sheet = CSS::StyleSheetState::create(CSS::RustRuleList {}, nullptr, move(media_list), location);
         style_sheet->set_source_text({});
         return style_sheet;
     }
-    auto style_sheet = CSS::Parser::Parser { context }.parse_as_css_stylesheet(css, location, move(media_list));
-    style_sheet->set_source_text(Utf16String::from_utf16(css));
+    auto style_sheet = CSS::Parser::Parser { context }.parse_as_css_stylesheet(source, location, move(media_list));
+    style_sheet->set_source_text(move(source));
     return style_sheet;
+}
+
+NonnullRefPtr<CSS::StyleSheetState> parse_css_stylesheet(CSS::Parser::ParsingParams const& context, StringView css, Optional<::URL::URL> location, CSS::RustMediaList media_list)
+{
+    // NB: The converted text is the sheet's source, rather than a copy of it.
+    return parse_css_stylesheet_from_source(context, Utf16String::from_utf8(css), move(location), move(media_list));
+}
+
+NonnullRefPtr<CSS::StyleSheetState> parse_css_stylesheet(CSS::Parser::ParsingParams const& context, Utf16View css, Optional<::URL::URL> location, CSS::RustMediaList media_list)
+{
+    return parse_css_stylesheet_from_source(context, css.is_empty() ? Utf16String {} : Utf16String::from_utf16(css), move(location), move(media_list));
 }
 
 CSS::RustDeclarationBlock parse_css_property_declaration_block(CSS::Parser::ParsingParams const& context, Utf16View css)
