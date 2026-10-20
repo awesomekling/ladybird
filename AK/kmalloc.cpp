@@ -19,6 +19,10 @@
 #    ifdef AK_OS_MACOS
 #        include <mach/vm_statistics.h>
 #    endif
+#    if defined(AK_OS_LINUX) || defined(AK_OS_MACOS)
+#        include <sys/mman.h>
+#        include <unistd.h>
+#    endif
 #endif
 
 #ifdef AK_USE_SYSTEM_ALLOCATOR_INSTRUMENTED
@@ -176,6 +180,53 @@ void ak_kfree(void* ptr)
     mi_free(ptr);
 }
 
+#    if defined(AK_OS_LINUX) || defined(AK_OS_MACOS)
+// A page of large blocks stays committed while any one of them is in use, and the blocks freed around that one keep
+// whatever they held resident. The allocator reads nothing of a freed block but the free list link at its start, so the
+// rest of it can go back to the kernel.
+struct FreedBlockPurge {
+    uintptr_t page_size { static_cast<uintptr_t>(sysconf(_SC_PAGESIZE)) };
+    uintptr_t block_size { 0 };
+    uintptr_t next_block { 0 };
+    uintptr_t area_end { 0 };
+
+    void purge_blocks_before(uintptr_t end)
+    {
+        for (auto block = next_block; block < end; block += block_size) {
+            auto start = (block + sizeof(void*) + page_size - 1) & ~(page_size - 1);
+            auto stop = (block + block_size) & ~(page_size - 1);
+            if (start < stop)
+                madvise(reinterpret_cast<void*>(start), stop - start, MADV_FREE);
+        }
+    }
+};
+
+static bool purge_freed_blocks(mi_heap_t const*, mi_heap_area_t const* area, void* block, size_t, void* argument)
+{
+    auto& purge = *static_cast<FreedBlockPurge*>(argument);
+    if (!block) {
+        // The blocks of an area are visited in address order, so the ones after the last visited are free.
+        purge.purge_blocks_before(purge.area_end);
+        purge.block_size = area->full_block_size;
+        purge.next_block = reinterpret_cast<uintptr_t>(area->blocks);
+        purge.area_end = purge.block_size > purge.page_size ? purge.next_block + area->committed : 0;
+        return true;
+    }
+    if (!purge.area_end)
+        return true;
+    purge.purge_blocks_before(reinterpret_cast<uintptr_t>(block));
+    purge.next_block = reinterpret_cast<uintptr_t>(block) + purge.block_size;
+    return true;
+}
+
+static void purge_freed_blocks(mi_heap_t* heap)
+{
+    FreedBlockPurge purge;
+    mi_heap_visit_blocks(heap, true, purge_freed_blocks, &purge);
+    purge.purge_blocks_before(purge.area_end);
+}
+#    endif
+
 void ak_kmalloc_collect()
 {
     // mi_collect() only visits the calling thread's default heap, so the thread-local partitions have to be collected
@@ -186,6 +237,14 @@ void ak_kmalloc_collect()
         mi_heap_collect(s_string_heap, true);
 
     mi_collect(true);
+
+#    if defined(AK_OS_LINUX) || defined(AK_OS_MACOS)
+    purge_freed_blocks(mi_heap_get_default());
+    if (s_buffer_heap)
+        purge_freed_blocks(s_buffer_heap);
+    if (s_string_heap)
+        purge_freed_blocks(s_string_heap);
+#    endif
 }
 
 #endif
