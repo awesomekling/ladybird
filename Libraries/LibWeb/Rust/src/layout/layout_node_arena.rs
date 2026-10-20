@@ -1094,7 +1094,9 @@ struct StyleNodeTables {
     /// The maps are borrowed for writing only by the publication entry points, which can run while a
     /// tree build is under way: an element styled on the build's behalf replaces its style record,
     /// which republishes the resources its style names. No reader holds a borrow across a host call.
-    svg_attribute_facts: RefCell<HashMap<StyleNodeID, super::svg_formatting_context::FfiSvgAttributeFacts>>,
+    /// Shared between the elements that published the same facts, which most of a document's icons do.
+    svg_attribute_facts:
+        RefCell<HashMap<StyleNodeID, std::sync::Arc<super::svg_formatting_context::FfiSvgAttributeFacts>>>,
     /// The `points` list each <polyline> and <polygon> published beside its facts.
     svg_points: RefCell<HashMap<StyleNodeID, std::sync::Arc<[super::svg_formatting_context::FfiFloatPoint]>>>,
     /// The elements carrying each anchor name, in tree order. The DOM's registry republishes a
@@ -1331,6 +1333,27 @@ pub(crate) struct LayoutNodeArena {
     /// counter is used in, not from the scope the style was written in.
     counter_styles: RefCell<crate::css::counter_representation::CounterStyleRegistry>,
     style_node_tables: StyleNodeTables,
+}
+
+/// `facts` in an `Arc`, which is one of the few the arena published last where they are the same. A document publishes
+/// its elements in tree order, and its icons alternate an `<svg>` with the same few shapes, so a short memory finds most.
+fn shared_svg_attribute_facts(
+    facts: super::svg_formatting_context::FfiSvgAttributeFacts,
+) -> std::sync::Arc<super::svg_formatting_context::FfiSvgAttributeFacts> {
+    const REMEMBERED: usize = 4;
+    type Remembered = [Option<std::sync::Arc<super::svg_formatting_context::FfiSvgAttributeFacts>>; REMEMBERED];
+    thread_local! {
+        static RECENT: RefCell<(Remembered, usize)> = const { RefCell::new(([const { None }; REMEMBERED], 0)) };
+    }
+    RECENT.with_borrow_mut(|(recent, next)| {
+        if let Some(shared) = recent.iter().flatten().find(|shared| ***shared == facts) {
+            return std::sync::Arc::clone(shared);
+        }
+        let shared = std::sync::Arc::new(facts);
+        recent[*next] = Some(std::sync::Arc::clone(&shared));
+        *next = (*next + 1) % REMEMBERED;
+        shared
+    })
 }
 
 impl LayoutNodeArena {
@@ -3152,7 +3175,7 @@ impl LayoutNodeArena {
             .svg_attribute_facts
             .borrow()
             .get(&style_node)
-            .copied()
+            .map(|facts| **facts)
             .unwrap_or_default()
     }
 
@@ -3217,7 +3240,7 @@ impl LayoutNodeArena {
             .style_node_tables
             .svg_attribute_facts
             .borrow_mut()
-            .insert(style_node, facts)
+            .insert(style_node, shared_svg_attribute_facts(facts))
             .map_or([0; PUBLISHED_REFERENCE_ATOM_COUNT], |published| {
                 Self::published_reference_atoms(&published)
             });
@@ -3238,6 +3261,7 @@ impl LayoutNodeArena {
         let Some(facts) = published.get_mut(&style_node) else {
             return;
         };
+        let facts = std::sync::Arc::make_mut(facts);
         let replaced = Self::published_reference_atoms(facts);
         [
             facts.mask_reference_atom,
