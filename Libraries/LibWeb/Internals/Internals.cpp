@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/AnyOf.h>
 #include <AK/HashTable.h>
 #include <AK/JsonObject.h>
 #include <AK/NumericLimits.h>
@@ -2599,6 +2600,13 @@ GC::Ref<JS::Object> Internals::computed_values_stats()
 void Internals::update_style()
 {
     window().associated_document().update_style();
+}
+
+bool Internals::update_layout_and_check_images_are_fetching()
+{
+    auto& document = window().associated_document();
+    document.update_layout(DOM::UpdateLayoutReason::Debugging);
+    return any_of(document.shared_resource_requests(), [](auto const& entry) { return entry.value && entry.value->is_fetching(); });
 }
 
 void Internals::set_user_style(Utf16String const& source)

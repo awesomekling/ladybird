@@ -268,13 +268,21 @@ function afterFontsAndPaint(callback) {{
     document.fonts.ready.then(() => requestAnimationFrame(() => requestAnimationFrame(callback)));
 }}
 
+// A style sheet's images load as layout reaches them, so the ones a change made after the load event shows may still
+// be fetching, where the load event would have waited for them.
+function afterImageFetches(callback) {{
+    if (!internals.updateLayoutAndCheckImagesAreFetching())
+        return callback();
+    setTimeout(() => afterImageFetches(callback), 10);
+}}
+
 if (!hasTestWaitClass()) {{
     afterFontsAndPaint(() => internals.signalTestIsDone("PASS"));
 }} else {{
     const observer = new MutationObserver(() => {{
         if (!hasTestWaitClass()) {{
             observer.disconnect();
-            internals.signalTestIsDone("PASS");
+            afterImageFetches(() => internals.signalTestIsDone("PASS"));
         }}
     }});
 

@@ -291,6 +291,7 @@ public:
     void reset_style_ffi_counters();
     GC::Ref<JS::Object> style_group_sharing_info(DOM::Element&);
     void update_style();
+    bool update_layout_and_check_images_are_fetching();
     void set_user_style(Utf16String const& source);
     void set_preferred_color_scheme(Utf16String const& color_scheme);
     void set_page_focus(bool has_focus);

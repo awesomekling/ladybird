@@ -349,6 +349,9 @@ interface Internals {
     object styleGroupSharingInfo(Element element);
     // Flushes pending style work without forcing layout.
     undefined updateStyle();
+    // Updates layout, which starts loading the images it lays out, and answers whether the document still fetches any
+    // image.
+    boolean updateLayoutAndCheckImagesAreFetching();
     undefined setUserStyle(DOMString source);
     undefined setPreferredColorScheme(DOMString colorScheme);
     // Simulates the window gaining or losing focus (e.g. browser chrome or another window taking focus).
