@@ -158,8 +158,29 @@ pub(super) fn compact<T: Clone>(values: &mut Vec<T>) {
     }
 }
 
+/// Moves `values` into an allocation of its length and some room to grow, for a vector that may be extended later, as
+/// one rule after another arrives: an eighth of its length, up to 4096 values. Extending a vector of exactly its length
+/// would copy all of it into a larger allocation.
+pub(super) fn compact_leaving_room<T: Clone>(values: &mut Vec<T>) {
+    let target = values.len() + (values.len() / 8).min(4096);
+    if values.capacity() > target {
+        let mut compacted = Vec::with_capacity(target);
+        compacted.extend_from_slice(values);
+        *values = compacted;
+    }
+}
+
 impl<T: Clone + Eq + Hash> SharedVector<T> {
     pub(super) fn share(&mut self, pool: &mut SharedVectorPool<T>) {
+        self.share_with(pool, compact);
+    }
+
+    /// Shares the vector as `share` does, leaving room to extend it (see `compact_leaving_room`).
+    pub(super) fn share_leaving_room(&mut self, pool: &mut SharedVectorPool<T>) {
+        self.share_with(pool, compact_leaving_room);
+    }
+
+    fn share_with(&mut self, pool: &mut SharedVectorPool<T>, compact: fn(&mut Vec<T>)) {
         let Storage::Owned(values) = &self.storage else { return };
         if values.is_empty() {
             return;

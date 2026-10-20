@@ -3734,11 +3734,11 @@ impl RouteColumns {
                 data.compact();
                 // Offsets and lengths can agree even when route keys or rule bindings differ.
                 // Share each immutable range column independently of the complete registry.
-                data.paths.share(&mut pools.route_ranges);
-                data.origins.share(&mut pools.route_ranges);
-                data.origin_requirements.share(&mut pools.route_ranges);
-                data.parents.share(&mut pools.route_ranges);
-                data.waypoints.share(&mut pools.route_ranges);
+                data.paths.share_leaving_room(&mut pools.route_ranges);
+                data.origins.share_leaving_room(&mut pools.route_ranges);
+                data.origin_requirements.share_leaving_room(&mut pools.route_ranges);
+                data.parents.share_leaving_room(&mut pools.route_ranges);
+                data.waypoints.share_leaving_room(&mut pools.route_ranges);
                 let mut memory = MemoryLease::new(MemoryCategory::RoutingRegistry);
                 memory.resize_required_to(&mut pools.route_columns.memory, data.capacity_bytes());
                 let shared = Arc::new(SharedRouteColumns {
@@ -3791,15 +3791,16 @@ impl RouteColumnData {
 
     /// Drops the growth slack of the columns before they are shared and frozen.
     fn compact(&mut self) {
-        use super::shared_vector::compact;
-        compact(&mut self.headers);
+        use super::shared_vector::{compact, compact_leaving_room};
+        // NB: The columns every rule's routes extend keep room for the rules that arrive later, as dormant rules wake.
+        compact_leaving_room(&mut self.headers);
         compact(&mut self.anchors);
-        compact(&mut self.entry_facts);
-        compact(&mut self.inverse_steps);
-        compact(&mut self.keys);
+        compact_leaving_room(&mut self.entry_facts);
+        compact_leaving_room(&mut self.inverse_steps);
+        compact_leaving_room(&mut self.keys);
         compact(&mut self.relational);
         compact(&mut self.sibling_first);
-        compact(&mut self.canonical_next);
+        compact_leaving_room(&mut self.canonical_next);
         self.canonical_route_heads.shrink_to_fit();
     }
 
