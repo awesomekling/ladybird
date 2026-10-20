@@ -161,7 +161,9 @@ impl InlineContent {
                 if fragment.is_fully_truncated {
                     continue;
                 }
-                fragment.record.glyph_run = fragment.glyphs.take().map(|glyph_data| {
+                fragment.record.glyph_run = fragment.glyphs.take().map(|mut glyph_data| {
+                    // NB: Merging the runs of a fragment grew its glyphs, which are final now.
+                    glyph_data.glyphs.shrink_to_fit();
                     let bounding_box = libgfx_rust::FloatRect::from_array(
                         libgfx_rust::text_layout::glyph_run_bounding_box(&glyph_data.font, &glyph_data.glyphs, 1.0),
                     );

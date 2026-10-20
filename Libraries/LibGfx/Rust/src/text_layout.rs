@@ -141,6 +141,19 @@ impl GlyphBuffer {
             Self::Shared(_) => unreachable!(),
         }
     }
+
+    /// Moves the glyphs of an owned buffer that has room beyond them into an allocation of their size, for a buffer
+    /// that is done growing.
+    ///
+    /// NB: The allocator keeps a block that shrinks by less than half where it is, so shrinking the vector in place
+    ///     would give nothing back.
+    pub fn shrink_to_fit(&mut self) {
+        if let Self::Owned(glyphs) = self
+            && glyphs.capacity() > glyphs.len()
+        {
+            *self = Self::Shared(Arc::from(std::mem::take(glyphs)));
+        }
+    }
 }
 
 impl Default for GlyphBuffer {
