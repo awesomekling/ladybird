@@ -250,19 +250,23 @@ impl<'a> Iterator for SlotValues<'a> {
     }
 }
 
-// NB: Inline changes avoid a separate allocation for each sparse drive.
-#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 enum SlotStorage {
     Dense(Arc<DenseSlotStorage>),
-    Delta {
-        base: Arc<DenseSlotStorage>,
-        changes: SmallVec<[ChangedSlot; 16]>,
-        changed_bits: [u8; LONGHAND_BITMAP_BYTES],
-        preserve_sources: bool,
-        // Only consumers explicitly asking for the contiguous ABI span pay for it.
-        view: OnceLock<Box<[SharedPayload; LONGHAND_COUNT]>>,
-    },
+    // NB: A frozen table is dense, so the changes of a working one are kept apart, where the many frozen tables do not
+    //     pay for them.
+    Delta(Box<SlotDelta>),
+}
+
+// NB: Inline changes avoid a separate allocation for each sparse drive.
+#[derive(Clone)]
+struct SlotDelta {
+    base: Arc<DenseSlotStorage>,
+    changes: SmallVec<[ChangedSlot; 16]>,
+    changed_bits: [u8; LONGHAND_BITMAP_BYTES],
+    preserve_sources: bool,
+    // Only consumers explicitly asking for the contiguous ABI span pay for it.
+    view: OnceLock<Box<[SharedPayload; LONGHAND_COUNT]>>,
 }
 
 impl SlotStorage {
@@ -273,13 +277,14 @@ impl SlotStorage {
     fn slot(&self, index: usize) -> (&RetainedStyleValueData, i32) {
         match self {
             Self::Dense(storage) => (&storage.slots[index], storage.source_slot(index)),
-            Self::Delta {
-                base,
-                changes,
-                changed_bits,
-                preserve_sources,
-                ..
-            } => {
+            Self::Delta(delta) => {
+                let SlotDelta {
+                    base,
+                    changes,
+                    changed_bits,
+                    preserve_sources,
+                    ..
+                } = &**delta;
                 if bitmap_bit(changed_bits, index) {
                     let change = &changes[bitmap_rank(changed_bits, index)];
                     return (change.value.as_ref().unwrap_or(&base.slots[index]), change.source_slot);
@@ -294,15 +299,15 @@ impl SlotStorage {
 
     fn change(&mut self, index: usize) -> &mut ChangedSlot {
         let source_slot = self.slot(index).1;
-        let Self::Delta {
+        let Self::Delta(delta) = self else {
+            unreachable!()
+        };
+        let SlotDelta {
             changes,
             changed_bits,
             view,
             ..
-        } = self
-        else {
-            unreachable!()
-        };
+        } = &mut **delta;
         view.take();
         // Changes stay in slot order, so a rank names an entry directly. A drive that writes
         // its slots in order only ever appends.
@@ -324,7 +329,7 @@ impl SlotStorage {
     fn set_value(&mut self, index: usize, value: RetainedStyleValueData) {
         match self {
             Self::Dense(storage) => Arc::make_mut(storage).slots[index] = value,
-            Self::Delta { .. } => self.change(index).value = Some(value),
+            Self::Delta(_) => self.change(index).value = Some(value),
         }
     }
 
@@ -342,8 +347,8 @@ impl SlotStorage {
     fn has_source_slots(&self) -> bool {
         match self {
             Self::Dense(storage) => storage.source_slots.is_some(),
-            Self::Delta { base, changes, .. } => {
-                base.source_slots.is_some() || changes.iter().any(|change| change.source_slot != -1)
+            Self::Delta(delta) => {
+                delta.base.source_slots.is_some() || delta.changes.iter().any(|change| change.source_slot != -1)
             }
         }
     }
@@ -354,7 +359,7 @@ impl SlotStorage {
         }
         match self {
             Self::Dense(storage) => Arc::make_mut(storage).set_source_slot(index, source_slot),
-            Self::Delta { .. } => self.change(index).source_slot = source_slot,
+            Self::Delta(_) => self.change(index).source_slot = source_slot,
         }
     }
 
@@ -363,13 +368,14 @@ impl SlotStorage {
         ffi_stats::count_table_copy(|| (0, 1));
         let (base, changes, changed_bits, old_preserve_sources) = match source {
             Self::Dense(storage) => (storage.clone(), SmallVec::new(), [0; LONGHAND_BITMAP_BYTES], true),
-            Self::Delta {
-                base,
-                changes,
-                changed_bits,
-                preserve_sources,
-                ..
-            } => {
+            Self::Delta(delta) => {
+                let SlotDelta {
+                    base,
+                    changes,
+                    changed_bits,
+                    preserve_sources,
+                    ..
+                } = &**delta;
                 ffi_stats::count_table_copy(|| {
                     let slots = changes.iter().filter_map(|change| change.value.as_ref());
                     (
@@ -388,26 +394,26 @@ impl SlotStorage {
                 (base.clone(), changes, *changed_bits, *preserve_sources)
             }
         };
-        let mut result = Self::Delta {
+        let mut delta = SlotDelta {
             base,
             changes,
             changed_bits,
             preserve_sources: preserve_sources && old_preserve_sources,
             view: OnceLock::new(),
         };
-        if !preserve_sources && let Self::Delta { changes, .. } = &mut result {
-            for change in changes {
+        if !preserve_sources {
+            for change in &mut delta.changes {
                 change.source_slot = -1;
             }
         }
-        result
+        Self::Delta(Box::new(delta))
     }
 
     /// Every slot's value, in slot order, without locating each change by rank.
     fn values(&self) -> SlotValues<'_> {
         let (base, changes) = match self {
             Self::Dense(storage) => (&storage.slots, &[][..]),
-            Self::Delta { base, changes, .. } => (&base.slots, &changes[..]),
+            Self::Delta(delta) => (&delta.base.slots, &delta.changes[..]),
         };
         debug_assert!(changes.windows(2).all(|pair| pair[0].index < pair[1].index));
         SlotValues {
@@ -425,10 +431,10 @@ impl SlotStorage {
     /// everywhere.
     fn values_are_equal(&self, other: &Self, equal: impl Fn(*const c_void, *const c_void) -> bool) -> bool {
         match (self, other) {
-            (Self::Dense(dense), Self::Delta { base, changes, .. })
-            | (Self::Delta { base, changes, .. }, Self::Dense(dense))
-                if Arc::ptr_eq(dense, base) =>
+            (Self::Dense(dense), Self::Delta(delta)) | (Self::Delta(delta), Self::Dense(dense))
+                if Arc::ptr_eq(dense, &delta.base) =>
             {
+                let SlotDelta { base, changes, .. } = &**delta;
                 changes.iter().all(|change| {
                     change.value.as_ref().is_none_or(|value| {
                         equal(
@@ -446,18 +452,11 @@ impl SlotStorage {
                         .zip(second.slots.iter())
                         .all(|(first, second)| equal(first.pointer().cast(), second.pointer().cast()))
             }
-            (
-                Self::Delta {
-                    base: first_base,
-                    changes: first_changes,
-                    ..
-                },
-                Self::Delta {
-                    base: second_base,
-                    changes: second_changes,
-                    ..
-                },
-            ) if Arc::ptr_eq(first_base, second_base) => {
+            (Self::Delta(first_delta), Self::Delta(second_delta))
+                if Arc::ptr_eq(&first_delta.base, &second_delta.base) =>
+            {
+                let (first_base, first_changes) = (&first_delta.base, &first_delta.changes);
+                let second_changes = &second_delta.changes;
                 let mut first = 0;
                 let mut second = 0;
                 while first < first_changes.len() || second < second_changes.len() {
@@ -491,8 +490,8 @@ impl SlotStorage {
     fn value_pointers(&self) -> &[*const c_void] {
         match self {
             Self::Dense(storage) => RetainedStyleValueData::pointer_slice(&storage.slots),
-            Self::Delta { view, .. } => HostShared::as_pointer_slice(
-                view.get_or_init(|| {
+            Self::Delta(delta) => HostShared::as_pointer_slice(
+                delta.view.get_or_init(|| {
                     Box::new(std::array::from_fn(|index| {
                         SharedPayload::new(self.slot(index).0.pointer().cast())
                     }))
@@ -508,15 +507,15 @@ impl SlotStorage {
         }
         let dense = DenseSlotStorage::new_shared();
         let old = std::mem::replace(self, Self::Dense(dense));
-        let Self::Delta {
+        let Self::Delta(delta) = old else {
+            unreachable!()
+        };
+        let SlotDelta {
             base,
             changes,
             preserve_sources,
             ..
-        } = old
-        else {
-            unreachable!()
-        };
+        } = *delta;
         let Self::Dense(dense) = self else { unreachable!() };
         let storage = Arc::get_mut(dense).unwrap();
         let mut owned_bits = [0; LONGHAND_BITMAP_BYTES];
@@ -554,12 +553,14 @@ impl SlotStorage {
     fn owned_capacity_bytes(&self) -> usize {
         match self {
             Self::Dense(_) => size_of::<DenseSlotStorage>(),
-            Self::Delta { changes, view, .. } => {
-                (if changes.spilled() {
-                    changes.capacity() * size_of::<ChangedSlot>()
-                } else {
-                    0
-                }) + view.get().map_or(0, |view| size_of_val(view.as_ref()))
+            Self::Delta(delta) => {
+                size_of::<SlotDelta>()
+                    + (if delta.changes.spilled() {
+                        delta.changes.capacity() * size_of::<ChangedSlot>()
+                    } else {
+                        0
+                    })
+                    + delta.view.get().map_or(0, |view| size_of_val(view.as_ref()))
             }
         }
     }
@@ -998,15 +999,15 @@ impl ComputedLonghandTable {
             self.adjust_slot_hash_sum(slot, previous, replacement);
         }
         let source_slot = source.storage.slot(slot).1;
-        if let SlotStorage::Delta {
-            base,
-            changes,
-            changed_bits,
-            view,
-            ..
-        } = &mut self.storage
-            && base.slots[slot].pointer().cast::<c_void>() == replacement
+        if let SlotStorage::Delta(delta) = &mut self.storage
+            && delta.base.slots[slot].pointer().cast::<c_void>() == replacement
         {
+            let SlotDelta {
+                changes,
+                changed_bits,
+                view,
+                ..
+            } = &mut **delta;
             view.take();
             if bitmap_bit(changed_bits, slot) {
                 changes.remove(bitmap_rank(changed_bits, slot));
@@ -1763,7 +1764,7 @@ mod tests {
         kept.set_or_keep_equal(property_id::Z_INDEX, retained_number(7.0), -1);
         kept.set(property_id::OPACITY, retained_number(0.5), -1);
         kept.finish_delta();
-        assert!(matches!(kept.storage, SlotStorage::Delta { .. }));
+        assert!(matches!(kept.storage, SlotStorage::Delta(_)));
         assert!(base.storage.values_are_equal(&kept.storage, equal));
         assert!(kept.storage.values_are_equal(&base.storage, equal));
 
