@@ -22,8 +22,9 @@ pub(crate) struct RecorderState {
     pub(crate) published_recording: Option<Arc<RecordingOutput>>,
     pub(crate) published_hit_test_items: Option<Arc<PublishedHitTestItems>>,
     /// The paint-order tree describing the published recording; a recording that publishes
-    /// appends to it and publication or discarding decides what stays.
-    pub(crate) paint_order_tree: PaintOrderTree,
+    /// appends to it and publication or discarding decides what stays. Forks share it until one of
+    /// them records.
+    pub(crate) paint_order_tree: Arc<PaintOrderTree>,
     /// The recording's workspace, whose tables one recording leaves for the next to reuse.
     pub(crate) scratch: RecordingScratch,
     /// The absolute rects the recordings computed, which stay valid while the document's geometry

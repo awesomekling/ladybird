@@ -412,7 +412,7 @@ pub(crate) fn record_frame(
     let recording = crate::painting::record::traversal::record_display_list(
         &source,
         scratch,
-        paint_order_tree,
+        Arc::make_mut(paint_order_tree),
         viewport,
         &inputs,
         published_recording.clone(),
