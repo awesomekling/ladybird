@@ -27,45 +27,41 @@ displayListTest({
                   @viewport/preamble COPY
                   @viewport/background/hit-test COPY
                   @viewport/scroll-metadata COPY
-                  @viewport/background COPY
-                  @viewport/border COPY
                   BlockContainer<HTML>#html/descendants(background-and-borders) ASSEMBLE
-                  @viewport/foreground/hit-test COPY
-                  @viewport/foreground COPY
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
-                  BlockContainer<HTML>#html ASSEMBLE
+                  BlockContainer<HTML>#html REPLAN
                     BlockContainer<HTML>#html/preamble RECORD (empty)
                     BlockContainer<HTML>#html/background/hit-test RECORD
                     BlockContainer<HTML>#html/scroll-metadata RECORD (empty)
                     BlockContainer<HTML>#html/background RECORD (empty)
                     BlockContainer<HTML>#html/border SKIP
-                    BlockContainer<BODY>#body/descendants(background-and-borders) ASSEMBLE
+                    BlockContainer<BODY>#body/descendants(background-and-borders) REPLAN
                       BlockContainer<BODY>#body/background/hit-test RECORD
                       BlockContainer<BODY>#body/scroll-metadata RECORD (empty)
                       BlockContainer<BODY>#body/background SKIP
                       BlockContainer<BODY>#body/border SKIP
-                      BlockContainer<DIV>#list/descendants(background-and-borders) ASSEMBLE
+                      BlockContainer<DIV>#list/descendants(background-and-borders) REPLAN
                         BlockContainer<DIV>#list/background/hit-test RECORD
                         BlockContainer<DIV>#list/scroll-metadata RECORD (empty)
                         BlockContainer<DIV>#list/background SKIP
                         BlockContainer<DIV>#list/border SKIP
-                        BlockContainer<DIV>#c0.card/descendants(background-and-borders) ASSEMBLE
+                        BlockContainer<DIV>#c0.card/descendants(background-and-borders) REPLAN
                           BlockContainer<DIV>#c0.card/background/hit-test RECORD
                           BlockContainer<DIV>#c0.card/scroll-metadata RECORD (empty)
                           BlockContainer<DIV>#c0.card/background SKIP
                           BlockContainer<DIV>#c0.card/border SKIP
-                        BlockContainer<DIV>#c1.card/descendants(background-and-borders) ASSEMBLE
+                        BlockContainer<DIV>#c1.card/descendants(background-and-borders) REPLAN
                           BlockContainer<DIV>#c1.card/background/hit-test RECORD
                           BlockContainer<DIV>#c1.card/scroll-metadata RECORD (empty)
                           BlockContainer<DIV>#c1.card/background SKIP
                           BlockContainer<DIV>#c1.card/border SKIP
-                          BlockContainer<DIV>#c1-inner.inner/descendants(background-and-borders) ASSEMBLE
+                          BlockContainer<DIV>#c1-inner.inner/descendants(background-and-borders) REPLAN
                             BlockContainer<DIV>#c1-inner.inner/background/hit-test RECORD
                             BlockContainer<DIV>#c1-inner.inner/scroll-metadata RECORD (empty)
                             BlockContainer<DIV>#c1-inner.inner/background SKIP
                             BlockContainer<DIV>#c1-inner.inner/border SKIP
                             InlineNode<SPAN>#c1-text/descendants(background-and-borders) ASSEMBLE
-                        BlockContainer<DIV>#c2.card/descendants(background-and-borders) ASSEMBLE
+                        BlockContainer<DIV>#c2.card/descendants(background-and-borders) REPLAN
                           BlockContainer<DIV>#c2.card/background/hit-test RECORD
                           BlockContainer<DIV>#c2.card/scroll-metadata RECORD (empty)
                           BlockContainer<DIV>#c2.card/background SKIP
@@ -75,7 +71,7 @@ displayListTest({
                         BlockContainer<DIV>#c0.card/descendants(inline-background-and-borders) ASSEMBLE
                         BlockContainer<DIV>#c1.card/descendants(inline-background-and-borders) ASSEMBLE
                           BlockContainer<DIV>#c1-inner.inner/descendants(inline-background-and-borders) ASSEMBLE
-                            InlineNode<SPAN>#c1-text/descendants(inline-background-and-borders) ASSEMBLE
+                            InlineNode<SPAN>#c1-text/descendants(inline-background-and-borders) REPLAN
                               InlineNode<SPAN>#c1-text/background/hit-test RECORD
                               InlineNode<SPAN>#c1-text/scroll-metadata RECORD (empty)
                               InlineNode<SPAN>#c1-text/background SKIP
@@ -83,27 +79,27 @@ displayListTest({
                         BlockContainer<DIV>#c2.card/descendants(inline-background-and-borders) ASSEMBLE
                     BlockContainer<HTML>#html/foreground/hit-test RECORD (empty)
                     BlockContainer<HTML>#html/foreground RECORD (empty)
-                    BlockContainer<BODY>#body/descendants(foreground) ASSEMBLE
+                    BlockContainer<BODY>#body/descendants(foreground) REPLAN
                       BlockContainer<BODY>#body/foreground/hit-test RECORD (empty)
                       BlockContainer<BODY>#body/foreground RECORD (empty)
-                      BlockContainer<DIV>#list/descendants(foreground) ASSEMBLE
+                      BlockContainer<DIV>#list/descendants(foreground) REPLAN
                         BlockContainer<DIV>#list/foreground/hit-test RECORD (empty)
                         BlockContainer<DIV>#list/foreground RECORD (empty)
-                        BlockContainer<DIV>#c0.card/descendants(foreground) ASSEMBLE
+                        BlockContainer<DIV>#c0.card/descendants(foreground) REPLAN
                           BlockContainer<DIV>#c0.card/foreground/hit-test RECORD (empty)
                           BlockContainer<DIV>#c0.card/foreground RECORD (empty)
                           BlockContainer<DIV>#c0.card/outline SKIP
                           BlockContainer<DIV>#c0.card/overlay/hit-test RECORD (empty)
                           BlockContainer<DIV>#c0.card/overlay SKIP
-                        BlockContainer<DIV>#c1.card/descendants(foreground) ASSEMBLE
+                        BlockContainer<DIV>#c1.card/descendants(foreground) REPLAN
                           BlockContainer<DIV>#c1.card/foreground/hit-test RECORD (empty)
                           BlockContainer<DIV>#c1.card/foreground RECORD (empty)
-                          BlockContainer<DIV>#c1-inner.inner/descendants(foreground) ASSEMBLE
+                          BlockContainer<DIV>#c1-inner.inner/descendants(foreground) REPLAN
                             BlockContainer<DIV>#c1-inner.inner/foreground/hit-test RECORD
                             BlockContainer<DIV>#c1-inner.inner/inline-piece RECORD (empty)
                             BlockContainer<DIV>#c1-inner.inner/text-fragment RECORD
                             BlockContainer<DIV>#c1-inner.inner/foreground RECORD (empty)
-                            InlineNode<SPAN>#c1-text/descendants(foreground) ASSEMBLE
+                            InlineNode<SPAN>#c1-text/descendants(foreground) REPLAN
                               InlineNode<SPAN>#c1-text/foreground/hit-test RECORD (empty)
                               InlineNode<SPAN>#c1-text/foreground RECORD (empty)
                               InlineNode<SPAN>#c1-text/outline SKIP
@@ -115,7 +111,7 @@ displayListTest({
                           BlockContainer<DIV>#c1.card/outline SKIP
                           BlockContainer<DIV>#c1.card/overlay/hit-test RECORD (empty)
                           BlockContainer<DIV>#c1.card/overlay SKIP
-                        BlockContainer<DIV>#c2.card/descendants(foreground) ASSEMBLE
+                        BlockContainer<DIV>#c2.card/descendants(foreground) REPLAN
                           BlockContainer<DIV>#c2.card/foreground/hit-test RECORD
                           BlockContainer<DIV>#c2.card/foreground RECORD
                           BlockContainer<DIV>#c2.card/outline SKIP
@@ -128,7 +124,6 @@ displayListTest({
                       BlockContainer<BODY>#body/overlay/hit-test RECORD (empty)
                       BlockContainer<BODY>#body/overlay SKIP
                     BlockContainer<HTML>#html/outline SKIP
-                  @viewport/outline COPY
             `
         },
         {

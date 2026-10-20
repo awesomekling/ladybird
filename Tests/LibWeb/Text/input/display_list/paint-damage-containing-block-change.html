@@ -26,26 +26,22 @@ displayListTest({
                   @viewport/preamble COPY
                   @viewport/background/hit-test COPY
                   @viewport/scroll-metadata COPY
-                  @viewport/background COPY
-                  @viewport/border COPY
                   BlockContainer<HTML>#html/descendants(background-and-borders) ASSEMBLE
-                  @viewport/foreground/hit-test COPY
-                  @viewport/foreground COPY
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
                   BlockContainer<HTML>#html REPLAN
                     BlockContainer<HTML>#html/preamble COPY
                     BlockContainer<HTML>#html/background/hit-test COPY
                     BlockContainer<HTML>#html/scroll-metadata COPY
-                    BlockContainer<HTML>#html/background COPY
-                    BlockContainer<HTML>#html/border COPY
+                    BlockContainer<HTML>#html/background RECORD (empty)
+                    BlockContainer<HTML>#html/border SKIP
                     BlockContainer<BODY>#body/descendants(background-and-borders) REPLAN
                       BlockContainer<BODY>#body/background/hit-test RECORD
                       BlockContainer<BODY>#body/scroll-metadata RECORD (empty)
                       BlockContainer<BODY>#body/background SKIP
                       BlockContainer<BODY>#body/border SKIP
                       BlockContainer<DIV>#parent/descendants(background-and-borders) RECORD
-                    BlockContainer<HTML>#html/foreground/hit-test COPY
-                    BlockContainer<HTML>#html/foreground COPY
+                    BlockContainer<HTML>#html/foreground/hit-test RECORD (empty)
+                    BlockContainer<HTML>#html/foreground RECORD (empty)
                     BlockContainer<BODY>#body/descendants(foreground) REPLAN
                       BlockContainer<BODY>#body/foreground/hit-test RECORD (empty)
                       BlockContainer<BODY>#body/foreground RECORD (empty)
@@ -77,8 +73,7 @@ displayListTest({
                       BlockContainer<DIV>#child/outline SKIP
                       BlockContainer<DIV>#child/overlay/hit-test RECORD (empty)
                       BlockContainer<DIV>#child/overlay SKIP
-                    BlockContainer<HTML>#html/outline COPY
-                  @viewport/outline COPY
+                    BlockContainer<HTML>#html/outline SKIP
             `
         },
         {

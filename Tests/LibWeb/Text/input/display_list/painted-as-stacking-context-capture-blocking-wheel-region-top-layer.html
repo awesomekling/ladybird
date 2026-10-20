@@ -48,13 +48,13 @@ displayListTest({
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
                   BlockContainer(anonymous)/descendants(foreground) ASSEMBLE
                   BlockContainer<DIALOG>#modal/descendants(foreground) ASSEMBLE
-                  BlockContainer<HTML>#html ASSEMBLE
+                  BlockContainer<HTML>#html REPLAN
                     BlockContainer<HTML>#html/preamble RECORD (empty)
                     BlockContainer<HTML>#html/background/hit-test RECORD
                     BlockContainer<HTML>#html/scroll-metadata RECORD (empty)
                     BlockContainer<HTML>#html/background RECORD (empty)
                     BlockContainer<HTML>#html/border SKIP
-                    BlockContainer<BODY>#body/descendants(background-and-borders) ASSEMBLE
+                    BlockContainer<BODY>#body/descendants(background-and-borders) REPLAN
                       BlockContainer<BODY>#body/background/hit-test RECORD
                       BlockContainer<BODY>#body/scroll-metadata RECORD (empty)
                       BlockContainer<BODY>#body/background SKIP
@@ -62,14 +62,14 @@ displayListTest({
                       BlockContainer<DIV>#host/descendants(background-and-borders) ASSEMBLE
                     BlockContainer<HTML>#html/foreground/hit-test RECORD (empty)
                     BlockContainer<HTML>#html/foreground RECORD (empty)
-                    BlockContainer<BODY>#body/descendants(foreground) ASSEMBLE
+                    BlockContainer<BODY>#body/descendants(foreground) REPLAN
                       BlockContainer<BODY>#body/foreground/hit-test RECORD (empty)
                       BlockContainer<BODY>#body/foreground RECORD (empty)
                       BlockContainer<DIV>#host/descendants(foreground) ASSEMBLE
                       BlockContainer<BODY>#body/outline SKIP
                       BlockContainer<BODY>#body/overlay/hit-test RECORD (empty)
                       BlockContainer<BODY>#body/overlay SKIP
-                    BlockContainer<DIV>#host ASSEMBLE
+                    BlockContainer<DIV>#host REPLAN
                       BlockContainer<DIV>#host/background/hit-test RECORD
                       BlockContainer<DIV>#host/scroll-metadata RECORD
                       BlockContainer<DIV>#host/background SKIP
@@ -80,7 +80,7 @@ displayListTest({
                       BlockContainer<DIV>#host/overlay/hit-test RECORD (empty)
                       BlockContainer<DIV>#host/overlay SKIP
                     BlockContainer<HTML>#html/outline SKIP
-                  BlockContainer(anonymous) ASSEMBLE
+                  BlockContainer(anonymous) REPLAN
                     BlockContainer(anonymous)/preamble RECORD (empty)
                     BlockContainer(anonymous)/background/hit-test RECORD
                     BlockContainer(anonymous)/scroll-metadata RECORD (empty)
@@ -89,7 +89,7 @@ displayListTest({
                     BlockContainer(anonymous)/foreground/hit-test RECORD (empty)
                     BlockContainer(anonymous)/foreground RECORD (empty)
                     BlockContainer(anonymous)/outline SKIP
-                  BlockContainer<DIALOG>#modal ASSEMBLE
+                  BlockContainer<DIALOG>#modal REPLAN
                     BlockContainer<DIALOG>#modal/preamble RECORD (empty)
                     BlockContainer<DIALOG>#modal/background/hit-test RECORD
                     BlockContainer<DIALOG>#modal/scroll-metadata RECORD
@@ -135,24 +135,13 @@ displayListTest({
                     BlockContainer<HTML>#html/preamble COPY
                     BlockContainer<HTML>#html/background/hit-test COPY
                     BlockContainer<HTML>#html/scroll-metadata COPY
-                    BlockContainer<HTML>#html/background COPY
-                    BlockContainer<HTML>#html/border COPY
                     BlockContainer<BODY>#body/descendants(background-and-borders) ASSEMBLE
                       BlockContainer<BODY>#body/background/hit-test COPY
                       BlockContainer<BODY>#body/scroll-metadata COPY
-                      BlockContainer<BODY>#body/background COPY
-                      BlockContainer<BODY>#body/border COPY
                       BlockContainer<DIV>#host/descendants(background-and-borders) ASSEMBLE
-                    BlockContainer<HTML>#html/foreground/hit-test COPY
-                    BlockContainer<HTML>#html/foreground COPY
                     BlockContainer<BODY>#body/descendants(foreground) ASSEMBLE
-                      BlockContainer<BODY>#body/foreground/hit-test COPY
-                      BlockContainer<BODY>#body/foreground COPY
                       BlockContainer<DIV>#host/descendants(foreground) ASSEMBLE
-                      BlockContainer<BODY>#body/outline COPY
-                      BlockContainer<BODY>#body/overlay/hit-test COPY
-                      BlockContainer<BODY>#body/overlay COPY
-                    BlockContainer<DIV>#host ASSEMBLE
+                    BlockContainer<DIV>#host REPLAN
                       BlockContainer<DIV>#host/background/hit-test RECORD
                       BlockContainer<DIV>#host/scroll-metadata RECORD (empty)
                       BlockContainer<DIV>#host/background SKIP
@@ -162,8 +151,7 @@ displayListTest({
                       BlockContainer<DIV>#host/outline SKIP
                       BlockContainer<DIV>#host/overlay/hit-test RECORD (empty)
                       BlockContainer<DIV>#host/overlay SKIP
-                    BlockContainer<HTML>#html/outline COPY
-                  BlockContainer(anonymous) ASSEMBLE
+                  BlockContainer(anonymous) REPLAN
                     BlockContainer(anonymous)/preamble RECORD (empty)
                     BlockContainer(anonymous)/background/hit-test RECORD
                     BlockContainer(anonymous)/scroll-metadata RECORD (empty)
@@ -172,7 +160,7 @@ displayListTest({
                     BlockContainer(anonymous)/foreground/hit-test RECORD (empty)
                     BlockContainer(anonymous)/foreground RECORD (empty)
                     BlockContainer(anonymous)/outline SKIP
-                  BlockContainer<DIALOG>#modal ASSEMBLE
+                  BlockContainer<DIALOG>#modal REPLAN
                     BlockContainer<DIALOG>#modal/preamble RECORD (empty)
                     BlockContainer<DIALOG>#modal/background/hit-test RECORD
                     BlockContainer<DIALOG>#modal/scroll-metadata RECORD (empty)

@@ -35,11 +35,7 @@ displayListTest({
                   @viewport/preamble COPY
                   @viewport/background/hit-test COPY
                   @viewport/scroll-metadata COPY
-                  @viewport/background COPY
-                  @viewport/border COPY
                   BlockContainer<HTML>#html/descendants(background-and-borders) ASSEMBLE
-                  @viewport/foreground/hit-test COPY
-                  @viewport/foreground COPY
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
                   BlockContainer<HTML>#html REPLAN
                     BlockContainer<HTML>#html/preamble RECORD (empty)
@@ -98,7 +94,6 @@ displayListTest({
                       BlockContainer<BODY>#body/overlay/hit-test RECORD (empty)
                       BlockContainer<BODY>#body/overlay SKIP
                     BlockContainer<HTML>#html/outline SKIP
-                  @viewport/outline COPY
             `
         },
         {
@@ -112,11 +107,7 @@ displayListTest({
                   @viewport/preamble COPY
                   @viewport/background/hit-test COPY
                   @viewport/scroll-metadata COPY
-                  @viewport/background COPY
-                  @viewport/border COPY
                   BlockContainer<HTML>#html/descendants(background-and-borders) ASSEMBLE
-                  @viewport/foreground/hit-test COPY
-                  @viewport/foreground COPY
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
                   BlockContainer<HTML>#html REPLAN
                     BlockContainer<HTML>#html/preamble RECORD (empty)
@@ -171,7 +162,6 @@ displayListTest({
                       BlockContainer<BODY>#body/overlay/hit-test RECORD (empty)
                       BlockContainer<BODY>#body/overlay SKIP
                     BlockContainer<HTML>#html/outline SKIP
-                  @viewport/outline COPY
             `
         }
     ]

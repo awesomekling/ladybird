@@ -214,7 +214,8 @@ impl<'a, H: AssemblyHost> Assembler<'a, H> {
             }
             PaintScopeKind::Descendants(_) => PaintDamage::ORDER,
         };
-        if damage.intersects(order_damage) {
+        // NB: A producer a scope's list leaves out is found only by replanning the scope, where its damage reaches it.
+        if damage.intersects(order_damage) || damage.intersects(self.tree.omitted_producer_damage(id)) {
             return self.rebuild_scope(id, cursor, damage);
         }
         self.host
@@ -251,7 +252,7 @@ impl<'a, H: AssemblyHost> Assembler<'a, H> {
             entries.push(assembled);
         }
         if self.rewrites_tree {
-            self.tree.set_children(id, &entries);
+            self.tree.set_children_omitting_empty_producers(id, &entries, false);
         }
         self.host.observe(AssemblyEvent::ScopeEnd(scope));
         ChildEntry::scope(id, total)
@@ -377,7 +378,7 @@ impl<'a, H: AssemblyHost> Assembler<'a, H> {
                 self.tree.detach_scope(child);
             }
         }
-        self.tree.set_children(id, entries);
+        self.tree.set_children_omitting_empty_producers(id, entries, true);
     }
 
     fn record_scope_fresh(&mut self, id: ScopeId) -> ChildEntry {
@@ -412,7 +413,7 @@ impl<'a, H: AssemblyHost> Assembler<'a, H> {
                 }
             }
         }
-        self.tree.set_children(id, &entries);
+        self.tree.set_children_omitting_empty_producers(id, &entries, true);
         self.host.observe(AssemblyEvent::ScopeEnd(scope));
         ChildEntry::scope(id, total)
     }
@@ -1099,11 +1100,12 @@ mod tests {
         let second = record_next_frame(&mut host, &mut tree);
 
         assert_eq!(host.recorded, vec![(row(5), ProducerKind::DrawForeground)]);
+        // NB: A scope whose list leaves out empty producers is replanned where its own producers are damaged.
         let assembled: Vec<PaintScope> = host
             .events
             .iter()
             .filter_map(|event| match event {
-                AssemblyEvent::ScopeBegin(scope, ScopeAction::Assembled) => Some(*scope),
+                AssemblyEvent::ScopeBegin(scope, ScopeAction::Assembled | ScopeAction::Replanned) => Some(*scope),
                 _ => None,
             })
             .collect();

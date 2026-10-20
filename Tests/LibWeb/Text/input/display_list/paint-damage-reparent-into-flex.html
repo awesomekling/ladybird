@@ -41,19 +41,15 @@ displayListTest({
                   @viewport/preamble COPY
                   @viewport/background/hit-test COPY
                   @viewport/scroll-metadata COPY
-                  @viewport/background COPY
-                  @viewport/border COPY
                   BlockContainer<HTML>#html/descendants(background-and-borders) ASSEMBLE
-                  @viewport/foreground/hit-test COPY
-                  @viewport/foreground COPY
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
-                  BlockContainer<HTML>#html ASSEMBLE
+                  BlockContainer<HTML>#html REPLAN
                     BlockContainer<HTML>#html/preamble RECORD (empty)
                     BlockContainer<HTML>#html/background/hit-test RECORD
                     BlockContainer<HTML>#html/scroll-metadata RECORD (empty)
                     BlockContainer<HTML>#html/background RECORD (empty)
                     BlockContainer<HTML>#html/border SKIP
-                    BlockContainer<BODY>#body/descendants(background-and-borders) ASSEMBLE
+                    BlockContainer<BODY>#body/descendants(background-and-borders) REPLAN
                       BlockContainer<BODY>#body/background/hit-test RECORD
                       BlockContainer<BODY>#body/scroll-metadata RECORD (empty)
                       BlockContainer<BODY>#body/background SKIP
@@ -72,7 +68,7 @@ displayListTest({
                         BlockContainer<DIV>#moved.item/descendants(background-and-borders) RECORD
                     BlockContainer<HTML>#html/foreground/hit-test RECORD (empty)
                     BlockContainer<HTML>#html/foreground RECORD (empty)
-                    BlockContainer<BODY>#body/descendants(foreground) ASSEMBLE
+                    BlockContainer<BODY>#body/descendants(foreground) REPLAN
                       BlockContainer<BODY>#body/foreground/hit-test RECORD (empty)
                       BlockContainer<BODY>#body/foreground RECORD (empty)
                       BlockContainer<DIV>#block/descendants(foreground) REPLAN
@@ -84,7 +80,7 @@ displayListTest({
                       Box<DIV>#flex/descendants(foreground) REPLAN
                         Box<DIV>#flex/foreground/hit-test RECORD (empty)
                         Box<DIV>#flex/foreground RECORD (empty)
-                        BlockContainer<DIV>#stay.item/descendants(foreground) ASSEMBLE
+                        BlockContainer<DIV>#stay.item/descendants(foreground) REPLAN
                           BlockContainer<DIV>#stay.item/background/hit-test RECORD
                           BlockContainer<DIV>#stay.item/scroll-metadata RECORD (empty)
                           BlockContainer<DIV>#stay.item/background SKIP
@@ -111,7 +107,6 @@ displayListTest({
                       BlockContainer<BODY>#body/overlay/hit-test RECORD (empty)
                       BlockContainer<BODY>#body/overlay SKIP
                     BlockContainer<HTML>#html/outline SKIP
-                  @viewport/outline COPY
             `
         }
     ]

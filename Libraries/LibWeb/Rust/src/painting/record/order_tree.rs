@@ -228,6 +228,23 @@ impl ChildEntry {
     pub(crate) fn is_live(&self) -> bool {
         self.meta & META_LIVE != 0
     }
+
+    /// The group of the producer an entry names where it recorded nothing, is not recorded again every frame and reads
+    /// nothing of its owner's descendants, which only its own draw and hit damage records again.
+    fn empty_producer_group(&self) -> Option<u8> {
+        if self.key & SCOPE_KEY_BIT != 0 || self.bytes != 0 || self.hits != 0 || self.meta != 0 {
+            return None;
+        }
+        match ProducerKind::from_code(self.key) {
+            ProducerKind::DrawBackground | ProducerKind::HitBackground => Some(EMPTY_PRODUCER_GROUP_BACKGROUND),
+            ProducerKind::DrawBorder => Some(EMPTY_PRODUCER_GROUP_BORDER),
+            ProducerKind::DrawTableCollapsedBorder => Some(EMPTY_PRODUCER_GROUP_TABLE_COLLAPSED_BORDER),
+            ProducerKind::DrawForeground | ProducerKind::HitForeground => Some(EMPTY_PRODUCER_GROUP_FOREGROUND),
+            ProducerKind::DrawOutline => Some(EMPTY_PRODUCER_GROUP_OUTLINE),
+            ProducerKind::DrawOverlay | ProducerKind::HitOverlay => Some(EMPTY_PRODUCER_GROUP_OVERLAY),
+            _ => None,
+        }
+    }
 }
 
 impl Default for ChildEntry {
@@ -237,6 +254,49 @@ impl Default for ChildEntry {
 }
 
 const NODE_OCCUPIED: u8 = 1;
+
+// The groups of producers a scope's child list may leave out where they recorded nothing; see
+// [`PaintOrderTree::set_children_omitting_empty_producers`].
+const EMPTY_PRODUCER_GROUP_BACKGROUND: u8 = 1 << 0;
+const EMPTY_PRODUCER_GROUP_BORDER: u8 = 1 << 1;
+const EMPTY_PRODUCER_GROUP_TABLE_COLLAPSED_BORDER: u8 = 1 << 2;
+const EMPTY_PRODUCER_GROUP_FOREGROUND: u8 = 1 << 3;
+const EMPTY_PRODUCER_GROUP_OUTLINE: u8 = 1 << 4;
+const EMPTY_PRODUCER_GROUP_OVERLAY: u8 = 1 << 5;
+
+/// The damage that records a producer of the groups `groups` again.
+fn empty_producer_group_damage(groups: u8) -> PaintDamage {
+    let mut damage = PaintDamage::NONE;
+    for (group, group_damage) in [
+        (
+            EMPTY_PRODUCER_GROUP_BACKGROUND,
+            PaintDamage::DRAW_BACKGROUND | PaintDamage::HIT_BACKGROUND,
+        ),
+        (EMPTY_PRODUCER_GROUP_BORDER, PaintDamage::DRAW_BORDER),
+        (
+            EMPTY_PRODUCER_GROUP_TABLE_COLLAPSED_BORDER,
+            PaintDamage::DRAW_TABLE_COLLAPSED_BORDER,
+        ),
+        (
+            EMPTY_PRODUCER_GROUP_FOREGROUND,
+            PaintDamage::DRAW_FOREGROUND | PaintDamage::HIT_FOREGROUND,
+        ),
+        (EMPTY_PRODUCER_GROUP_OUTLINE, PaintDamage::DRAW_OUTLINE),
+        (
+            EMPTY_PRODUCER_GROUP_OVERLAY,
+            PaintDamage::DRAW_OVERLAY | PaintDamage::HIT_OVERLAY,
+        ),
+    ] {
+        if groups & group != 0 {
+            damage |= group_damage;
+        }
+    }
+    damage
+}
+
+/// The most entries a child list may have for its empty producers to be left out of it. A scope that leaves any out is
+/// replanned when its owner's producers are damaged, which only a short list makes cheap.
+const MAX_ENTRIES_OMITTING_EMPTY_PRODUCERS: usize = 16;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -251,7 +311,8 @@ struct ScopeNode {
     kind: u8,
     flags: u8,
     generation: u8,
-    _padding: u8,
+    /// The groups of producers that recorded nothing the child list leaves out.
+    omitted_producer_groups: u8,
 }
 
 const _: () = assert!(std::mem::size_of::<ScopeNode>() == 24);
@@ -484,7 +545,7 @@ impl PaintOrderTree {
             kind: scope_kind_code(scope.kind),
             flags: NODE_OCCUPIED,
             generation: 1,
-            _padding: 0,
+            omitted_producer_groups: 0,
         };
         let id = if let Some(index) = self.free_nodes.pop() {
             let slot = &mut self.nodes[index as usize];
@@ -498,6 +559,46 @@ impl PaintOrderTree {
         };
         self.register_scope(id);
         id
+    }
+
+    /// Installs the child list assembled for a scope as [`Self::set_children`] does, but for the producers that recorded
+    /// nothing, where the list is short. Those take no room in the output, so no copy reads their place, and nearly
+    /// every box has some: a box without a background or border records nothing for them. A list assembled from the
+    /// scope's published one, rather than from its plan, lists none of the producers that one left out.
+    pub(crate) fn set_children_omitting_empty_producers(
+        &mut self,
+        id: ScopeId,
+        entries: &[ChildEntry],
+        entries_follow_the_plan: bool,
+    ) {
+        let left_out_before = if entries_follow_the_plan {
+            0
+        } else {
+            self.node(id).omitted_producer_groups
+        };
+        let empty_groups = entries
+            .iter()
+            .filter_map(ChildEntry::empty_producer_group)
+            .fold(0, |groups, group| groups | group);
+        // NB: Producers the published list left out cannot be listed again from a list assembled from it.
+        if left_out_before != 0 || (empty_groups != 0 && entries.len() <= MAX_ENTRIES_OMITTING_EMPTY_PRODUCERS) {
+            let kept: SmallVec<[ChildEntry; MAX_ENTRIES_OMITTING_EMPTY_PRODUCERS]> = entries
+                .iter()
+                .copied()
+                .filter(|entry| entry.empty_producer_group().is_none())
+                .collect();
+            self.set_children(id, &kept);
+            self.node_mut(id).omitted_producer_groups = left_out_before | empty_groups;
+        } else {
+            self.set_children(id, entries);
+            self.node_mut(id).omitted_producer_groups = 0;
+        }
+    }
+
+    /// The damage that records again a producer the scope's child list leaves out, which only a replan of the scope
+    /// finds.
+    pub(crate) fn omitted_producer_damage(&self, id: ScopeId) -> PaintDamage {
+        empty_producer_group_damage(self.node(id).omitted_producer_groups)
     }
 
     /// Installs the child list assembled for a scope. A list of the same length overwrites the

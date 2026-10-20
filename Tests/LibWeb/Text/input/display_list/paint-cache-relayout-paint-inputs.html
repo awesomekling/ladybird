@@ -43,24 +43,16 @@ displayListTest({
                   @viewport/preamble COPY
                   @viewport/background/hit-test COPY
                   @viewport/scroll-metadata COPY
-                  @viewport/background COPY
-                  @viewport/border COPY
                   BlockContainer<HTML>#html/descendants(background-and-borders) ASSEMBLE
-                  @viewport/foreground/hit-test COPY
-                  @viewport/foreground COPY
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
                   BlockContainer<HTML>#html ASSEMBLE
                     BlockContainer<HTML>#html/preamble COPY
                     BlockContainer<HTML>#html/background/hit-test COPY
                     BlockContainer<HTML>#html/scroll-metadata COPY
-                    BlockContainer<HTML>#html/background COPY
-                    BlockContainer<HTML>#html/border COPY
                     BlockContainer<BODY>#body/descendants(background-and-borders) ASSEMBLE
                       BlockContainer<BODY>#body/background/hit-test COPY
                       BlockContainer<BODY>#body/scroll-metadata COPY
-                      BlockContainer<BODY>#body/background COPY
-                      BlockContainer<BODY>#body/border COPY
-                      BlockContainer<DIV>#target/descendants(background-and-borders) ASSEMBLE
+                      BlockContainer<DIV>#target/descendants(background-and-borders) REPLAN
                         BlockContainer<DIV>#target/background/hit-test RECORD
                         BlockContainer<DIV>#target/scroll-metadata RECORD (empty)
                         BlockContainer<DIV>#target/background RECORD
@@ -71,12 +63,8 @@ displayListTest({
                       BlockContainer<DIV>#target/descendants(inline-background-and-borders) ASSEMBLE
                         InlineNode<SPAN>#inline/descendants(inline-background-and-borders) ASSEMBLE
                       CanvasBox<CANVAS>#trigger/descendants(inline-background-and-borders) COPY
-                    BlockContainer<HTML>#html/foreground/hit-test COPY
-                    BlockContainer<HTML>#html/foreground COPY
                     BlockContainer<BODY>#body/descendants(foreground) ASSEMBLE
-                      BlockContainer<BODY>#body/foreground/hit-test COPY
-                      BlockContainer<BODY>#body/foreground COPY
-                      BlockContainer<DIV>#target/descendants(foreground) ASSEMBLE
+                      BlockContainer<DIV>#target/descendants(foreground) REPLAN
                         BlockContainer<DIV>#target/foreground/hit-test RECORD (empty)
                         BlockContainer<DIV>#target/foreground RECORD (empty)
                         InlineNode<SPAN>#inline/descendants(foreground) ASSEMBLE
@@ -84,10 +72,7 @@ displayListTest({
                         BlockContainer<DIV>#target/overlay/hit-test RECORD (empty)
                         BlockContainer<DIV>#target/overlay SKIP
                       CanvasBox<CANVAS>#trigger/descendants(foreground) COPY
-                      BlockContainer<BODY>#body/outline COPY
-                      BlockContainer<BODY>#body/overlay/hit-test COPY
-                      BlockContainer<BODY>#body/overlay COPY
-                    InlineNode<SPAN>#inline ASSEMBLE
+                    InlineNode<SPAN>#inline REPLAN
                       InlineNode<SPAN>#inline/background/hit-test RECORD
                       InlineNode<SPAN>#inline/scroll-metadata RECORD (empty)
                       InlineNode<SPAN>#inline/background SKIP
@@ -99,8 +84,6 @@ displayListTest({
                       InlineNode<SPAN>#inline/outline SKIP
                       InlineNode<SPAN>#inline/overlay/hit-test RECORD (empty)
                       InlineNode<SPAN>#inline/overlay SKIP
-                    BlockContainer<HTML>#html/outline COPY
-                  @viewport/outline COPY
             `,
         },
         {
@@ -121,24 +104,16 @@ displayListTest({
                   @viewport/preamble COPY
                   @viewport/background/hit-test COPY
                   @viewport/scroll-metadata COPY
-                  @viewport/background COPY
-                  @viewport/border COPY
                   BlockContainer<HTML>#html/descendants(background-and-borders) ASSEMBLE
-                  @viewport/foreground/hit-test COPY
-                  @viewport/foreground COPY
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
                   BlockContainer<HTML>#html ASSEMBLE
                     BlockContainer<HTML>#html/preamble COPY
                     BlockContainer<HTML>#html/background/hit-test COPY
                     BlockContainer<HTML>#html/scroll-metadata COPY
-                    BlockContainer<HTML>#html/background COPY
-                    BlockContainer<HTML>#html/border COPY
                     BlockContainer<BODY>#body/descendants(background-and-borders) ASSEMBLE
                       BlockContainer<BODY>#body/background/hit-test COPY
                       BlockContainer<BODY>#body/scroll-metadata COPY
-                      BlockContainer<BODY>#body/background COPY
-                      BlockContainer<BODY>#body/border COPY
-                      BlockContainer<DIV>#target/descendants(background-and-borders) ASSEMBLE
+                      BlockContainer<DIV>#target/descendants(background-and-borders) REPLAN
                         BlockContainer<DIV>#target/background/hit-test COPY
                         BlockContainer<DIV>#target/scroll-metadata COPY
                         BlockContainer<DIV>#target/background RECORD
@@ -149,23 +124,16 @@ displayListTest({
                       BlockContainer<DIV>#target/descendants(inline-background-and-borders) ASSEMBLE
                         InlineNode<SPAN>#inline/descendants(inline-background-and-borders) ASSEMBLE
                       CanvasBox<CANVAS>#trigger/descendants(inline-background-and-borders) COPY
-                    BlockContainer<HTML>#html/foreground/hit-test COPY
-                    BlockContainer<HTML>#html/foreground COPY
                     BlockContainer<BODY>#body/descendants(foreground) ASSEMBLE
-                      BlockContainer<BODY>#body/foreground/hit-test COPY
-                      BlockContainer<BODY>#body/foreground COPY
-                      BlockContainer<DIV>#target/descendants(foreground) ASSEMBLE
-                        BlockContainer<DIV>#target/foreground/hit-test COPY
+                      BlockContainer<DIV>#target/descendants(foreground) REPLAN
+                        BlockContainer<DIV>#target/foreground/hit-test RECORD (empty)
                         BlockContainer<DIV>#target/foreground RECORD (empty)
                         InlineNode<SPAN>#inline/descendants(foreground) ASSEMBLE
                         BlockContainer<DIV>#target/outline SKIP
-                        BlockContainer<DIV>#target/overlay/hit-test COPY
+                        BlockContainer<DIV>#target/overlay/hit-test RECORD (empty)
                         BlockContainer<DIV>#target/overlay SKIP
                       CanvasBox<CANVAS>#trigger/descendants(foreground) COPY
-                      BlockContainer<BODY>#body/outline COPY
-                      BlockContainer<BODY>#body/overlay/hit-test COPY
-                      BlockContainer<BODY>#body/overlay COPY
-                    InlineNode<SPAN>#inline ASSEMBLE
+                    InlineNode<SPAN>#inline REPLAN
                       InlineNode<SPAN>#inline/background/hit-test COPY
                       InlineNode<SPAN>#inline/scroll-metadata COPY
                       InlineNode<SPAN>#inline/background SKIP
@@ -175,10 +143,8 @@ displayListTest({
                       InlineNode<SPAN>#inline/text-fragment RECORD
                       InlineNode<SPAN>#inline/foreground RECORD (empty)
                       InlineNode<SPAN>#inline/outline SKIP
-                      InlineNode<SPAN>#inline/overlay/hit-test COPY
+                      InlineNode<SPAN>#inline/overlay/hit-test RECORD (empty)
                       InlineNode<SPAN>#inline/overlay SKIP
-                    BlockContainer<HTML>#html/outline COPY
-                  @viewport/outline COPY
             `,
         },
     ],

@@ -34,11 +34,7 @@ displayListTest({
                   @viewport/preamble COPY
                   @viewport/background/hit-test COPY
                   @viewport/scroll-metadata COPY
-                  @viewport/background COPY
-                  @viewport/border COPY
                   BlockContainer<HTML>#html/descendants(background-and-borders) ASSEMBLE
-                  @viewport/foreground/hit-test COPY
-                  @viewport/foreground COPY
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
                   BlockContainer<HTML>#html REPLAN
                     BlockContainer<HTML>#html/preamble RECORD (empty)
@@ -46,7 +42,7 @@ displayListTest({
                     BlockContainer<HTML>#html/scroll-metadata RECORD (empty)
                     BlockContainer<HTML>#html/background RECORD (empty)
                     BlockContainer<HTML>#html/border SKIP
-                    BlockContainer<BODY>#body/descendants(background-and-borders) ASSEMBLE
+                    BlockContainer<BODY>#body/descendants(background-and-borders) REPLAN
                       BlockContainer<BODY>#body/background/hit-test RECORD
                       BlockContainer<BODY>#body/scroll-metadata RECORD (empty)
                       BlockContainer<BODY>#body/background SKIP
@@ -55,7 +51,7 @@ displayListTest({
                       BlockContainer<DIV>#b/descendants(background-and-borders) REPLAN
                     BlockContainer<HTML>#html/foreground/hit-test RECORD (empty)
                     BlockContainer<HTML>#html/foreground RECORD (empty)
-                    BlockContainer<BODY>#body/descendants(foreground) ASSEMBLE
+                    BlockContainer<BODY>#body/descendants(foreground) REPLAN
                       BlockContainer<BODY>#body/foreground/hit-test RECORD (empty)
                       BlockContainer<BODY>#body/foreground RECORD (empty)
                       BlockContainer<DIV>#a/descendants(foreground) COPY
@@ -93,7 +89,6 @@ displayListTest({
                       BlockContainer<DIV>#inserted.row/overlay/hit-test RECORD (empty)
                       BlockContainer<DIV>#inserted.row/overlay SKIP
                     BlockContainer<HTML>#html/outline SKIP
-                  @viewport/outline COPY
             `
         },
         {

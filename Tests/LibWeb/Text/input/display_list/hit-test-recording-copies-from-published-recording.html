@@ -99,36 +99,21 @@ displayListTest({
                   @viewport/preamble COPY
                   @viewport/background/hit-test COPY
                   @viewport/scroll-metadata COPY
-                  @viewport/background COPY
-                  @viewport/border COPY
                   BlockContainer<HTML>#html/descendants(background-and-borders) ASSEMBLE
-                  @viewport/foreground/hit-test COPY
-                  @viewport/foreground COPY
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
                   BlockContainer<HTML>#html ASSEMBLE
                     BlockContainer<HTML>#html/preamble COPY
                     BlockContainer<HTML>#html/background/hit-test COPY
                     BlockContainer<HTML>#html/scroll-metadata COPY
-                    BlockContainer<HTML>#html/background COPY
-                    BlockContainer<HTML>#html/border COPY
                     BlockContainer<BODY>#body/descendants(background-and-borders) ASSEMBLE
                       BlockContainer<BODY>#body/background/hit-test COPY
                       BlockContainer<BODY>#body/scroll-metadata COPY
-                      BlockContainer<BODY>#body/background COPY
-                      BlockContainer<BODY>#body/border COPY
                       BlockContainer<DIV>#static/descendants(background-and-borders) COPY
                       BlockContainer<DIV>#box/descendants(background-and-borders) ASSEMBLE
-                    BlockContainer<HTML>#html/foreground/hit-test COPY
-                    BlockContainer<HTML>#html/foreground COPY
                     BlockContainer<BODY>#body/descendants(foreground) ASSEMBLE
-                      BlockContainer<BODY>#body/foreground/hit-test COPY
-                      BlockContainer<BODY>#body/foreground COPY
                       BlockContainer<DIV>#static/descendants(foreground) COPY
                       BlockContainer<DIV>#box/descendants(foreground) ASSEMBLE
-                      BlockContainer<BODY>#body/outline COPY
-                      BlockContainer<BODY>#body/overlay/hit-test COPY
-                      BlockContainer<BODY>#body/overlay COPY
-                    BlockContainer<DIV>#box ASSEMBLE
+                    BlockContainer<DIV>#box REPLAN
                       BlockContainer<DIV>#box/background/hit-test RECORD
                       BlockContainer<DIV>#box/scroll-metadata RECORD (empty)
                       BlockContainer<DIV>#box/background RECORD
@@ -138,12 +123,6 @@ displayListTest({
                       BlockContainer<DIV>#box/outline SKIP
                       BlockContainer<DIV>#box/overlay/hit-test RECORD (empty)
                       BlockContainer<DIV>#box/overlay SKIP
-                    BlockContainer<HTML>#html/outline COPY
-                    BlockContainer<HTML>#html/overlay/hit-test COPY
-                    BlockContainer<HTML>#html/overlay COPY
-                  @viewport/outline COPY
-                  @viewport/overlay/hit-test COPY
-                  @viewport/overlay COPY
                 recording (overlay=true)
                 damage: rows=4 moved=1 order=0 eligibility=0 all=false
                 @canvas RECORD (empty)
@@ -151,36 +130,21 @@ displayListTest({
                   @viewport/preamble COPY
                   @viewport/background/hit-test COPY
                   @viewport/scroll-metadata COPY
-                  @viewport/background COPY
-                  @viewport/border COPY
                   BlockContainer<HTML>#html/descendants(background-and-borders) ASSEMBLE
-                  @viewport/foreground/hit-test COPY
-                  @viewport/foreground COPY
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
                   BlockContainer<HTML>#html ASSEMBLE
                     BlockContainer<HTML>#html/preamble COPY
                     BlockContainer<HTML>#html/background/hit-test COPY
                     BlockContainer<HTML>#html/scroll-metadata COPY
-                    BlockContainer<HTML>#html/background COPY
-                    BlockContainer<HTML>#html/border COPY
                     BlockContainer<BODY>#body/descendants(background-and-borders) ASSEMBLE
                       BlockContainer<BODY>#body/background/hit-test COPY
                       BlockContainer<BODY>#body/scroll-metadata COPY
-                      BlockContainer<BODY>#body/background COPY
-                      BlockContainer<BODY>#body/border COPY
                       BlockContainer<DIV>#static/descendants(background-and-borders) COPY
                       BlockContainer<DIV>#box/descendants(background-and-borders) ASSEMBLE
-                    BlockContainer<HTML>#html/foreground/hit-test COPY
-                    BlockContainer<HTML>#html/foreground COPY
                     BlockContainer<BODY>#body/descendants(foreground) ASSEMBLE
-                      BlockContainer<BODY>#body/foreground/hit-test COPY
-                      BlockContainer<BODY>#body/foreground COPY
                       BlockContainer<DIV>#static/descendants(foreground) COPY
                       BlockContainer<DIV>#box/descendants(foreground) ASSEMBLE
-                      BlockContainer<BODY>#body/outline COPY
-                      BlockContainer<BODY>#body/overlay/hit-test COPY
-                      BlockContainer<BODY>#body/overlay COPY
-                    BlockContainer<DIV>#box ASSEMBLE
+                    BlockContainer<DIV>#box REPLAN
                       BlockContainer<DIV>#box/background/hit-test RECORD
                       BlockContainer<DIV>#box/scroll-metadata RECORD (empty)
                       BlockContainer<DIV>#box/background RECORD
@@ -190,12 +154,6 @@ displayListTest({
                       BlockContainer<DIV>#box/outline SKIP
                       BlockContainer<DIV>#box/overlay/hit-test RECORD (empty)
                       BlockContainer<DIV>#box/overlay SKIP
-                    BlockContainer<HTML>#html/outline COPY
-                    BlockContainer<HTML>#html/overlay/hit-test COPY
-                    BlockContainer<HTML>#html/overlay COPY
-                  @viewport/outline COPY
-                  @viewport/overlay/hit-test COPY
-                  @viewport/overlay COPY
             `
         }
     ]

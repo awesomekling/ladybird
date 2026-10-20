@@ -102,52 +102,31 @@ displayListTest({
                   @viewport/preamble COPY
                   @viewport/background/hit-test COPY
                   @viewport/scroll-metadata COPY
-                  @viewport/background COPY
-                  @viewport/border COPY
                   BlockContainer<HTML>#html/descendants(background-and-borders) ASSEMBLE
-                  @viewport/foreground/hit-test COPY
-                  @viewport/foreground COPY
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
                   BlockContainer<HTML>#html ASSEMBLE
                     BlockContainer<HTML>#html/preamble COPY
                     BlockContainer<HTML>#html/background/hit-test COPY
                     BlockContainer<HTML>#html/scroll-metadata COPY
-                    BlockContainer<HTML>#html/background COPY
-                    BlockContainer<HTML>#html/border COPY
                     BlockContainer<BODY>#body/descendants(background-and-borders) ASSEMBLE
                       BlockContainer<BODY>#body/background/hit-test COPY
                       BlockContainer<BODY>#body/scroll-metadata COPY
-                      BlockContainer<BODY>#body/background COPY
-                      BlockContainer<BODY>#body/border COPY
-                      BlockContainer<DIV>#scroller/descendants(background-and-borders) ASSEMBLE
+                      BlockContainer<DIV>#scroller/descendants(background-and-borders) REPLAN
                         BlockContainer<DIV>#scroller/background/hit-test COPY
                         BlockContainer<DIV>#scroller/scroll-metadata COPY
                         BlockContainer<DIV>#scroller/background SKIP
                         BlockContainer<DIV>#scroller/border SKIP
                         BlockContainer<DIV>#content/descendants(background-and-borders) COPY
                       BlockContainer<DIV>#other/descendants(background-and-borders) COPY
-                    BlockContainer<HTML>#html/foreground/hit-test COPY
-                    BlockContainer<HTML>#html/foreground COPY
                     BlockContainer<BODY>#body/descendants(foreground) ASSEMBLE
-                      BlockContainer<BODY>#body/foreground/hit-test COPY
-                      BlockContainer<BODY>#body/foreground COPY
-                      BlockContainer<DIV>#scroller/descendants(foreground) ASSEMBLE
-                        BlockContainer<DIV>#scroller/foreground/hit-test COPY
+                      BlockContainer<DIV>#scroller/descendants(foreground) REPLAN
+                        BlockContainer<DIV>#scroller/foreground/hit-test RECORD (empty)
                         BlockContainer<DIV>#scroller/foreground RECORD (empty)
                         BlockContainer<DIV>#content/descendants(foreground) COPY
                         BlockContainer<DIV>#scroller/outline SKIP
                         BlockContainer<DIV>#scroller/overlay/hit-test RECORD
                         BlockContainer<DIV>#scroller/overlay RECORD
                       BlockContainer<DIV>#other/descendants(foreground) COPY
-                      BlockContainer<BODY>#body/outline COPY
-                      BlockContainer<BODY>#body/overlay/hit-test COPY
-                      BlockContainer<BODY>#body/overlay COPY
-                    BlockContainer<HTML>#html/outline COPY
-                    BlockContainer<HTML>#html/overlay/hit-test COPY
-                    BlockContainer<HTML>#html/overlay COPY
-                  @viewport/outline COPY
-                  @viewport/overlay/hit-test COPY
-                  @viewport/overlay COPY
             `
         },
         {
@@ -161,52 +140,31 @@ displayListTest({
                   @viewport/preamble COPY
                   @viewport/background/hit-test COPY
                   @viewport/scroll-metadata COPY
-                  @viewport/background COPY
-                  @viewport/border COPY
                   BlockContainer<HTML>#html/descendants(background-and-borders) ASSEMBLE
-                  @viewport/foreground/hit-test COPY
-                  @viewport/foreground COPY
                   BlockContainer<HTML>#html/descendants(foreground) ASSEMBLE
                   BlockContainer<HTML>#html ASSEMBLE
                     BlockContainer<HTML>#html/preamble COPY
                     BlockContainer<HTML>#html/background/hit-test COPY
                     BlockContainer<HTML>#html/scroll-metadata COPY
-                    BlockContainer<HTML>#html/background COPY
-                    BlockContainer<HTML>#html/border COPY
                     BlockContainer<BODY>#body/descendants(background-and-borders) ASSEMBLE
                       BlockContainer<BODY>#body/background/hit-test COPY
                       BlockContainer<BODY>#body/scroll-metadata COPY
-                      BlockContainer<BODY>#body/background COPY
-                      BlockContainer<BODY>#body/border COPY
-                      BlockContainer<DIV>#scroller/descendants(background-and-borders) ASSEMBLE
+                      BlockContainer<DIV>#scroller/descendants(background-and-borders) REPLAN
                         BlockContainer<DIV>#scroller/background/hit-test COPY
                         BlockContainer<DIV>#scroller/scroll-metadata COPY
                         BlockContainer<DIV>#scroller/background SKIP
                         BlockContainer<DIV>#scroller/border SKIP
                         BlockContainer<DIV>#content/descendants(background-and-borders) COPY
                       BlockContainer<DIV>#other/descendants(background-and-borders) COPY
-                    BlockContainer<HTML>#html/foreground/hit-test COPY
-                    BlockContainer<HTML>#html/foreground COPY
                     BlockContainer<BODY>#body/descendants(foreground) ASSEMBLE
-                      BlockContainer<BODY>#body/foreground/hit-test COPY
-                      BlockContainer<BODY>#body/foreground COPY
-                      BlockContainer<DIV>#scroller/descendants(foreground) ASSEMBLE
-                        BlockContainer<DIV>#scroller/foreground/hit-test COPY
+                      BlockContainer<DIV>#scroller/descendants(foreground) REPLAN
+                        BlockContainer<DIV>#scroller/foreground/hit-test RECORD (empty)
                         BlockContainer<DIV>#scroller/foreground RECORD (empty)
                         BlockContainer<DIV>#content/descendants(foreground) COPY
                         BlockContainer<DIV>#scroller/outline SKIP
                         BlockContainer<DIV>#scroller/overlay/hit-test RECORD
                         BlockContainer<DIV>#scroller/overlay RECORD
                       BlockContainer<DIV>#other/descendants(foreground) COPY
-                      BlockContainer<BODY>#body/outline COPY
-                      BlockContainer<BODY>#body/overlay/hit-test COPY
-                      BlockContainer<BODY>#body/overlay COPY
-                    BlockContainer<HTML>#html/outline COPY
-                    BlockContainer<HTML>#html/overlay/hit-test COPY
-                    BlockContainer<HTML>#html/overlay COPY
-                  @viewport/outline COPY
-                  @viewport/overlay/hit-test COPY
-                  @viewport/overlay COPY
             `
         }
     ]
