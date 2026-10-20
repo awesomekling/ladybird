@@ -258,11 +258,12 @@ void ComputedValues::borrow_style_record_payloads(ReadonlySpan<void const*> payl
 
 bool InstalledStyle::display_is_none() const
 {
-    if (!m_view.present)
+    if (!m_view)
         return false;
     // The record's base payloads are the ones an animation overlay was layered on top of, matching
     // what ComputedValues::base_values() exposes.
-    auto const* payloads = m_view.base_payloads ? m_view.base_payloads : m_view.payloads;
+    auto const& view = this->view();
+    auto const* payloads = view.base_payloads ? view.base_payloads : view.payloads;
     if (!payloads)
         return false;
     auto const* box = static_cast<ComputedValuesFFI::BoxValues const*>(payloads[to_underlying(StyleGroupIndex::BoxValues)]);

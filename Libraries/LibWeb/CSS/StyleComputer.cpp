@@ -219,7 +219,7 @@ InstalledStyle StyleComputer::install_style(Layout::BegunRead const& read, Style
 {
     if (!style_record)
         return {};
-    return { style_record, m_style_engine.style_record_view(read, style_record) };
+    return { m_style_engine.host(), style_record, m_style_engine.style_record_view(read, style_record) };
 }
 
 void StyleComputer::pin_style_record(StyleRecordID style_record_identity) const
