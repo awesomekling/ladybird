@@ -250,14 +250,87 @@ pub struct CompoundSelector {
 ///
 /// Compounds retain their parsed left-to-right order. Matching starts at the final compound and
 /// follows each compound's combinator toward the beginning of this slice.
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompiledSelector {
     /// Where each compound's simple selectors end in `simple_selectors`, with how it relates to the compound before.
     compound_headers: CompoundHeaders,
     /// The simple selectors of every compound, in one allocation rather than one per compound.
-    simple_selectors: Box<[SimpleSelector]>,
+    simple_selectors: SimpleSelectorStorage,
     /// The pseudo-element required on the initial match target, if this selector ends in one.
     pub target_pseudo_element: Option<PseudoElementType>,
+}
+
+// A sheet keeps one of these for each selector of its rules.
+const _: () = assert!(size_of::<CompiledSelector>() <= 4 * size_of::<usize>());
+
+/// The simple selectors of a selector, owned as a boxed slice whose length the selector's compound headers keep, so
+/// that the selector does not keep it a second time.
+struct SimpleSelectorStorage(std::ptr::NonNull<SimpleSelector>);
+
+// SAFETY: The storage owns its simple selectors, which are Send and Sync.
+unsafe impl Send for SimpleSelectorStorage {}
+unsafe impl Sync for SimpleSelectorStorage {}
+
+impl SimpleSelectorStorage {
+    fn new(selectors: Box<[SimpleSelector]>) -> Self {
+        Self(std::ptr::NonNull::new(Box::into_raw(selectors).cast::<SimpleSelector>()).unwrap())
+    }
+
+    /// # Safety
+    /// `length` must be the length of the slice the storage was made from.
+    unsafe fn as_slice(&self, length: usize) -> &[SimpleSelector] {
+        unsafe { std::slice::from_raw_parts(self.0.as_ptr(), length) }
+    }
+
+    /// # Safety
+    /// `length` must be the length of the slice the storage was made from.
+    unsafe fn as_mut_slice(&mut self, length: usize) -> &mut [SimpleSelector] {
+        unsafe { std::slice::from_raw_parts_mut(self.0.as_ptr(), length) }
+    }
+
+    /// # Safety
+    /// `length` must be the length of the slice the storage was made from, and the storage must not be used again.
+    unsafe fn drop_with_length(&mut self, length: usize) {
+        drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(self.0.as_ptr(), length)) });
+    }
+}
+
+impl Drop for CompiledSelector {
+    fn drop(&mut self) {
+        let length = self.simple_selector_count();
+        // SAFETY: The compound headers end where the simple selectors the storage was made from end.
+        unsafe { self.simple_selectors.drop_with_length(length) };
+    }
+}
+
+impl Clone for CompiledSelector {
+    fn clone(&self) -> Self {
+        Self {
+            compound_headers: self.compound_headers.clone(),
+            simple_selectors: SimpleSelectorStorage::new(self.simple_selectors().into()),
+            target_pseudo_element: self.target_pseudo_element,
+        }
+    }
+}
+
+impl PartialEq for CompiledSelector {
+    fn eq(&self, other: &Self) -> bool {
+        self.compound_headers == other.compound_headers
+            && self.simple_selectors() == other.simple_selectors()
+            && self.target_pseudo_element == other.target_pseudo_element
+    }
+}
+
+impl Eq for CompiledSelector {}
+
+impl std::fmt::Debug for CompiledSelector {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CompiledSelector")
+            .field("compound_headers", &self.compound_headers)
+            .field("simple_selectors", &self.simple_selectors())
+            .field("target_pseudo_element", &self.target_pseudo_element)
+            .finish()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -348,7 +421,7 @@ impl SharedSimpleSelectors {
     pub(crate) fn share(&mut self, selectors: &mut [CompiledSelector]) {
         use std::hash::{Hash, Hasher};
         for selector in selectors {
-            for simple in selector.simple_selectors.iter_mut() {
+            for simple in selector.simple_selectors_mut() {
                 let mut hasher = crate::fast_hash::fast_hasher();
                 match simple {
                     SimpleSelector::Universal(name) | SimpleSelector::TagName(name) => {
@@ -486,7 +559,7 @@ impl CompiledSelector {
             let compound = compound_selectors.into_vec().pop().unwrap();
             return Self {
                 compound_headers: CompoundHeaders::new(&[header(&compound, compound.simple_selectors.len())]),
-                simple_selectors: compound.simple_selectors,
+                simple_selectors: SimpleSelectorStorage::new(compound.simple_selectors),
                 target_pseudo_element,
             };
         }
@@ -507,9 +580,24 @@ impl CompiledSelector {
             .collect::<smallvec::SmallVec<[CompoundHeader; 3]>>();
         Self {
             compound_headers: CompoundHeaders::new(&compound_headers),
-            simple_selectors: simple_selectors.into_boxed_slice(),
+            simple_selectors: SimpleSelectorStorage::new(simple_selectors.into_boxed_slice()),
             target_pseudo_element,
         }
+    }
+
+    fn simple_selector_count(&self) -> usize {
+        self.compound_headers.last().map_or(0, |header| usize::from(header.end))
+    }
+
+    fn simple_selectors(&self) -> &[SimpleSelector] {
+        // SAFETY: The compound headers end where the simple selectors the storage was made from end.
+        unsafe { self.simple_selectors.as_slice(self.simple_selector_count()) }
+    }
+
+    fn simple_selectors_mut(&mut self) -> &mut [SimpleSelector] {
+        let length = self.simple_selector_count();
+        // SAFETY: The compound headers end where the simple selectors the storage was made from end.
+        unsafe { self.simple_selectors.as_mut_slice(length) }
     }
 
     #[must_use]
@@ -526,7 +614,7 @@ impl CompiledSelector {
         CompoundRef {
             combinator: header.combinator,
             is_implicit_universal_anchor: header.is_implicit_universal_anchor,
-            simple_selectors: &self.simple_selectors[start..header.end as usize],
+            simple_selectors: &self.simple_selectors()[start..header.end as usize],
         }
     }
 
