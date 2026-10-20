@@ -1340,48 +1340,67 @@ pub extern "C" fn style_engine_note_element_declarations_changed(host: &Document
     }
 }
 
-/// A direct-mapped memo of one answer per key, which keeps the answers of the keys the host asked about last.
+/// A direct-mapped memo of one answer per key, which keeps the answers of the keys the host asked about last. It starts
+/// small and grows as the keys it keeps collide, so that the memo of a document with few elements, as an SVG image's,
+/// stays small.
 pub(crate) struct Memo<T: Copy> {
-    slots: [std::cell::Cell<(u64, T)>; Memo::<()>::SLOTS],
+    slots: std::cell::RefCell<Box<[(u64, T)]>>,
+    empty: T,
 }
 
 impl<T: Copy> Memo<T> {
-    const SLOTS: usize = 256;
+    const MIN_SLOTS: usize = 16;
+    const MAX_SLOTS: usize = 256;
     /// No record has this identity: a base record's leaves the top bit clear, and an overlay's generation is below it.
     const NO_KEY: u64 = u64::MAX;
 
     fn new(empty: T) -> Self {
         Self {
-            slots: std::array::from_fn(|_| std::cell::Cell::new((Self::NO_KEY, empty))),
+            slots: std::cell::RefCell::new(Box::default()),
+            empty,
         }
     }
 
-    fn slot(&self, key: u64) -> &std::cell::Cell<(u64, T)> {
-        &self.slots[(key ^ (key >> 32)) as usize % Self::SLOTS]
+    /// The slot of `key` in a memo of `slot_count` slots, a power of two; past the end of an empty memo's.
+    fn index(key: u64, slot_count: usize) -> usize {
+        (key ^ (key >> 32)) as usize & slot_count.wrapping_sub(1)
     }
 
     pub(crate) fn get(&self, key: u64) -> Option<T> {
-        let (held, answer) = self.slot(key).get();
+        let slots = self.slots.borrow();
+        let &(held, answer) = slots.get(Self::index(key, slots.len()))?;
         (held == key).then_some(answer)
     }
 
     pub(crate) fn set(&self, key: u64, answer: T) {
-        self.slot(key).set((key, answer));
+        let mut slots = self.slots.borrow_mut();
+        let held = slots.get(Self::index(key, slots.len())).map(|&(held, _)| held);
+        if held.is_none_or(|held| held != Self::NO_KEY && held != key && slots.len() < Self::MAX_SLOTS) {
+            let slot_count = (slots.len() * 4).clamp(Self::MIN_SLOTS, Self::MAX_SLOTS);
+            let mut grown = vec![(Self::NO_KEY, self.empty); slot_count].into_boxed_slice();
+            for &(held, answer) in slots.iter().filter(|(held, _)| *held != Self::NO_KEY) {
+                grown[Self::index(held, slot_count)] = (held, answer);
+            }
+            *slots = grown;
+        }
+        let index = Self::index(key, slots.len());
+        slots[index] = (key, answer);
     }
 
     fn forget(&self, key: u64) {
-        let slot = self.slot(key);
-        let (held, answer) = slot.get();
-        if held == key {
-            slot.set((Self::NO_KEY, answer));
+        let mut slots = self.slots.borrow_mut();
+        let index = Self::index(key, slots.len());
+        if let Some(slot) = slots.get_mut(index)
+            && slot.0 == key
+        {
+            slot.0 = Self::NO_KEY;
         }
     }
 
     fn forget_where(&self, forgets: impl Fn(u64) -> bool) {
-        for slot in &self.slots {
-            let (held, answer) = slot.get();
-            if held != Self::NO_KEY && forgets(held) {
-                slot.set((Self::NO_KEY, answer));
+        for slot in self.slots.borrow_mut().iter_mut() {
+            if slot.0 != Self::NO_KEY && forgets(slot.0) {
+                slot.0 = Self::NO_KEY;
             }
         }
     }
@@ -1478,4 +1497,29 @@ pub unsafe extern "C" fn style_engine_decide_transitions(
         decision.decide(engine, reference_box, existing)
     });
     hand_over(&actions);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Memo;
+
+    #[test]
+    fn memo_grows_as_its_keys_collide() {
+        let memo = Memo::new(0u8);
+        assert_eq!(memo.get(1), None);
+        memo.set(1, 1);
+        memo.set(2, 2);
+        assert_eq!(memo.slots.borrow().len(), Memo::<u8>::MIN_SLOTS);
+        // 1 and 17 share a slot of 16, so keeping both grows the memo.
+        memo.set(17, 17);
+        assert_eq!(memo.slots.borrow().len(), 64);
+        assert_eq!((memo.get(1), memo.get(2), memo.get(17)), (Some(1), Some(2), Some(17)));
+        memo.forget(2);
+        assert_eq!(memo.get(2), None);
+        for key in 0..4096 {
+            memo.set(key, key as u8);
+        }
+        assert_eq!(memo.slots.borrow().len(), Memo::<u8>::MAX_SLOTS);
+        assert_eq!(memo.get(4095), Some(255));
+    }
 }
