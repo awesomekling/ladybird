@@ -309,10 +309,18 @@ impl RetainedState {
 
     /// Forget what the record loop read of the answers of a pass that has settled its last row.
     fn clear_batch_answer_facts(&mut self) {
-        self.batch_answers_complete_but_for_custom_properties.clear();
-        self.batch_custom_property_matches.clear();
-        self.batch_custom_property_answers.clear();
-        self.batch_backing_pseudo_matches.clear();
+        // NB: The first pass over a document batches every element, and the passes after it few, so a map grown past
+        //     what those need is let go rather than kept empty at the size of the first.
+        fn clear<K: Eq + std::hash::Hash, V, S: std::hash::BuildHasher>(map: &mut std::collections::HashMap<K, V, S>) {
+            map.clear();
+            if map.capacity() > 256 {
+                map.shrink_to(0);
+            }
+        }
+        clear(&mut self.batch_answers_complete_but_for_custom_properties);
+        clear(&mut self.batch_custom_property_matches);
+        clear(&mut self.batch_custom_property_answers);
+        clear(&mut self.batch_backing_pseudo_matches);
     }
 
     /// Whether the node's record, or the record of one of its pseudo-elements, resolved a counter
