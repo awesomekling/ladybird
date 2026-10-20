@@ -266,10 +266,11 @@ impl FcRunCacheEntry {
 }
 
 fn outputs_allow_committed_subtree_reuse(outputs: &formatting_context::RunOutputs) -> bool {
-    outputs
-        .root
-        .as_ref()
-        .is_none_or(|root| root.propagated_pending_abspos.is_empty())
+    outputs.root.as_ref().is_none_or(|root| {
+        root.propagated
+            .as_ref()
+            .is_none_or(|propagated| propagated.pending_abspos.is_empty())
+    })
 }
 
 fn outputs_without_descendant_fragments(outputs: &formatting_context::RunOutputs) -> formatting_context::RunOutputs {
@@ -279,10 +280,7 @@ fn outputs_without_descendant_fragments(outputs: &formatting_context::RunOutputs
         // enter its scopes. Only payloads that escape the run still have to reach the parent.
         scoped_descendants: Vec::new(),
         reused_subtree_roots: HashSet::default(),
-        propagated_pending_abspos: root.propagated_pending_abspos.clone(),
-        propagated_anchor_candidates: root.propagated_anchor_candidates.clone(),
-        propagated_inline_containing_block_rects: root.propagated_inline_containing_block_rects.clone(),
-        propagated_abspos_containing_block_info: root.propagated_abspos_containing_block_info.clone(),
+        propagated: root.propagated.clone(),
     });
     formatting_context::RunOutputs {
         result: outputs.result,
@@ -643,7 +641,12 @@ impl FcRunCacheAttempt {
         // A committed-subtree hit omits that subtree's descendant fragments. Do not embed such a
         // skeletal result in an entry that exports an out-of-flow descendant: replaying the parent
         // has to rebuild its paintable subtree so the freshly laid-out descendant can commit.
-        if !root.propagated_pending_abspos.is_empty() && !root.reused_subtree_roots.is_empty() {
+        if root
+            .propagated
+            .as_ref()
+            .is_some_and(|propagated| !propagated.pending_abspos.is_empty())
+            && !root.reused_subtree_roots.is_empty()
+        {
             store.remove_entry(box_.slot_index());
             return;
         }

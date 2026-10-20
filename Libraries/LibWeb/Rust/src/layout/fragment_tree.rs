@@ -532,21 +532,37 @@ pub(crate) struct UnplacedRootFragment {
     pub(crate) node: crate::layout::node_data::NodeSlotId,
     pub(crate) scoped_descendants: Vec<FragmentLink>,
     pub(crate) reused_subtree_roots: HashSet<u32>,
-    pub(crate) propagated_pending_abspos: Vec<abspos_inputs::PendingAbsposChild>,
-    pub(crate) propagated_anchor_candidates: Vec<AnchorCandidate>,
-    pub(crate) propagated_inline_containing_block_rects: Vec<InlineContainingBlockRect>,
-    pub(crate) propagated_abspos_containing_block_info: Vec<AbsposContainingBlockInfoContribution>,
+    /// What the root hands the run it is placed in, which few roots hand anything: none where it hands nothing.
+    pub(crate) propagated: Option<Box<PropagatedPayloads>>,
+}
+
+/// The payloads an unplaced root hands the run it is placed in.
+#[derive(Clone, Default)]
+pub(crate) struct PropagatedPayloads {
+    pub(crate) pending_abspos: Vec<abspos_inputs::PendingAbsposChild>,
+    pub(crate) anchor_candidates: Vec<AnchorCandidate>,
+    pub(crate) inline_containing_block_rects: Vec<InlineContainingBlockRect>,
+    pub(crate) abspos_containing_block_info: Vec<AbsposContainingBlockInfoContribution>,
+}
+
+impl PropagatedPayloads {
+    fn is_empty(&self) -> bool {
+        self.pending_abspos.is_empty()
+            && self.anchor_candidates.is_empty()
+            && self.inline_containing_block_rects.is_empty()
+            && self.abspos_containing_block_info.is_empty()
+    }
+
+    /// The payloads boxed, where there are any.
+    fn boxed(self) -> Option<Box<Self>> {
+        (!self.is_empty()).then(|| Box::new(self))
+    }
 }
 
 impl UnplacedRootFragment {
     /// Whether the root holds nothing past its box: no descendant fragment, reuse marker or payload for an ancestor.
     pub(crate) fn carries_nothing(&self) -> bool {
-        self.scoped_descendants.is_empty()
-            && self.reused_subtree_roots.is_empty()
-            && self.propagated_pending_abspos.is_empty()
-            && self.propagated_anchor_candidates.is_empty()
-            && self.propagated_inline_containing_block_rects.is_empty()
-            && self.propagated_abspos_containing_block_info.is_empty()
+        self.scoped_descendants.is_empty() && self.reused_subtree_roots.is_empty() && self.propagated.is_none()
     }
 }
 
@@ -1027,23 +1043,25 @@ impl RunFragmentBuilder {
         } else {
             pending_fragment.children.extend(root.scoped_descendants);
         }
+        let Some(propagated) = root.propagated else {
+            return;
+        };
+        let propagated = *propagated;
         pending_fragment
             .pending_abspos
-            .extend(root.propagated_pending_abspos.into_iter().map(|mut entry| {
+            .extend(propagated.pending_abspos.into_iter().map(|mut entry| {
                 formatting_context::resolve_pending_abspos_containing_block(callbacks, &mut entry, self.root_node);
                 entry
             }));
-        pending_fragment
-            .anchor_candidates
-            .extend(root.propagated_anchor_candidates);
+        pending_fragment.anchor_candidates.extend(propagated.anchor_candidates);
         pending_fragment
             .inline_containing_block_rects
-            .extend(root.propagated_inline_containing_block_rects);
+            .extend(propagated.inline_containing_block_rects);
         inner.abspos_containing_block_info_contributions_received +=
-            root.propagated_abspos_containing_block_info.len() as u64;
+            propagated.abspos_containing_block_info.len() as u64;
         inner
             .abspos_containing_block_info_contributions
-            .extend(root.propagated_abspos_containing_block_info);
+            .extend(propagated.abspos_containing_block_info);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1300,10 +1318,13 @@ impl RunFragmentBuilder {
             node: self.root_node,
             scoped_descendants: inner.top_scope_links,
             reused_subtree_roots: inner.reused_subtree_roots,
-            propagated_pending_abspos,
-            propagated_anchor_candidates,
-            propagated_inline_containing_block_rects,
-            propagated_abspos_containing_block_info,
+            propagated: PropagatedPayloads {
+                pending_abspos: propagated_pending_abspos,
+                anchor_candidates: propagated_anchor_candidates,
+                inline_containing_block_rects: propagated_inline_containing_block_rects,
+                abspos_containing_block_info: propagated_abspos_containing_block_info,
+            }
+            .boxed(),
         }
     }
 }
