@@ -2106,8 +2106,9 @@ impl StyleEngine {
         self.finalize_staged_sheet_rule_replacements();
         // A diagnostic or retained planning snapshot may still hold this exact immutable routing
         // program. It remains queryable in builder form; compact it at the next unshared boundary.
+        let expects_rules = !self.host.dormant_rules.is_empty();
         if let Some(routing) = Arc::get_mut(&mut self.retained.routing)
-            && routing.finish_directories()
+            && routing.finish_directories(expects_rules)
         {
             routing.settle_memory(&mut self.retained.memory);
         }

@@ -3718,6 +3718,14 @@ impl RouteColumns {
         }
     }
 
+    /// Moves owned columns into allocations of their length and some room, answering whether any moved.
+    fn compact_owned(&mut self) -> bool {
+        let Self::Owned(data) = self else { return false };
+        let before = data.capacity_bytes();
+        data.compact();
+        data.capacity_bytes() != before
+    }
+
     fn share(&mut self, pools: &mut RoutingPools) {
         if matches!(self, Self::Shared(_)) || self.is_empty() {
             return;
@@ -4783,16 +4791,23 @@ impl RoutingRegistry {
         self.by_input.len()
     }
 
-    pub(super) fn finish_directories(&mut self) -> bool {
+    /// Settles the directories, and the route columns once the directories are flat. A registry that `expects_rules`,
+    /// as dormant rules wake, keeps its columns rather than sharing them: the documents that could share them would
+    /// have woken the same rules, and each rule that wakes would copy the columns back out and share them again.
+    pub(super) fn finish_directories(&mut self, expects_rules: bool) -> bool {
         let mut pools = routing_pools();
         let changed = self.by_input.finish(&mut pools.flat_route_directories)
             | self.arrival_by_input.finish(&mut pools.flat_route_directories);
         // NB: The route columns change whenever the directories do, so they are shared once the directories settle.
-        //     Rules that arrive transaction after transaction, as dormant rules wake, then extend one owned copy
-        //     instead of copying and hashing every route each time.
-        if self.by_input.is_flat() && self.arrival_by_input.is_flat() {
-            self.routes.share(&mut pools);
+        //     Rules that arrive transaction after transaction then extend one owned copy instead of copying and
+        //     hashing every route each time.
+        if !(self.by_input.is_flat() && self.arrival_by_input.is_flat()) {
+            return changed;
         }
+        if expects_rules {
+            return self.routes.compact_owned() | changed;
+        }
+        self.routes.share(&mut pools);
         changed
     }
 
@@ -7979,14 +7994,14 @@ mod tests {
         let second = programs.add(second);
 
         registry.add_rule(RuleID(1), first, &programs);
-        assert!(registry.finish_directories());
-        assert!(!registry.finish_directories());
+        assert!(registry.finish_directories(false));
+        assert!(!registry.finish_directories(false));
         assert_eq!(registry.routes_for(RoutingKey::Class(CLASS_ITEM)).len(), 1);
 
         registry.add_rule(RuleID(2), second, &programs);
         assert_eq!(registry.routes_for(RoutingKey::Class(CLASS_ITEM)).len(), 1);
         assert_eq!(registry.routes_for(RoutingKey::Class(CLASS_THEME)).len(), 1);
-        assert!(registry.finish_directories());
+        assert!(registry.finish_directories(false));
         assert_eq!(registry.routes_for(RoutingKey::Class(CLASS_ITEM)).len(), 1);
         assert_eq!(registry.routes_for(RoutingKey::Class(CLASS_THEME)).len(), 1);
     }
