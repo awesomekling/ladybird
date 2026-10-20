@@ -13,13 +13,17 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Index, IndexMut};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-const RULE_RECORDS_PER_PAGE: usize = 128;
+// NB: A page of 126, with its header and the Arc's counts, fills a 5 KiB allocation, where 128 would take the next size
+//     class up.
+const RULE_RECORDS_PER_PAGE: usize = 126;
 
 struct RuleRecordPage {
     values: [Option<Rule>; RULE_RECORDS_PER_PAGE],
     shared_hash: Option<u64>,
     _memory: MemoryLease,
 }
+
+const _: () = assert!(size_of::<RuleRecordPage>() + 2 * size_of::<usize>() <= 5120);
 
 impl RuleRecordPage {
     fn new(values: [Option<Rule>; RULE_RECORDS_PER_PAGE], memory_controller: &mut MemoryController) -> Self {

@@ -17,7 +17,9 @@ use std::hash::{Hash, Hasher};
 use std::num::NonZeroU64;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-const TARGETS_PER_PAGE: usize = 128;
+// NB: A page of 126, with its header and the Arc's counts, fills a 4 KiB allocation, where 128 would take the next size
+//     class up.
+const TARGETS_PER_PAGE: usize = 126;
 
 #[derive(Clone)]
 
@@ -27,6 +29,8 @@ struct TargetPage {
     shared_hash: Option<u64>,
     memory: MemoryLease,
 }
+
+const _: () = assert!(size_of::<TargetPage>() + 2 * size_of::<usize>() <= 4096);
 
 impl TargetPage {
     fn new(values: [Option<NativeRuleTarget>; TARGETS_PER_PAGE], memory_controller: &mut MemoryController) -> Self {

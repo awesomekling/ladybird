@@ -16,7 +16,9 @@ use crate::css::style::weak_pool::WeakPool;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-const RULE_VERSIONS_PER_PAGE: usize = 128;
+// NB: A page of 126, with its header and the Arc's counts, fills a 4 KiB allocation, where 128 would take the next size
+//     class up.
+const RULE_VERSIONS_PER_PAGE: usize = 126;
 
 /// A rule version as a page stores it, each identity it may lack as `NONE`, so that a version takes 32 bytes rather
 /// than 48.
@@ -85,6 +87,8 @@ struct RuleVersionPage {
     shared_hash: Option<u64>,
     _memory: MemoryLease,
 }
+
+const _: () = assert!(size_of::<RuleVersionPage>() + 2 * size_of::<usize>() <= 4096);
 
 impl RuleVersionPage {
     fn new(values: [PackedRuleVersion; RULE_VERSIONS_PER_PAGE], memory_controller: &mut MemoryController) -> Self {
