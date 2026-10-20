@@ -536,7 +536,9 @@ impl<'a> PaintableCommit<'a> {
                     .note_visual_context_box_dirty(piece_node, VisualContextBoxDirtyKind::InlineGeometryChanged);
             }
             // This box has at most one piece per line, so its piece indices are ordered by line.
-            paintable_rows.committed_side_data_mut(piece_node).piece_indices = Some(piece_indices.into());
+            paintable_rows
+                .committed_side_data_mut(piece_node)
+                .set_piece_indices(Some(piece_indices.into()));
         }
     }
 }

@@ -192,17 +192,29 @@ pub struct PaintableSideData {
 #[derive(Clone, Default)]
 pub(crate) struct CommittedSideData {
     pub(crate) inline_content: Option<std::sync::Arc<crate::layout::inline_content::InlineContent>>,
-    pub(crate) piece_indices: Option<std::sync::Arc<[u32]>>,
     pub(crate) overflow_valid_across_recommits: bool,
     pub(crate) overflow_relative_to_padding_box: FfiOverflowData,
-    /// The bounds of the SVG filter the box references, as the visual context update resolved
-    /// them.
-    pub(crate) svg_filter_bounds: Option<used_values::FfiCssPixelRect>,
-    // Only meaningful while is_self_painting(); assigned by the containing block's
-    // assign_fragment_ownership().
-    pub(crate) fragment_ownership: Option<std::sync::Arc<crate::painting::fragment_ownership::FragmentOwnershipFilter>>,
     /// The paint-order decisions paint preparation gathered for the row, if it gathered them.
     pub(crate) order_inputs: crate::painting::paint_order_plan::PaintOrderInputs,
+    /// What only some rows commit, which the others keep no room for.
+    pub(super) rare: Option<Box<RareCommittedSideData>>,
+}
+
+#[derive(Clone, Default)]
+pub(super) struct RareCommittedSideData {
+    piece_indices: Option<std::sync::Arc<[u32]>>,
+    /// The bounds of the SVG filter the box references, as the visual context update resolved
+    /// them.
+    svg_filter_bounds: Option<used_values::FfiCssPixelRect>,
+    // Only meaningful while is_self_painting(); assigned by the containing block's
+    // assign_fragment_ownership().
+    fragment_ownership: Option<std::sync::Arc<crate::painting::fragment_ownership::FragmentOwnershipFilter>>,
+}
+
+impl RareCommittedSideData {
+    fn is_empty(&self) -> bool {
+        self.piece_indices.is_none() && self.svg_filter_bounds.is_none() && self.fragment_ownership.is_none()
+    }
 }
 
 /// Rows are the same when they hold equal records; a shared record is compared only when the rows
@@ -212,14 +224,14 @@ impl PartialEq for CommittedSideData {
         use crate::cow_column::same_payload;
         self.overflow_valid_across_recommits == other.overflow_valid_across_recommits
             && self.overflow_relative_to_padding_box == other.overflow_relative_to_padding_box
-            && self.svg_filter_bounds == other.svg_filter_bounds
+            && self.svg_filter_bounds() == other.svg_filter_bounds()
             && self.order_inputs == other.order_inputs
-            && same_payload(self.piece_indices.as_ref(), other.piece_indices.as_ref(), |a, b| a == b)
             && same_payload(
-                self.fragment_ownership.as_ref(),
-                other.fragment_ownership.as_ref(),
+                self.rare().and_then(|rare| rare.piece_indices.as_ref()),
+                other.rare().and_then(|rare| rare.piece_indices.as_ref()),
                 |a, b| a == b,
             )
+            && same_payload(self.fragment_ownership(), other.fragment_ownership(), |a, b| a == b)
             && same_payload(self.inline_content.as_ref(), other.inline_content.as_ref(), |a, b| {
                 a == b
             })
@@ -233,12 +245,73 @@ impl CommittedSideData {
 
     pub(crate) fn clear_committed_records(&mut self) {
         self.inline_content = None;
-        self.piece_indices = None;
+        self.set_piece_indices(None);
+    }
+
+    fn rare(&self) -> Option<&RareCommittedSideData> {
+        self.rare.as_deref()
+    }
+
+    /// Changes the rare data with `change`, keeping no room for it where it is left empty.
+    fn change_rare<R>(&mut self, change: impl FnOnce(&mut RareCommittedSideData) -> R) -> R {
+        let rare = self.rare.get_or_insert_with(Box::default);
+        let result = change(rare);
+        if rare.is_empty() {
+            self.rare = None;
+        }
+        result
     }
 
     /// The indices of an inline box's pieces in its line root's inline content.
     pub(crate) fn piece_indices(&self) -> &[u32] {
-        self.piece_indices.as_deref().unwrap_or_default()
+        self.rare()
+            .and_then(|rare| rare.piece_indices.as_deref())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn set_piece_indices(&mut self, piece_indices: Option<std::sync::Arc<[u32]>>) {
+        if piece_indices.is_none() && self.rare.is_none() {
+            return;
+        }
+        self.change_rare(|rare| rare.piece_indices = piece_indices);
+    }
+
+    pub(crate) fn svg_filter_bounds(&self) -> Option<used_values::FfiCssPixelRect> {
+        self.rare().and_then(|rare| rare.svg_filter_bounds)
+    }
+
+    /// Sets the SVG filter bounds, answering the ones they replace.
+    pub(crate) fn replace_svg_filter_bounds(
+        &mut self,
+        bounds: Option<used_values::FfiCssPixelRect>,
+    ) -> Option<used_values::FfiCssPixelRect> {
+        if bounds.is_none() && self.rare.is_none() {
+            return None;
+        }
+        self.change_rare(|rare| std::mem::replace(&mut rare.svg_filter_bounds, bounds))
+    }
+
+    pub(crate) fn fragment_ownership(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::painting::fragment_ownership::FragmentOwnershipFilter>> {
+        self.rare().and_then(|rare| rare.fragment_ownership.as_ref())
+    }
+
+    pub(crate) fn set_fragment_ownership(
+        &mut self,
+        filter: Option<std::sync::Arc<crate::painting::fragment_ownership::FragmentOwnershipFilter>>,
+    ) {
+        if filter.is_none() && self.rare.is_none() {
+            return;
+        }
+        self.change_rare(|rare| rare.fragment_ownership = filter);
+    }
+
+    pub(crate) fn take_fragment_ownership(
+        &mut self,
+    ) -> Option<std::sync::Arc<crate::painting::fragment_ownership::FragmentOwnershipFilter>> {
+        self.rare.as_ref()?.fragment_ownership.as_ref()?;
+        self.change_rare(|rare| rare.fragment_ownership.take())
     }
 
     pub(crate) fn lines(&self) -> &[crate::layout::inline_content::LineRecord] {

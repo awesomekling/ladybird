@@ -129,7 +129,7 @@ impl Verifier<'_> {
             for (owner, recomputed_filter) in
                 crate::painting::fragment_ownership::compute_fragment_ownership_for_block(&paintable_rows, slot)
             {
-                let stored_filter = self.arena.committed_side_data(owner).fragment_ownership.clone();
+                let stored_filter = self.arena.committed_side_data(owner).fragment_ownership().cloned();
                 if stored_filter.as_deref() != Some(&recomputed_filter) {
                     self.report.note(format_args!(
                         "fragment ownership of {owner:?} under line root {slot:?} diverges from a fresh computation"

@@ -211,8 +211,7 @@ fn assign_for_block(layout_arena: &impl PaintableRowsRead, block: NodeSlotId) {
     let previous_filter_of = |paintable: NodeSlotId| {
         let assigned = layout_arena
             .committed_side_data_mut(paintable)
-            .fragment_ownership
-            .take();
+            .take_fragment_ownership();
         assigned.or_else(|| {
             layout_arena
                 .paintable_side_data_mut(paintable)
@@ -241,12 +240,14 @@ fn assign_for_block(layout_arena: &impl PaintableRowsRead, block: NodeSlotId) {
                 PaintDamage::DRAW_FOREGROUND | PaintDamage::HIT_FOREGROUND | PaintDamage::ORDER,
             );
         }
-        layout_arena.committed_side_data_mut(owner).fragment_ownership = Some(std::sync::Arc::new(filter));
+        layout_arena
+            .committed_side_data_mut(owner)
+            .set_fragment_ownership(Some(std::sync::Arc::new(filter)));
     }
     for (previous_owner, _) in boxes_with_previous_filters {
         if layout_arena
             .committed_side_data(previous_owner)
-            .fragment_ownership
+            .fragment_ownership()
             .is_none()
         {
             layout_arena.push_paint_damage(
@@ -258,7 +259,7 @@ fn assign_for_block(layout_arena: &impl PaintableRowsRead, block: NodeSlotId) {
 }
 
 pub(crate) fn effective_filter(layout_arena: &impl PaintRead, paintable: NodeSlotId) -> FragmentOwnershipFilter {
-    if let Some(filter) = &layout_arena.committed_side_data(paintable).fragment_ownership {
+    if let Some(filter) = layout_arena.committed_side_data(paintable).fragment_ownership() {
         return FragmentOwnershipFilter::clone(filter);
     }
     if node_painting::has_lines(layout_arena, paintable) {

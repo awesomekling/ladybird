@@ -68,24 +68,22 @@ mod tests {
         use crate::layout::inline_content::InlineContent;
         use std::sync::Arc;
 
-        let side_data = CommittedSideData {
+        let mut side_data = CommittedSideData {
             inline_content: Some(Arc::new(InlineContent::default())),
-            piece_indices: Some(Arc::from([1, 2])),
             ..Default::default()
         };
+        side_data.set_piece_indices(Some(Arc::from([1, 2])));
         assert!(side_data == side_data.clone());
 
-        let equal_records = CommittedSideData {
+        let mut equal_records = CommittedSideData {
             inline_content: Some(Arc::new(InlineContent::default())),
-            piece_indices: Some(Arc::from([1, 2])),
             ..Default::default()
         };
+        equal_records.set_piece_indices(Some(Arc::from([1, 2])));
         assert!(side_data == equal_records);
 
-        let other_pieces = CommittedSideData {
-            piece_indices: Some(Arc::from([1])),
-            ..side_data.clone()
-        };
+        let mut other_pieces = side_data.clone();
+        other_pieces.set_piece_indices(Some(Arc::from([1])));
         assert!(side_data != other_pieces);
 
         let without_content = CommittedSideData {
@@ -541,7 +539,7 @@ where
         let filter = {
             let mut committed = self.arena.committed_side_data_mut(id);
             committed.clear_committed_records();
-            committed.fragment_ownership.take()
+            committed.take_fragment_ownership()
         };
         let mut side = self.arena.paintable_side_data_mut(id);
         side.overflow_measured_this_commit.set(false);

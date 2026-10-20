@@ -268,7 +268,7 @@ pub(crate) fn box_owns_geometry_dependent_nodes(
     slot: NodeSlotId,
     handles: &BoxVisualContextNodeHandles,
 ) -> bool {
-    if layout_arena.committed_side_data(slot).svg_filter_bounds.is_some() {
+    if layout_arena.committed_side_data(slot).svg_filter_bounds().is_some() {
         return true;
     }
     let spatial_is_geometry_dependent = handles.spatial.iter().any(|index| {

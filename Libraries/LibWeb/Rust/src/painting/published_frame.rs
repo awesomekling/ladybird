@@ -279,13 +279,13 @@ mod tests {
         link.inset_left = CssPixels::from_integer(10);
         arena.set_committed_fragment_link(node, link.clone(), None);
         arena.paintable_rows_mut().paintable_data_mut(node).offset.x = CssPixels::from_integer(10).into();
-        arena.committed_side_data_mut(node).piece_indices = Some([0].into());
+        arena.committed_side_data_mut(node).set_piece_indices(Some([0].into()));
 
         let published = arena.publish_rows();
         link.inset_left = CssPixels::from_integer(20);
         arena.set_committed_fragment_link(node, link, None);
         arena.paintable_rows_mut().paintable_data_mut(node).offset.x = CssPixels::from_integer(20).into();
-        arena.committed_side_data_mut(node).piece_indices = None;
+        arena.committed_side_data_mut(node).set_piece_indices(None);
 
         assert_eq!(
             published.paintable_data(node).offset.x,
