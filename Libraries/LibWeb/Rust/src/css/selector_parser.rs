@@ -1013,8 +1013,12 @@ impl<'a> SelectorParser<'a> {
         })
     }
 
-    fn parse_compound_simple_selectors(&mut self, stream: &mut Stream<'_>) -> Result<Vec<SimpleSelector>, ()> {
-        let mut simple_selectors = Vec::new();
+    fn parse_compound_simple_selectors(
+        &mut self,
+        stream: &mut Stream<'_>,
+    ) -> Result<smallvec::SmallVec<[SimpleSelector; 4]>, ()> {
+        // NB: Gathered beside the stack, the simple selectors of a compound are allocated once, at their length.
+        let mut simple_selectors = smallvec::SmallVec::new();
         while let Some(simple_selector) = self.parse_simple_selector(stream)? {
             if matches!(simple_selector, SimpleSelector::TagName(_)) && !simple_selectors.is_empty() {
                 return Err(());

@@ -462,6 +462,20 @@ impl CompiledSelector {
                 }
             });
 
+        let header = |compound: &CompoundSelector, end: usize| CompoundHeader {
+            end: u16::try_from(end).expect("a selector cannot have 65536 simple selectors"),
+            combinator: compound.combinator,
+            is_implicit_universal_anchor: compound.is_implicit_universal_anchor,
+        };
+        // NB: Most selectors are one compound, whose simple selectors already sit in an allocation of their own.
+        if compound_selectors.len() == 1 {
+            let compound = compound_selectors.into_vec().pop().unwrap();
+            return Self {
+                compound_headers: CompoundHeaders::new(&[header(&compound, compound.simple_selectors.len())]),
+                simple_selectors: compound.simple_selectors,
+                target_pseudo_element,
+            };
+        }
         let mut simple_selectors = Vec::with_capacity(
             compound_selectors
                 .iter()
@@ -472,12 +486,9 @@ impl CompiledSelector {
             .into_vec()
             .into_iter()
             .map(|compound| {
+                let header = header(&compound, simple_selectors.len() + compound.simple_selectors.len());
                 simple_selectors.extend(compound.simple_selectors.into_vec());
-                CompoundHeader {
-                    end: u16::try_from(simple_selectors.len()).expect("a selector cannot have 65536 simple selectors"),
-                    combinator: compound.combinator,
-                    is_implicit_universal_anchor: compound.is_implicit_universal_anchor,
-                }
+                header
             })
             .collect::<smallvec::SmallVec<[CompoundHeader; 3]>>();
         Self {
