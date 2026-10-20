@@ -49,6 +49,21 @@ public:
     WebIDL::ExceptionOr<Vector<GC::Ref<Animation>>> get_animations(Bindings::GetAnimationsOptions const& options);
     WebIDL::ExceptionOr<Vector<GC::Ref<Animation>>> get_animations_internal(GetAnimationsSorted sorted, GetAnimationsOptions const& options);
     ReadonlySpan<GC::Ref<Animation>> associated_animations_in_composite_order();
+    // NB: Only the elements whose generations are read count them: an effect reads its target's before it caches what
+    //     it read against them.
+    u64 animation_style_generation() const { return ensure_impl().style_generation; }
+    u64 animation_subtree_style_generation() const { return ensure_impl().subtree_style_generation; }
+    void note_animation_style_changed()
+    {
+        if (m_impl)
+            ++m_impl->style_generation;
+    }
+    void note_animation_subtree_style_changed()
+    {
+        if (m_impl)
+            ++m_impl->subtree_style_generation;
+    }
+
     ReadonlySpan<GC::Ref<Animation>> associated_animations_unordered() const { return m_impl ? m_impl->associated_animations.span() : ReadonlySpan<GC::Ref<Animation>> {}; }
     void invalidate_associated_animation_composite_order();
     bool has_relevant_animations() const;
@@ -86,6 +101,11 @@ private:
         Vector<GC::Ref<Animation>> associated_animations;
         bool is_sorted_by_composite_order { true };
         bool has_css_defined_animations { false };
+
+        // Advanced whenever the style of the element, or of an element in its subtree, is set, so that an effect can
+        // tell whether its target's style moved since it last looked.
+        u64 style_generation { 0 };
+        u64 subtree_style_generation { 0 };
 
         mutable Array<OwnPtr<Vector<GC::Ref<CSS::CSSAnimation>>>, to_underlying(CSS::PseudoElement::KnownPseudoElementCount) + 1> css_defined_animations;
         mutable Array<OwnPtr<Transition>, to_underlying(CSS::PseudoElement::KnownPseudoElementCount) + 1> transitions;

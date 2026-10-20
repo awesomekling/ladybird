@@ -433,8 +433,6 @@ public:
     // The style the element or one of its pseudo-elements installed last, which reading asks nothing of the engine.
     [[nodiscard]] CSS::InstalledStyle const& installed_style(Optional<CSS::PseudoElement> = {}) const;
     [[nodiscard]] CSS::StyleRecordID style_record_identity(Optional<CSS::PseudoElement> pseudo_element = {}) const { return installed_style(pseudo_element).record(); }
-    u64 animation_style_generation() const { return m_animation_style_generation; }
-    u64 animation_subtree_style_generation() const { return m_animation_subtree_style_generation; }
     [[nodiscard]] bool has_style(Optional<CSS::PseudoElement> pseudo_element = {}) const { return !!style_record_identity(pseudo_element); }
     [[nodiscard]] void const* style_record_payloads(Optional<CSS::PseudoElement> pseudo_element = {}) const { return installed_style(pseudo_element).payloads(); }
     template<typename StyleGroup>
@@ -1073,8 +1071,6 @@ private:
     // borrow the record-owned computed-values view rather than retaining one complete style per
     // element.
     CSS::InstalledStyle m_installed_style;
-    u64 m_animation_style_generation { 0 };
-    u64 m_animation_subtree_style_generation { 0 };
     PublishedCustomPropertyNames m_published_custom_property_names;
 
     void register_element_reference_pseudo_element(CSS::PseudoElement type, GC::Ref<Element> element);
