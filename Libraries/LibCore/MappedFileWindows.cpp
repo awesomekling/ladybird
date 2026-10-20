@@ -103,6 +103,11 @@ MappedFile::MappedFile(void* mapping, size_t mapping_size, void* data, size_t si
     , m_mapping_size(mapping_size)
     , m_data(data)
     , m_size(size)
+    , m_mode(mode)
+{
+}
+
+void MappedFile::release_resident_pages() const
 {
 }
 

@@ -999,6 +999,9 @@ void fetch_response_handover(JS::Realm& realm, Infrastructure::FetchParams const
             if (response.body()) {
                 if (auto const* source_bytes = response.body()->source().get_pointer<Core::ImmutableBytes>()) {
                     (algorithms->process_response_consume_body())(response, *source_bytes);
+                    // NB: A body the disk cache maps has been read through by now, and is read from the file again if
+                    //     it is read later, as a hit in the memory cache reads it.
+                    source_bytes->release_resident_file_pages();
                     return;
                 }
             }

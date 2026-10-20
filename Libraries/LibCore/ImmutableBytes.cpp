@@ -68,6 +68,12 @@ ErrorOr<ByteBuffer> ImmutableBytes::copy_to_byte_buffer() const
     return ByteBuffer::copy(bytes());
 }
 
+void ImmutableBytes::release_resident_file_pages() const
+{
+    if (m_impl)
+        m_impl->release_resident_file_pages();
+}
+
 ImmutableBytes::ImmutableBytes(NonnullRefPtr<Impl> impl)
     : m_impl(move(impl))
 {
@@ -102,6 +108,12 @@ bool ImmutableBytes::Impl::is_file_backed() const
 bool ImmutableBytes::Impl::is_readonly_mapped() const
 {
     return m_storage.has<ReadonlyMapping>();
+}
+
+void ImmutableBytes::Impl::release_resident_file_pages() const
+{
+    if (auto const* mapped_file = m_storage.get_pointer<NonnullOwnPtr<MappedFile>>())
+        (*mapped_file)->release_resident_pages();
 }
 
 ReadonlyBytes ImmutableBytes::Impl::bytes() const

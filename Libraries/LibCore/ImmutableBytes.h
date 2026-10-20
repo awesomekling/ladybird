@@ -39,6 +39,10 @@ public:
     [[nodiscard]] ReadonlyBytes bytes() const LIFETIME_BOUND;
     [[nodiscard]] ErrorOr<ByteBuffer> copy_to_byte_buffer() const;
 
+    // Lets the system take back the pages of file-backed bytes, which it reads from the file again as they are next
+    // read: the bytes stay as they are.
+    void release_resident_file_pages() const;
+
 private:
     class Impl final : public RefCounted<Impl> {
     public:
@@ -69,6 +73,7 @@ private:
         [[nodiscard]] bool is_file_backed() const;
         [[nodiscard]] bool is_readonly_mapped() const;
         [[nodiscard]] ReadonlyBytes bytes() const LIFETIME_BOUND;
+        void release_resident_file_pages() const;
 
     private:
         Variant<ByteBuffer, NonnullOwnPtr<MappedFile>, ReadonlyMapping> m_storage;

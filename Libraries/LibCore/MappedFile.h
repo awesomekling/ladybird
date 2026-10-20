@@ -32,6 +32,10 @@ public:
     void const* data() const { return m_data; }
     ReadonlyBytes bytes() const LIFETIME_BOUND { return { m_data, m_size }; }
 
+    // Lets the system take back the pages of a read-only mapping that it holds resident, which it reads from the file
+    // again as they are next read.
+    void release_resident_pages() const;
+
 private:
     explicit MappedFile(void* mapping, size_t mapping_size, void* data, size_t size, Mode);
 
@@ -39,6 +43,7 @@ private:
     size_t m_mapping_size { 0 };
     void* m_data { nullptr };
     size_t m_size { 0 };
+    Mode m_mode { Mode::ReadOnly };
 };
 
 }
