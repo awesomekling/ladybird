@@ -21,8 +21,8 @@ use super::selector::{
     PseudoClassParameterType, PseudoClassType, PseudoElementParameterType, PseudoElementType, SelectorString,
 };
 use super::selector::{
-    AttributeSelector, CompiledSelector, CompoundSelector, NameSelector, PseudoClassSelector, PseudoElementSelector,
-    PseudoElementValue, QualifiedName, SelectorList, SimpleSelector,
+    AttributeSelector, CompiledSelector, CompoundSelector, NameSelector, ParsedSelectors, PseudoClassSelector,
+    PseudoElementSelector, PseudoElementValue, QualifiedName, SelectorList, SimpleSelector,
 };
 use super::selector::{RustSelector, search_text_match_filter};
 
@@ -1179,7 +1179,7 @@ fn parse_pseudo_element_selector(input: TokenizerInput<'_>) -> Result<(Arc<Compi
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RustParsedSelectorList {
-    pub(crate) selectors: SelectorList,
+    pub(crate) selectors: ParsedSelectors,
 }
 
 // Parsed selectors and their interned names can be shared across threads.
@@ -1193,7 +1193,7 @@ impl RustParsedSelectorList {
         if parent == StyleNestingParent::None {
             return self;
         }
-        for selector in &mut self.selectors {
+        for selector in self.selectors.iter_mut() {
             let first = selector
                 .first_compound()
                 .map_or(Combinator::None, |compound| compound.combinator);
@@ -1212,11 +1212,13 @@ impl RustParsedSelectorList {
     }
 
     pub(crate) fn new(selectors: SelectorList) -> Self {
-        Self { selectors }
+        Self {
+            selectors: selectors.into(),
+        }
     }
 
     #[cfg(test)]
-    pub(crate) fn selectors(&self) -> &SelectorList {
+    pub(crate) fn selectors(&self) -> &[CompiledSelector] {
         &self.selectors
     }
 

@@ -243,9 +243,9 @@ pub unsafe extern "C" fn rust_selector_contains_named_namespace(selector: *const
 }
 
 pub(crate) fn absolutize_selector_list(
-    selectors: &SelectorList,
+    selectors: &[CompiledSelector],
     parent: StyleNestingParent,
-    parents: &SelectorList,
+    parents: &[CompiledSelector],
 ) -> Option<SelectorList> {
     if !selectors.iter().any(|selector| {
         contains_nesting(selector)
@@ -260,7 +260,7 @@ pub(crate) fn absolutize_selector_list(
         return None;
     }
     let replacement = if parent == StyleNestingParent::Style {
-        pseudo_class(PseudoClassType::Is, parents.clone())
+        pseudo_class(PseudoClassType::Is, parents.into())
     } else {
         pseudo_class(PseudoClassType::Where, Box::new([scope_selector()]))
     };
@@ -285,7 +285,7 @@ pub(crate) fn absolutize_selector_list(
     )
 }
 
-pub(crate) fn adapt_scope_end_selector_list(selectors: &SelectorList) -> SelectorList {
+pub(crate) fn adapt_scope_end_selector_list(selectors: &[CompiledSelector]) -> SelectorList {
     selectors
         .iter()
         .map(|selector| {
@@ -328,7 +328,7 @@ mod tests {
             let units: Vec<_> = source.encode_utf16().collect();
             let values = consume_a_list_of_component_values(tokenize_for_parser(units.as_slice())).unwrap();
             let parsed = parse_selector_list_from_component_values(&values, &[], kind).unwrap();
-            parsed.selectors
+            parsed.selectors[..].into()
         }
         fn text(selectors: super::SelectorList) -> Vec<Vec<u16>> {
             selectors
@@ -389,7 +389,7 @@ mod tests {
         parse_selector_list_from_component_values(&values, &[TokenizerInput::Ascii(b"foo")], SelectorType::Standalone)
             .unwrap()
             .selectors()
-            .clone()
+            .into()
     }
 
     #[test]

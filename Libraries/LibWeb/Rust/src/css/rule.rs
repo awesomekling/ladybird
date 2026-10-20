@@ -288,9 +288,7 @@ impl NativeRule {
             // https://drafts.csswg.org/css-cascade-6/#scoped-declarations
             // Declarations may be used directly with the body of a @scope rule. Contiguous runs of declarations are
             // wrapped in nested declarations rules, which match the scoping root with zero specificity.
-            return Rc::new(RustParsedSelectorList {
-                selectors: scope_root_selector_list(),
-            });
+            return Rc::new(RustParsedSelectorList::new(scope_root_selector_list()));
         }
         let RulePayload::Style(style) = &self.payload else {
             unreachable!()
@@ -316,12 +314,15 @@ impl NativeRule {
         {
             return cached.selectors.clone();
         }
-        let empty: crate::css::selector::SelectorList = Box::new([]);
-        let parent_selectors = parents.as_ref().map_or(&empty, |parents| &parents.selectors);
-        let selectors = Rc::new(RustParsedSelectorList {
-            selectors: absolutize_selector_list(&source.selectors, parent_kind, parent_selectors)
-                .unwrap_or_else(|| source.selectors.clone()),
-        });
+        let parent_selectors: &[_] = parents.as_ref().map_or(&[], |parents| &parents.selectors);
+        let selectors = Rc::new(
+            match absolutize_selector_list(&source.selectors, parent_kind, parent_selectors) {
+                Some(selectors) => RustParsedSelectorList::new(selectors),
+                None => RustParsedSelectorList {
+                    selectors: source.selectors.clone(),
+                },
+            },
+        );
         *self.matching_selectors.borrow_mut() = Some(MatchingSelectorCache {
             source,
             parent_kind,
@@ -366,9 +367,9 @@ impl NativeRule {
         if let Some(cached) = self.scope_end_selectors.borrow().as_ref() {
             return Some(cached.clone());
         }
-        let selectors = Rc::new(RustParsedSelectorList {
-            selectors: adapt_scope_end_selector_list(&source.selectors),
-        });
+        let selectors = Rc::new(RustParsedSelectorList::new(adapt_scope_end_selector_list(
+            &source.selectors,
+        )));
         *self.scope_end_selectors.borrow_mut() = Some(selectors.clone());
         Some(selectors)
     }

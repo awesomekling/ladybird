@@ -63,14 +63,12 @@ impl SelectorInputs {
         source: &RustParsedSelectorList,
         parent_kind: StyleNestingParent,
     ) -> Option<RustParsedSelectorList> {
-        let empty: crate::css::selector::SelectorList = Box::new([]);
-        let parents = if parent_kind == StyleNestingParent::Style {
-            self.parents.as_ref().map_or(&empty, |parents| &parents.selectors)
+        let parents: &[_] = if parent_kind == StyleNestingParent::Style {
+            self.parents.as_ref().map_or(&[], |parents| &parents.selectors)
         } else {
-            &empty
+            &[]
         };
-        absolutize_selector_list(&source.selectors, parent_kind, parents)
-            .map(|selectors| RustParsedSelectorList { selectors })
+        absolutize_selector_list(&source.selectors, parent_kind, parents).map(RustParsedSelectorList::new)
     }
 
     fn bind(&self, source: &RustParsedSelectorList, parent_kind: StyleNestingParent) -> Arc<RustParsedSelectorList> {
@@ -102,9 +100,7 @@ impl SelectorInputs {
                     return Some(parents.clone());
                 }
                 assert_eq!(self.parent_kind, StyleNestingParent::Scope);
-                Some(Arc::new(RustParsedSelectorList {
-                    selectors: scope_root_selector_list(),
-                }))
+                Some(Arc::new(RustParsedSelectorList::new(scope_root_selector_list())))
             }
             _ => None,
         }
@@ -130,9 +126,10 @@ impl SelectorInputs {
                 self.immediate_parent_kind
             };
             let start = scope.start.as_ref().map(|start| self.bind(start, parent_kind));
-            let end = scope.end.as_ref().map(|end| RustParsedSelectorList {
-                selectors: adapt_scope_end_selector_list(&end.selectors),
-            });
+            let end = scope
+                .end
+                .as_ref()
+                .map(|end| RustParsedSelectorList::new(adapt_scope_end_selector_list(&end.selectors)));
             Arc::make_mut(&mut nested.scope).push(start.as_deref(), end.as_ref(), implicit_root);
         }
         match rule.rule_type() {

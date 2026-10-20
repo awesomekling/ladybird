@@ -13,6 +13,46 @@ use crate::css::retained_fly_string::RetainedUtf16FlyString;
 pub type SelectorString = crate::css::css_string::CssString;
 pub type SelectorList = Box<[CompiledSelector]>;
 
+/// The selectors of a parsed selector list, the one most lists have held in place rather than in an allocation of its
+/// own.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ParsedSelectors {
+    One(CompiledSelector),
+    Many(SelectorList),
+}
+
+const _: () = assert!(size_of::<ParsedSelectors>() == size_of::<CompiledSelector>());
+
+impl From<SelectorList> for ParsedSelectors {
+    fn from(selectors: SelectorList) -> Self {
+        if selectors.len() == 1 {
+            Self::One(selectors.into_vec().pop().unwrap())
+        } else {
+            Self::Many(selectors)
+        }
+    }
+}
+
+impl std::ops::Deref for ParsedSelectors {
+    type Target = [CompiledSelector];
+
+    fn deref(&self) -> &[CompiledSelector] {
+        match self {
+            Self::One(selector) => std::slice::from_ref(selector),
+            Self::Many(selectors) => selectors,
+        }
+    }
+}
+
+impl std::ops::DerefMut for ParsedSelectors {
+    fn deref_mut(&mut self) -> &mut [CompiledSelector] {
+        match self {
+            Self::One(selector) => std::slice::from_mut(selector),
+            Self::Many(selectors) => selectors,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 // NB: Some variants are only constructed by C++ through the FFI.
