@@ -204,7 +204,11 @@ impl RetainedState {
         let owing: HashSet<StyleNodeID> = host
             .journal
             .inputs()
-            .chain(host.deferred_element_style_inputs.iter().copied())
+            .chain(
+                host.deferred_element_style_inputs
+                    .iter()
+                    .map(|input| input.normalized()),
+            )
             .filter_map(|input| input.key.style_node())
             .collect();
         owing.is_empty()

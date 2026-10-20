@@ -481,6 +481,7 @@ impl StyleEngine {
                 && self.host.sheet_rule_replacement.is_none();
         self.host.deferred_element_style_inputs_moved |= !self.host.deferred_element_style_inputs.is_empty();
         for input in std::mem::take(&mut self.host.deferred_element_style_inputs) {
+            let input = input.normalized();
             self.record_input(input.key, input.old, input.new);
         }
         self.host.deferred_element_style_inputs_are_pending = false;

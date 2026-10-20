@@ -353,6 +353,31 @@ pub struct NormalizedInput {
     pub new: InputValue,
 }
 
+/// An element style input the engine owes the next transaction. It always moves from no reaction, so only what it
+/// moves to is kept, in a fraction of a normalized input's room: a page can owe one for every element.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DeferredElementStyleInput {
+    pub(crate) node: StyleNodeID,
+    pub(crate) reaction: u8,
+    pub(crate) inherited_style_groups: u8,
+}
+
+impl DeferredElementStyleInput {
+    pub(crate) fn normalized(self) -> NormalizedInput {
+        NormalizedInput {
+            key: InputKey::ElementStyleInput(self.node),
+            old: InputValue::ElementStyleInput {
+                reaction: 0,
+                inherited_style_groups: 0,
+            },
+            new: InputValue::ElementStyleInput {
+                reaction: self.reaction,
+                inherited_style_groups: self.inherited_style_groups,
+            },
+        }
+    }
+}
+
 /// One rule-side row produced by changing an input of the active-rule-match join.
 ///
 /// Selector, attachment, and activation changes alter which selector truth joins the rule.

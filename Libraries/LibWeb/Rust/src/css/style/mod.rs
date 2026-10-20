@@ -1329,7 +1329,7 @@ pub struct HostState {
     deferred_geometry_journal: NormalizationJournal,
     flushing_deferred_geometry_journal: bool,
     /// Exact element reactions retained across rootless flushes until a style root can consume them.
-    deferred_element_style_inputs: Vec<NormalizedInput>,
+    deferred_element_style_inputs: Vec<transaction::DeferredElementStyleInput>,
     /// Whether the deferred element style inputs moved since the document's host last took them.
     deferred_element_style_inputs_moved: bool,
     /// Whether the deferred element style inputs are owed to the next transaction, as opposed to

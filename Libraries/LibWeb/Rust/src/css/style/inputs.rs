@@ -2355,12 +2355,9 @@ impl StyleEngine {
         let index = self
             .host
             .deferred_element_style_inputs
-            .binary_search_by_key(&InputKey::ElementStyleInput(node), |pending| pending.key)
+            .binary_search_by_key(&node, |pending| pending.node)
             .ok()?;
-        match self.host.deferred_element_style_inputs[index].new {
-            InputValue::ElementStyleInput { reaction, .. } => Some(reaction),
-            _ => None,
-        }
+        Some(self.host.deferred_element_style_inputs[index].reaction)
     }
 
     pub fn absorb_element_style_input(
@@ -2373,17 +2370,15 @@ impl StyleEngine {
         let Ok(index) = self
             .host
             .deferred_element_style_inputs
-            .binary_search_by_key(&InputKey::ElementStyleInput(node), |pending| pending.key)
+            .binary_search_by_key(&node, |pending| pending.node)
         else {
             return 0;
         };
-        let InputValue::ElementStyleInput {
+        let transaction::DeferredElementStyleInput {
             reaction: pending_reaction,
             inherited_style_groups: pending_inherited_style_groups,
-        } = self.host.deferred_element_style_inputs[index].new
-        else {
-            unreachable!();
-        };
+            ..
+        } = self.host.deferred_element_style_inputs[index];
         // A descendant recompute asks nothing of the element its own reaction does not answer, and
         // the applied reaction carries what it asks of the descendants to the element's children.
         if !absorbs_any
@@ -2409,16 +2404,7 @@ impl StyleEngine {
             self.host
                 .deferred_element_style_inputs
                 .iter()
-                .filter_map(|input| match (input.key, input.new) {
-                    (
-                        InputKey::ElementStyleInput(node),
-                        InputValue::ElementStyleInput {
-                            reaction,
-                            inherited_style_groups,
-                        },
-                    ) => Some((node, reaction, inherited_style_groups)),
-                    _ => None,
-                })
+                .map(|input| (input.node, input.reaction, input.inherited_style_groups))
                 .collect(),
         )
     }
@@ -2428,7 +2414,7 @@ impl StyleEngine {
         if let Ok(index) = self
             .host
             .deferred_element_style_inputs
-            .binary_search_by_key(&InputKey::ElementStyleInput(node), |pending| pending.key)
+            .binary_search_by_key(&node, |pending| pending.node)
         {
             self.host.deferred_element_style_inputs.remove(index);
             self.host.deferred_element_style_inputs_moved = true;
@@ -2441,21 +2427,15 @@ impl StyleEngine {
         let Ok(index) = self
             .host
             .deferred_element_style_inputs
-            .binary_search_by_key(&InputKey::ElementStyleInput(node), |pending| pending.key)
+            .binary_search_by_key(&node, |pending| pending.node)
         else {
             return;
         };
         self.host.deferred_element_style_inputs_moved = true;
-        let InputValue::ElementStyleInput {
-            reaction,
-            inherited_style_groups,
-        } = &mut self.host.deferred_element_style_inputs[index].new
-        else {
-            unreachable!();
-        };
-        if *reaction & transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES != 0 {
-            *reaction = transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES;
-            *inherited_style_groups = 0;
+        let pending = &mut self.host.deferred_element_style_inputs[index];
+        if pending.reaction & transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES != 0 {
+            pending.reaction = transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES;
+            pending.inherited_style_groups = 0;
         } else {
             self.host.deferred_element_style_inputs.remove(index);
         }
@@ -3697,7 +3677,7 @@ impl HostState {
     /// key, so this is a binary search.
     pub(super) fn owes_element_style_input(&self, node: StyleNodeID) -> bool {
         self.deferred_element_style_inputs
-            .binary_search_by_key(&InputKey::ElementStyleInput(node), |pending| pending.key)
+            .binary_search_by_key(&node, |pending| pending.node)
             .is_ok()
     }
 }
