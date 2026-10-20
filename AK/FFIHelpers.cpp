@@ -208,6 +208,21 @@ extern "C" void ladybird_dealloc(void* pointer, size_t alignment)
 
 extern "C" void* ladybird_realloc(void* pointer, size_t old_size, size_t new_size, size_t alignment)
 {
+    if (new_size < old_size && alignment <= alignof(max_align_t)) {
+        // NB: The allocator keeps a block that shrinks by less than half where it is, with all of its room, while a
+        //     shrink is asked for to give the room back: a vector that is done growing keeps up to half of its block
+        //     unused. So the bytes move to a block of their size, where that block is smaller.
+        auto* shrunk = ak_kmalloc(max(new_size, alignment));
+        if (!shrunk)
+            return nullptr;
+        if (ak_kmalloc_usable_size(shrunk) >= ak_kmalloc_usable_size(pointer)) {
+            ak_kfree(shrunk);
+            return pointer;
+        }
+        __builtin_memcpy(shrunk, pointer, new_size);
+        ak_kfree(pointer);
+        return shrunk;
+    }
     if (alignment <= alignof(max_align_t))
         return ak_krealloc(pointer, max(new_size, alignment));
     auto* new_pointer = ladybird_alloc(new_size, alignment);
