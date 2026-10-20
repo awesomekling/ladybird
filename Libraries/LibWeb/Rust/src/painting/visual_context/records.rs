@@ -11,6 +11,7 @@ use super::{ClipNodeIndex, ContextRef, EffectNodeIndex, SpatialNodeIndex, Visual
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::host::FfiCompositorAnimationPublishOutcome;
 use crate::painting::visual_animation::VisualAnimation;
+use std::sync::Arc;
 
 #[derive(Clone, Default)]
 pub struct VisualContextState {
@@ -152,10 +153,11 @@ pub(crate) struct DescendantVisualContexts {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PaintableVisualContextRecord {
-    pub inherited_input: DescendantVisualContexts,
+    /// What the box inherits, which its siblings inherit as well, so the records share it.
+    inherited_input: Arc<DescendantVisualContexts>,
     /// What the box hands its descendants where that is not what it inherits. Most boxes hand on what they inherit,
     /// and the paintable rows keep a record in place for every box.
-    output_differing_from_input: Option<Box<DescendantVisualContexts>>,
+    output_differing_from_input: Option<Arc<DescendantVisualContexts>>,
     pub owns_geometry_dependent_nodes: bool,
     pub subtree_may_own_geometry_dependent_nodes: bool,
     pub stacking_context: crate::painting::stacking_context::StackingContextFacts,
@@ -168,7 +170,7 @@ impl PaintableVisualContextRecord {
         stacking_context: crate::painting::stacking_context::StackingContextFacts,
     ) -> Self {
         Self {
-            inherited_input,
+            inherited_input: shared_descendant_visual_contexts(inherited_input),
             output_differing_from_input: None,
             owns_geometry_dependent_nodes: false,
             subtree_may_own_geometry_dependent_nodes: false,
@@ -176,14 +178,37 @@ impl PaintableVisualContextRecord {
         }
     }
 
+    pub(crate) fn inherited_input(&self) -> &DescendantVisualContexts {
+        &self.inherited_input
+    }
+
     pub(crate) fn output_for_descendants(&self) -> DescendantVisualContexts {
-        self.output_differing_from_input
+        *self
+            .output_differing_from_input
             .as_deref()
-            .copied()
-            .unwrap_or(self.inherited_input)
+            .unwrap_or(&self.inherited_input)
     }
 
     pub(crate) fn set_output_for_descendants(&mut self, output: DescendantVisualContexts) {
-        self.output_differing_from_input = (output != self.inherited_input).then(|| Box::new(output));
+        self.output_differing_from_input =
+            (output != *self.inherited_input).then(|| shared_descendant_visual_contexts(output));
     }
+}
+
+/// `contexts` in an `Arc`, which is the one the records last made where they are the same. Records are made in tree
+/// order, so siblings, and the children of a box that hands them what differs from what it inherits, share one.
+fn shared_descendant_visual_contexts(contexts: DescendantVisualContexts) -> Arc<DescendantVisualContexts> {
+    thread_local! {
+        static LAST: std::cell::RefCell<Option<Arc<DescendantVisualContexts>>> = const { std::cell::RefCell::new(None) };
+    }
+    LAST.with_borrow_mut(|last| {
+        if let Some(last) = last
+            && **last == contexts
+        {
+            return Arc::clone(last);
+        }
+        let shared = Arc::new(contexts);
+        *last = Some(Arc::clone(&shared));
+        shared
+    })
 }

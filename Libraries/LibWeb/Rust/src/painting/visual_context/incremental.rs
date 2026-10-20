@@ -473,7 +473,7 @@ pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
             let record = layout_arena.paintable_visual_context_record(slot);
             let record = record.as_deref();
             let rebuild = work_bits.is_some_and(|bits| !bits.is_move_only())
-                || record.is_none_or(|record| record.inherited_input != input)
+                || record.is_none_or(|record| *record.inherited_input() != input)
                 || (moved && record.is_some_and(|record| record.owns_geometry_dependent_nodes));
             (
                 rebuild,
