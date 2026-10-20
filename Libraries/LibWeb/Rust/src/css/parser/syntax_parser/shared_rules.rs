@@ -25,7 +25,11 @@ use crate::css::selector_parser::RustParsedSelectorList;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-pub(super) fn native_child_indices(children: &[ParsedRuleChild], parent: Option<ParsedRuleKind>) -> Box<[usize]> {
+pub(super) fn native_child_indices(
+    children: &[ParsedRuleChild],
+    parent: Option<ParsedRuleKind>,
+    rules: &[ParsedRule],
+) -> Box<[usize]> {
     if !matches!(
         parent,
         None | Some(
@@ -47,7 +51,7 @@ pub(super) fn native_child_indices(children: &[ParsedRuleChild], parent: Option<
         .enumerate()
         .filter_map(|(index, child)| {
             let kind = match child {
-                ParsedRuleChild::Rule(rule) => rule.native_type()?,
+                ParsedRuleChild::Rule(rule) => rules[*rule as usize].native_type()?,
                 ParsedRuleChild::Declarations(_) => NativeRuleType::NestedDeclarations,
             };
             if (parent == Some(ParsedRuleKind::Page) && kind != NativeRuleType::Margin)
@@ -64,7 +68,8 @@ pub(super) fn native_child_indices(children: &[ParsedRuleChild], parent: Option<
 #[derive(Clone)]
 pub(crate) struct ParsedRuleList {
     sheet: Arc<ParsedStyleSheet>,
-    parent: Option<(Arc<ParsedRule>, NestedDeclarationsKind)>,
+    /// The rule whose children the list is, by its index among the sheet's parsed rules.
+    parent: Option<(u32, NestedDeclarationsKind)>,
 }
 
 impl ParsedRuleList {
@@ -78,7 +83,7 @@ impl ParsedRuleList {
 
     pub(super) fn children(
         sheet: Arc<ParsedStyleSheet>,
-        parent: Arc<ParsedRule>,
+        parent: u32,
         declarations_kind: NestedDeclarationsKind,
     ) -> Self {
         Self {
@@ -115,22 +120,38 @@ impl ParsedRuleList {
     pub(crate) fn len(&self) -> usize {
         self.parent
             .as_ref()
-            .map_or(self.sheet.native_roots.len(), |(parent, _)| {
-                parent.native_children().len()
+            .map_or(self.sheet.native_roots.len(), |&(parent, _)| {
+                self.sheet.parsed_rule(parent).native_children().len()
             })
     }
 
     pub(crate) fn rule_at(&self, index: usize) -> SharedRule<'_> {
         match &self.parent {
             Some((parent, kind)) => {
-                SharedRule::from_child(&parent.children()[parent.native_children()[index] as usize], *kind).unwrap()
+                let parent = self.sheet.parsed_rule(*parent);
+                SharedRule::from_child(
+                    &parent.children()[parent.native_children()[index] as usize],
+                    *kind,
+                    &self.sheet.parsed_rules,
+                )
+                .unwrap()
             }
             None => {
                 let index = self.sheet.native_roots[index];
                 if self.sheet.items.is_empty() {
-                    SharedRule::from_rule(&self.sheet.rules[index], self.sheet.declarations_kind).unwrap()
+                    SharedRule::from_rule(
+                        self.sheet.rules[index],
+                        self.sheet.declarations_kind,
+                        &self.sheet.parsed_rules,
+                    )
+                    .unwrap()
                 } else {
-                    SharedRule::from_child(&self.sheet.items[index], self.sheet.declarations_kind).unwrap()
+                    SharedRule::from_child(
+                        &self.sheet.items[index],
+                        self.sheet.declarations_kind,
+                        &self.sheet.parsed_rules,
+                    )
+                    .unwrap()
                 }
             }
         }
@@ -143,7 +164,7 @@ impl ParsedRuleList {
     ) -> std::rc::Rc<crate::css::rule::NativeRule> {
         let rule = self.rule_at(index);
         match rule.data {
-            SharedRuleData::Rule(parsed) => self.sheet.native_rule(parsed, rule.declarations_kind, list).unwrap(),
+            SharedRuleData::Rule(_, index) => self.sheet.native_rule(index, rule.declarations_kind, list).unwrap(),
             SharedRuleData::Declarations(declarations) => {
                 self.sheet
                     .native_declarations(declarations, rule.declarations_kind, list)
@@ -154,7 +175,8 @@ impl ParsedRuleList {
 
 #[derive(Clone, Copy)]
 enum SharedRuleData<'a> {
-    Rule(&'a Arc<ParsedRule>),
+    /// A rule, with its index among the sheet's parsed rules.
+    Rule(&'a ParsedRule, u32),
     Declarations(&'a ParsedDeclarationList),
 }
 
@@ -162,6 +184,8 @@ enum SharedRuleData<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct SharedRule<'a> {
     data: SharedRuleData<'a>,
+    /// The sheet's parsed rules, which the rule's children are among.
+    rules: &'a [ParsedRule],
     declarations_kind: NestedDeclarationsKind,
     rule_type: NativeRuleType,
 }
@@ -215,29 +239,35 @@ impl ParsedRule {
 impl ParsedRule {
     /// Whether the rule is, or holds, a rule a media evaluation reads: a `@media` rule, or an `@import`, whose sheet
     /// may hold one.
-    pub(super) fn holds_media_rules(&self) -> bool {
+    pub(super) fn holds_media_rules(&self, rules: &[ParsedRule]) -> bool {
         matches!(self.rule_kind, ParsedRuleKind::Media | ParsedRuleKind::Import)
-            || self
-                .children()
-                .iter()
-                .any(|child| matches!(child, ParsedRuleChild::Rule(rule) if rule.holds_media_rules()))
+            || self.children().iter().any(
+                |child| matches!(child, ParsedRuleChild::Rule(rule) if rules[*rule as usize].holds_media_rules(rules)),
+            )
     }
 }
 
 impl<'a> SharedRule<'a> {
-    fn from_rule(rule: &'a Arc<ParsedRule>, declarations_kind: NestedDeclarationsKind) -> Option<Self> {
+    fn from_rule(index: u32, declarations_kind: NestedDeclarationsKind, rules: &'a [ParsedRule]) -> Option<Self> {
+        let rule = &rules[index as usize];
         Some(Self {
-            data: SharedRuleData::Rule(rule),
+            data: SharedRuleData::Rule(rule, index),
+            rules,
             declarations_kind,
             rule_type: rule.native_type()?,
         })
     }
 
-    fn from_child(child: &'a ParsedRuleChild, declarations_kind: NestedDeclarationsKind) -> Option<Self> {
+    fn from_child(
+        child: &'a ParsedRuleChild,
+        declarations_kind: NestedDeclarationsKind,
+        rules: &'a [ParsedRule],
+    ) -> Option<Self> {
         match child {
-            ParsedRuleChild::Rule(rule) => Self::from_rule(rule, declarations_kind),
+            ParsedRuleChild::Rule(rule) => Self::from_rule(*rule, declarations_kind, rules),
             ParsedRuleChild::Declarations(declarations) => Some(Self {
                 data: SharedRuleData::Declarations(declarations),
+                rules,
                 declarations_kind,
                 rule_type: match declarations_kind {
                     NestedDeclarationsKind::Style => NativeRuleType::NestedDeclarations,
@@ -253,48 +283,48 @@ impl<'a> SharedRule<'a> {
 
     pub(crate) fn local_identity(self) -> u64 {
         match self.data {
-            SharedRuleData::Rule(rule) => u64::from(rule.local_identity),
+            SharedRuleData::Rule(rule, _) => u64::from(rule.local_identity),
             SharedRuleData::Declarations(declarations) => declarations.local_identity,
         }
     }
 
     pub(crate) fn namespace(self) -> Option<&'a Arc<NamespaceRuleData>> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         rule.rare().namespace_rule.as_ref()
     }
 
     pub(crate) fn property(self) -> Option<&'a PropertyRuleData> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         rule.rare().property_rule.as_deref()
     }
 
     pub(crate) fn import(self) -> Option<&'a Arc<ImportRuleData>> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         rule.rare().import_rule.as_ref()
     }
 
     pub(crate) fn media_data(self) -> Arc<MediaListData> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             unreachable!()
         };
         rule.rare().media_list.as_ref().unwrap().clone()
     }
 
     pub(crate) fn function_signature(self) -> Option<Arc<FunctionSignature>> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         rule.rare().function_signature.clone()
     }
 
     pub(crate) fn font_feature_values(self) -> Option<Arc<FontFeatureValuesData>> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         rule.rare().font_feature_values.clone()
@@ -302,41 +332,41 @@ impl<'a> SharedRule<'a> {
 
     pub(crate) fn descriptors(self) -> Option<Arc<DescriptorBlockData>> {
         match self.data {
-            SharedRuleData::Rule(rule) => rule.rare().descriptor_block.clone(),
+            SharedRuleData::Rule(rule, _) => rule.rare().descriptor_block.clone(),
             SharedRuleData::Declarations(declarations) => declarations.descriptor_block.clone(),
         }
     }
 
     pub(crate) fn keyframe(self) -> Option<&'a KeyframeData> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         rule.rare().keyframe.as_deref()
     }
 
     pub(crate) fn selectors(self) -> Option<Arc<RustParsedSelectorList>> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         rule.selector_list.clone()
     }
 
     pub(crate) fn scope(self) -> Option<Arc<ScopeSelectors>> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         rule.rare().scope_selectors.clone()
     }
 
     pub(crate) fn container(self) -> Option<&'a Arc<ContainerConditionsData>> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         rule.rare().container_conditions.as_ref()
     }
 
     pub(crate) fn layer_name(self) -> Option<&'a [u16]> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         match self.rule_type {
@@ -347,7 +377,7 @@ impl<'a> SharedRule<'a> {
     }
 
     pub(crate) fn definition_name(self) -> Option<CssString> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         match self.rule_type {
@@ -359,21 +389,21 @@ impl<'a> SharedRule<'a> {
     }
 
     pub(crate) fn layer_names(self) -> Option<&'a LayerNames> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         rule.rare().layer_names.as_deref()
     }
 
     pub(crate) fn media(self) -> Option<&'a MediaListData> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         rule.rare().media_list.as_deref()
     }
 
     pub(crate) fn supports(self) -> Option<&'a Arc<FfiQueryHandle>> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return None;
         };
         if self.rule_type == NativeRuleType::Import {
@@ -386,7 +416,7 @@ impl<'a> SharedRule<'a> {
     /// The rule's cascade declarations, which a style rule keeps unparsed until they are read.
     pub(crate) fn rule_declarations(self) -> Option<super::RuleDeclarations> {
         match self.data {
-            SharedRuleData::Rule(rule) if self.rule_type == NativeRuleType::Style => rule.declaration_block.clone(),
+            SharedRuleData::Rule(rule, _) if self.rule_type == NativeRuleType::Style => rule.declaration_block.clone(),
             SharedRuleData::Declarations(declarations) if self.rule_type == NativeRuleType::NestedDeclarations => {
                 declarations
                     .declaration_block
@@ -398,14 +428,14 @@ impl<'a> SharedRule<'a> {
     }
 
     pub(crate) fn visit_children(self, visit: &mut impl FnMut(Self) -> ControlFlow<()>) -> ControlFlow<()> {
-        let SharedRuleData::Rule(rule) = self.data else {
+        let SharedRuleData::Rule(rule, _) = self.data else {
             return ControlFlow::Continue(());
         };
         let Some(declarations_kind) = self.rule_type.child_declarations_kind(self.declarations_kind) else {
             return ControlFlow::Continue(());
         };
         for &index in rule.native_children() {
-            let child = Self::from_child(&rule.children()[index as usize], declarations_kind).unwrap();
+            let child = Self::from_child(&rule.children()[index as usize], declarations_kind, self.rules).unwrap();
             visit(child)?;
         }
         ControlFlow::Continue(())

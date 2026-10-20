@@ -30,7 +30,7 @@ fn declarations(source: &str) -> crate::css::declaration_block::DeclarationBlock
 }
 
 fn first_rule_block(sheet: &ParsedStyleSheet) -> Arc<crate::css::declaration_block::DeclarationBlockData> {
-    sheet.rules[0].declaration_block.as_ref().unwrap().data()
+    sheet.root_rule(0).declaration_block.as_ref().unwrap().data()
 }
 
 fn first_value(block: &crate::css::declaration_block::DeclarationBlock) -> Vec<u16> {
@@ -71,12 +71,15 @@ fn parse_shared_on_worker(source: &'static str) -> Arc<ParsedStyleSheet> {
 
 #[test]
 fn builder_constructs_one_rule_tree_with_dense_unique_identities() {
-    fn visit(rule: &Arc<super::ParsedRule>, identities: &mut std::collections::BTreeSet<u64>) {
-        assert_eq!(Arc::strong_count(rule), 1);
+    fn visit(
+        builder: &super::SyntaxParseBuilder,
+        rule: &super::ParsedRule,
+        identities: &mut std::collections::BTreeSet<u64>,
+    ) {
         assert!(identities.insert(u64::from(rule.local_identity)));
         for child in rule.children() {
             match child {
-                ParsedRuleChild::Rule(rule) => visit(rule, identities),
+                ParsedRuleChild::Rule(rule) => visit(builder, builder.parsed_rule(*rule), identities),
                 ParsedRuleChild::Declarations(declarations) => assert!(identities.insert(declarations.local_identity)),
             }
         }
@@ -89,14 +92,14 @@ fn builder_constructs_one_rule_tree_with_dense_unique_identities() {
     builder.append_roots(&rules);
     assert_eq!(builder.rules.len(), 2);
     let mut identities = std::collections::BTreeSet::new();
-    for rule in &builder.rules {
-        visit(rule, &mut identities);
+    for rule in builder.root_rules() {
+        visit(&builder, rule, &mut identities);
     }
     assert_eq!(
         identities.into_iter().collect::<Vec<_>>(),
         (0..builder.identity_count).collect::<Vec<_>>()
     );
-    let font = &builder.rules[1];
+    let font = &builder.root_rule(1);
     let ParsedRuleChild::Declarations(declarations) = &font.children()[0] else {
         panic!("expected descriptors")
     };
@@ -110,7 +113,7 @@ fn builder_constructs_one_rule_tree_with_dense_unique_identities() {
 fn style_rule_mutation_forks_current_selectors_and_declarations() {
     let sheet = parse_shared_on_worker(".親 { width: 13px; --色: 緑; }");
     assert_eq!(sheet.rules.len(), 1);
-    let parsed = &sheet.rules[0];
+    let parsed = &sheet.root_rule(0);
     let rule = StyleRule::new(
         parsed.selector_list.clone().unwrap(),
         parsed.declaration_block.clone().unwrap(),
@@ -150,8 +153,8 @@ fn counter_style_mutation_preserves_names_and_descriptor_snapshots() {
     use crate::css::counter_style::*;
     use crate::css::descriptor_block::{rust_descriptor_block_remove, rust_descriptor_block_set};
     let sheet = parse_shared_on_worker("@counter-style 初 { prefix: 'A'; } @counter-style 別 { prefix: 'B'; }");
-    let rule = FfiCounterStyle::new(sheet.rules[0].rare().counter_style.clone().unwrap());
-    let other = FfiCounterStyle::new(sheet.rules[1].rare().counter_style.clone().unwrap());
+    let rule = FfiCounterStyle::new(sheet.root_rule(0).rare().counter_style.clone().unwrap());
+    let other = FfiCounterStyle::new(sheet.root_rule(1).rare().counter_style.clone().unwrap());
     drop(sheet);
     assert_eq!(rule.name().units(), utf16("初"));
     unsafe {
@@ -288,9 +291,10 @@ fn keyframe_mutation_preserves_exposed_declarations_and_snapshots() {
     let sheet = parse_shared_on_worker(
         "@keyframes 色 { from, 50% { width: 13px !important; height: 17px; } 25% { width: 19px; } to { width: 29px; } }",
     );
-    let ParsedRuleChild::Rule(first) = &sheet.rules[0].children()[0] else {
+    let ParsedRuleChild::Rule(first) = &sheet.root_rule(0).children()[0] else {
         unreachable!()
     };
+    let first = sheet.parsed_rule(*first);
     let data = first.rare().keyframe.as_ref().unwrap();
     assert_eq!(&*data.keys, [0.0, 50.0]);
     assert_eq!(data.declarations.properties.len(), 1);
@@ -372,9 +376,10 @@ fn worker_block_merging_and_shorthand_expansion_only_use_thread_safe_callbacks()
             &utf16("@page { @top-left { color: red !important; @unknown {} color: blue; } }"),
             &super::tests::parse_context(),
         );
-        let ParsedRuleChild::Rule(margin) = &sheet.rules[0].children()[0] else {
+        let ParsedRuleChild::Rule(margin) = &sheet.root_rule(0).children()[0] else {
             panic!()
         };
+        let margin = sheet.parsed_rule(*margin);
         assert_eq!(margin.rule_kind, ParsedRuleKind::Margin);
         let margin = margin.declaration_block.as_ref().unwrap().data();
         drop(sheet);
@@ -382,7 +387,7 @@ fn worker_block_merging_and_shorthand_expansion_only_use_thread_safe_callbacks()
         assert!(margin.properties[0].important);
         let sheet = parse(&utf16("a { margin: var(--gap) }"), &super::tests::parse_context());
         assert!(sheet.declarations.is_empty());
-        let expanded = sheet.rules[0].declaration_block.as_ref().unwrap().data();
+        let expanded = sheet.root_rule(0).declaration_block.as_ref().unwrap().data();
         drop(sheet);
         assert_eq!(expanded.properties.len(), 5);
         assert_eq!(expanded.properties[0].property_id, property_id::MARGIN);
@@ -491,10 +496,15 @@ fn worker_selector_normalization_survives_publication() {
             serialize_selector_without_namespaces(&selector)
         }
     }
-    fn visit(rule: &super::ParsedRule, selectors: &mut Vec<Vec<u16>>, scopes: &mut Vec<Vec<u16>>) {
+    fn visit(
+        sheet: &ParsedStyleSheet,
+        rule: &super::ParsedRule,
+        selectors: &mut Vec<Vec<u16>>,
+        scopes: &mut Vec<Vec<u16>>,
+    ) {
         for child in rule.children() {
             if let ParsedRuleChild::Rule(child) = child {
-                visit(child, selectors, scopes);
+                visit(sheet, sheet.parsed_rule(*child), selectors, scopes);
             }
         }
         if let Some(parsed) = &rule.selector_list {
@@ -511,8 +521,8 @@ fn worker_selector_normalization_survives_publication() {
     );
     let mut selectors = Vec::new();
     let mut scopes = Vec::new();
-    for rule in &sheet.rules {
-        visit(rule, &mut selectors, &mut scopes);
+    for rule in sheet.root_rules() {
+        visit(&sheet, rule, &mut selectors, &mut scopes);
     }
     drop(sheet);
     assert_eq!(
@@ -538,10 +548,10 @@ fn import_preludes_outlive_the_worker_and_shared_sheet() {
         "@import 'a.css' layer(雪) supports(display: grid); @import url('b.css') layer supports(display: unknown); @import 'c.css'; @supports (display: grid) {}",
     );
     assert_eq!(sheet.rules.len(), 4);
-    let named = sheet.rules[0].rare().import_rule.clone().unwrap();
-    let anonymous = sheet.rules[1].rare().import_rule.clone().unwrap();
-    let unlayered = sheet.rules[2].rare().import_rule.clone().unwrap();
-    let supports = sheet.rules[3].rare().supports_condition.clone().unwrap();
+    let named = sheet.root_rule(0).rare().import_rule.clone().unwrap();
+    let anonymous = sheet.root_rule(1).rare().import_rule.clone().unwrap();
+    let unlayered = sheet.root_rule(2).rare().import_rule.clone().unwrap();
+    let supports = sheet.root_rule(3).rare().supports_condition.clone().unwrap();
     drop(sheet);
     assert_eq!(named.layer.as_ref().unwrap().units(), utf16("雪"));
     assert!(anonymous.layer.as_ref().unwrap().units().is_empty());
@@ -568,8 +578,8 @@ fn page_text(selectors: &PageSelectorList) -> Vec<u16> {
 fn page_selectors_outlive_the_sheet_and_replace_independently() {
     let sheet = parse_shared_on_worker("@page 雪:left:first, :blank { margin: 7px; } @page {}");
     assert_eq!(sheet.rules.len(), 2);
-    let selectors = sheet.rules[0].rare().page_selector_list.clone().unwrap();
-    let empty = sheet.rules[1].rare().page_selector_list.clone().unwrap();
+    let selectors = sheet.root_rule(0).rare().page_selector_list.clone().unwrap();
+    let empty = sheet.root_rule(1).rare().page_selector_list.clone().unwrap();
     drop(sheet);
     assert_eq!(selectors.selectors.len(), 2);
     assert_eq!(page_text(&selectors), utf16("雪:left:first, :blank"));
@@ -595,8 +605,8 @@ fn function_signatures_own_parameters_after_the_sheet_is_dropped() {
         "@function --幅(--長さ <length>: 8px, --名: '雪', --未) returns <length> { result: var(--長さ); } @function --空() {}",
     );
     assert_eq!(sheet.rules.len(), 2);
-    let signature = sheet.rules[0].rare().function_signature.clone().unwrap();
-    let empty = sheet.rules[1].rare().function_signature.clone().unwrap();
+    let signature = sheet.root_rule(0).rare().function_signature.clone().unwrap();
+    let empty = sheet.root_rule(1).rare().function_signature.clone().unwrap();
     drop(sheet);
     assert_eq!(signature.name.units(), utf16("--幅"));
     assert_eq!(signature.parameters.len(), 3);
@@ -621,8 +631,8 @@ fn property_rules_own_syntax_and_initial_values_after_the_sheet_is_dropped() {
         "@property --色 { syntax: '<length>'; inherits: false; initial-value: 8px; } @property --自由 { syntax: '*'; inherits: true; }",
     );
     assert_eq!(sheet.rules.len(), 2);
-    let typed = sheet.rules[0].rare().property_rule.clone().unwrap();
-    let universal = sheet.rules[1].rare().property_rule.clone().unwrap();
+    let typed = sheet.root_rule(0).rare().property_rule.clone().unwrap();
+    let universal = sheet.root_rule(1).rare().property_rule.clone().unwrap();
     drop(sheet);
     assert_eq!(typed.name.units(), utf16("--色"));
     assert_eq!(typed.syntax_source.units(), utf16("<length>"));
@@ -642,9 +652,9 @@ fn property_rules_own_syntax_and_initial_values_after_the_sheet_is_dropped() {
 fn namespace_rules_own_native_names_after_the_sheet_is_dropped() {
     let sheet = parse_shared_on_worker("@namespace ''; @namespace 色 'urn:名前'; 色|x {}");
     assert_eq!(sheet.rules.len(), 3);
-    assert!(sheet.rules[2].selector_list.is_some());
-    let default = sheet.rules[0].rare().namespace_rule.clone().unwrap();
-    let prefixed = sheet.rules[1].rare().namespace_rule.clone().unwrap();
+    assert!(sheet.root_rule(2).selector_list.is_some());
+    let default = sheet.root_rule(0).rare().namespace_rule.clone().unwrap();
+    let prefixed = sheet.root_rule(1).rare().namespace_rule.clone().unwrap();
     drop(sheet);
     assert!(default.prefix.units().is_empty());
     assert!(default.uri.units().is_empty());
@@ -779,7 +789,7 @@ fn published_sheet_owns_non_ascii_declarations() {
     let sheet = parse_shared_on_worker(".é😀 { width: 13px; --é😀: value }");
     assert_eq!(sheet.rules.len(), 1);
     assert!(sheet.declarations.is_empty());
-    assert!(sheet.rules[0].selector_list.is_some());
+    assert!(sheet.root_rule(0).selector_list.is_some());
     assert_eq!(
         first_rule_block(&sheet).custom_properties[0].name.units(),
         utf16("--é😀")
@@ -810,17 +820,18 @@ fn independent_workers_read_the_same_immutable_graph() {
             assert_eq!(sheet.rules.len(), 4);
             unsafe {
                 assert_eq!(
-                    rust_parsed_selector_list_length(Arc::as_ptr(sheet.rules[0].selector_list.as_ref().unwrap())),
+                    rust_parsed_selector_list_length(Arc::as_ptr(sheet.root_rule(0).selector_list.as_ref().unwrap())),
                     1
                 );
                 assert_eq!(
-                    css_query_evaluate_supports(sheet.rules[1].rare().supports_condition.as_deref()),
+                    css_query_evaluate_supports(sheet.root_rule(1).rare().supports_condition.as_deref()),
                     1
                 );
             }
-            let ParsedRuleChild::Rule(nested) = &sheet.rules[1].children()[0] else {
+            let ParsedRuleChild::Rule(nested) = &sheet.root_rule(1).children()[0] else {
                 panic!()
             };
+            let nested = sheet.parsed_rule(*nested);
             unsafe {
                 assert_eq!(
                     rust_parsed_selector_list_length(Arc::as_ptr(nested.selector_list.as_ref().unwrap())),
@@ -828,11 +839,12 @@ fn independent_workers_read_the_same_immutable_graph() {
                 )
             };
             assert_eq!(
-                *sheet.rules[2].rare().property_rule.as_ref().unwrap().syntax,
+                *sheet.root_rule(2).rare().property_rule.as_ref().unwrap().syntax,
                 SyntaxNode::Type(SyntaxType::Length)
             );
             assert_eq!(
-                sheet.rules[3]
+                sheet
+                    .root_rule(3)
                     .rare()
                     .page_selector_list
                     .as_ref()
@@ -858,9 +870,10 @@ fn scope_presence_and_native_selector_names_survive_worker_exit() {
         "@import 'data:text/css,'; @import 'data:text/css,' scope; @import 'data:text/css,' scope((.親) to (.限界)); @scope {} @scope (.親) to (.限界) {}",
     );
     assert_eq!(sheet.rules.len(), 5);
-    assert!(sheet.rules[0].rare().scope_selectors.is_none());
-    let scopes: Vec<_> = sheet.rules[1..]
-        .iter()
+    assert!(sheet.root_rule(0).rare().scope_selectors.is_none());
+    let scopes: Vec<_> = sheet
+        .root_rules()
+        .skip(1)
         .map(|rule| rule.rare().scope_selectors.clone().unwrap())
         .collect();
     drop(sheet);
@@ -895,19 +908,20 @@ fn shared_rule_tree_preserves_nested_declaration_lists() {
         "@media all { .a { width: 1px; @supports (display: grid) { width: 2px; .b { width: 3px; } height: 4px; } color: red; } } .c { width: 5px; }",
     );
     assert_eq!(sheet.rules.len(), 2);
-    let media = sheet.rules[0].clone();
-    let last = sheet.rules[1].clone();
-    drop(sheet);
+    let media = sheet.root_rule(0);
+    let last = sheet.root_rule(1);
     assert_eq!(media.rule_kind, ParsedRuleKind::Media);
     assert_eq!(media.children().len(), 1);
     let ParsedRuleChild::Rule(style) = &media.children()[0] else {
         panic!()
     };
+    let style = sheet.parsed_rule(*style);
     assert!(style.selector_list.is_some());
     assert_eq!(style.children().len(), 2);
     let ParsedRuleChild::Rule(supports) = &style.children()[0] else {
         panic!()
     };
+    let supports = sheet.parsed_rule(*supports);
     assert_eq!(supports.rule_kind, ParsedRuleKind::Supports);
     assert_eq!(supports.children().len(), 3);
     for child in [&supports.children()[0], &supports.children()[2], &style.children()[1]] {
@@ -919,6 +933,7 @@ fn shared_rule_tree_preserves_nested_declaration_lists() {
     let ParsedRuleChild::Rule(nested) = &supports.children()[1] else {
         panic!()
     };
+    let nested = sheet.parsed_rule(*nested);
     assert!(nested.selector_list.is_some());
     assert!(last.selector_list.is_some());
 }
@@ -929,7 +944,7 @@ fn container_conditions_own_names_and_queries_after_the_sheet_is_dropped() {
     let sheet =
         parse_shared_on_worker("@container 色😀 (width > 10px), 名前, style(--状態: 有効) { div { width: 13px } }");
     assert_eq!(sheet.rules.len(), 1);
-    let conditions = sheet.rules[0].rare().container_conditions.clone().unwrap();
+    let conditions = sheet.root_rule(0).rare().container_conditions.clone().unwrap();
     drop(sheet);
     let entries = &conditions.conditions;
     assert_eq!(entries.len(), 3);
@@ -954,9 +969,9 @@ fn container_conditions_own_names_and_queries_after_the_sheet_is_dropped() {
 fn layer_names_outlive_the_shared_sheet() {
     let sheet = parse_shared_on_worker("@layer 色.子, emoji😀; @layer 色.子 {} @layer {}");
     assert_eq!(sheet.rules.len(), 3);
-    let statement = sheet.rules[0].rare().layer_names.clone().unwrap();
-    let block = sheet.rules[1].rare().layer_names.clone().unwrap();
-    let anonymous = sheet.rules[2].rare().layer_names.clone().unwrap();
+    let statement = sheet.root_rule(0).rare().layer_names.clone().unwrap();
+    let block = sheet.root_rule(1).rare().layer_names.clone().unwrap();
+    let anonymous = sheet.root_rule(2).rare().layer_names.clone().unwrap();
     drop(sheet);
     assert_eq!(statement.names.len(), 2);
     assert_eq!(statement.names[0].units(), utf16("色.子"));
@@ -993,7 +1008,7 @@ fn parsed_anchor_and_font_values_retain_their_children() {
     assert_eq!(serialize_style_value_to_utf16(second_fallback.data()), utf16("2px"));
 
     let sheet = parse_shared_on_worker("@font-face { font-family: Graph; src: local('Font Name'); }");
-    let descriptors = sheet.rules[0].rare().descriptor_block.clone().unwrap();
+    let descriptors = sheet.root_rule(0).rare().descriptor_block.clone().unwrap();
     let value = &*descriptors.descriptors[1].value;
     assert_eq!(serialize_style_value_to_utf16(value), utf16("local(\"Font Name\")"));
     let StyleValueData::ValueList { values, .. } = value else {
@@ -1060,10 +1075,10 @@ fn declaration_mutation_does_not_change_cached_or_nested_shared_blocks() {
     let context = super::tests::parse_context();
     let first = parse(&source, &context);
     let second = parse(&source, &context);
-    let original = first.rules[0].declaration_block.as_ref().unwrap().data();
+    let original = first.root_rule(0).declaration_block.as_ref().unwrap().data();
     assert!(Arc::ptr_eq(
         &original,
-        &second.rules[0].declaration_block.as_ref().unwrap().data()
+        &second.root_rule(0).declaration_block.as_ref().unwrap().data()
     ));
     let mut changed = DeclarationBlock::new(original.clone());
     let independent = DeclarationBlock::new(original.clone());
@@ -1077,7 +1092,7 @@ fn declaration_mutation_does_not_change_cached_or_nested_shared_blocks() {
     let third = parse(&source, &context);
     assert!(Arc::ptr_eq(
         &original,
-        &third.rules[0].declaration_block.as_ref().unwrap().data()
+        &third.root_rule(0).declaration_block.as_ref().unwrap().data()
     ));
     drop((first, second, third, original));
     assert_eq!(
@@ -1090,8 +1105,8 @@ fn declaration_mutation_does_not_change_cached_or_nested_shared_blocks() {
     );
 
     let nested = parse_shared_on_worker(".parent { .child {} margin: var(--gap); --色: green; }");
-    assert_eq!(nested.rules[0].children().len(), 2);
-    let ParsedRuleChild::Declarations(list) = &nested.rules[0].children()[1] else {
+    assert_eq!(nested.root_rule(0).children().len(), 2);
+    let ParsedRuleChild::Declarations(list) = &nested.root_rule(0).children()[1] else {
         panic!()
     };
     let original = list.declaration_block.clone().unwrap();
@@ -1114,8 +1129,8 @@ fn media_mutation_preserves_live_owners_and_shared_snapshots() {
     }
     let sheet = parse_shared_on_worker("@import 'data:text/css,' screen, écran; @media all, print {}");
     assert_eq!(sheet.rules.len(), 2);
-    let imported = MediaList::new(sheet.rules[0].rare().media_list.clone().unwrap());
-    let media = MediaList::new(sheet.rules[1].rare().media_list.clone().unwrap());
+    let imported = MediaList::new(sheet.root_rule(0).rare().media_list.clone().unwrap());
+    let media = MediaList::new(sheet.root_rule(1).rare().media_list.clone().unwrap());
     drop(sheet);
     assert_eq!(text(&imported), utf16("screen, écran"));
     assert_eq!(text(&media), utf16("all, print"));
@@ -1216,9 +1231,9 @@ fn descriptor_mutation_forks_worker_parsed_data() {
         "@page { margin-top: 13px; margin-left: 29px; margin-top: 17px } @font-face { font-family: 色; src: local(色) }",
     );
     assert_eq!(sheet.rules.len(), 2);
-    let mut page = FfiDescriptorBlock::new(sheet.rules[0].rare().descriptor_block.clone().unwrap());
-    let shared = FfiDescriptorBlock::new(sheet.rules[0].rare().descriptor_block.clone().unwrap());
-    let font = sheet.rules[1].rare().descriptor_block.clone().unwrap();
+    let mut page = FfiDescriptorBlock::new(sheet.root_rule(0).rare().descriptor_block.clone().unwrap());
+    let shared = FfiDescriptorBlock::new(sheet.root_rule(0).rare().descriptor_block.clone().unwrap());
+    let font = sheet.root_rule(1).rare().descriptor_block.clone().unwrap();
     drop(sheet);
     let data = page.data();
     assert_eq!(data.descriptors.len(), 2);
