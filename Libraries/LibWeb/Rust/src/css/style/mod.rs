@@ -1130,6 +1130,8 @@ pub(super) struct DormantRules {
     /// The dormant rules in rule order, and the selectors each is compiled from once it wakes. A rule that woke or
     /// left keeps its place without selectors until a compaction.
     rules: Vec<(RuleID, Option<DormantSelectors>)>,
+    /// How many keys each selector of a dormant rule still waits for, the counts of a rule's selectors side by side.
+    waiting: Vec<u16>,
     dormant_count: usize,
     /// The scope chains and namespaces dormant rules are bound in, which the rules of one sheet share.
     contexts: Vec<(
@@ -1150,8 +1152,8 @@ struct DormantLink {
 struct DormantSelectors {
     selectors: std::sync::Arc<crate::css::selector_parser::RustParsedSelectorList>,
     context: u32,
-    /// How many keys each of the rule's selectors still waits for.
-    waiting: SmallVec<[u16; 2]>,
+    /// Where the counts of the keys the rule's selectors still wait for start.
+    waiting: u32,
 }
 
 impl DormantRules {
@@ -1191,11 +1193,13 @@ impl DormantRules {
         let dormant = DormantSelectors {
             selectors: selectors.selectors,
             context: u32::try_from(context).expect("dormant rule context space exhausted"),
-            waiting: waits
-                .iter()
-                .map(|keys| u16::try_from(keys.len()).expect("a selector cannot wait for 65536 keys"))
-                .collect(),
+            waiting: u32::try_from(self.waiting.len()).expect("dormant rule selector space exhausted"),
         };
+        self.waiting.extend(
+            waits
+                .iter()
+                .map(|keys| u16::try_from(keys.len()).expect("a selector cannot wait for 65536 keys")),
+        );
         match self.position(rule) {
             Ok(position) => self.rules[position].1 = Some(dormant),
             Err(position) => self.rules.insert(position, (rule, Some(dormant))),
@@ -1238,10 +1242,10 @@ impl DormantRules {
                 let Ok(position) = self.position(rule) else {
                     continue;
                 };
-                let Some(dormant) = self.rules[position].1.as_mut() else {
+                let Some(dormant) = self.rules[position].1.as_ref() else {
                     continue;
                 };
-                let waiting = &mut dormant.waiting[selector as usize];
+                let waiting = &mut self.waiting[dormant.waiting as usize + selector as usize];
                 *waiting = waiting.saturating_sub(1);
                 if *waiting != 0 {
                     continue;
@@ -1295,6 +1299,7 @@ impl DormantRules {
         }
         compact(&mut self.links);
         compact(&mut self.rules);
+        compact(&mut self.waiting);
         if self.first_link_by_key.capacity() > self.first_link_by_key.len() * 2 {
             self.first_link_by_key.shrink_to_fit();
         }
