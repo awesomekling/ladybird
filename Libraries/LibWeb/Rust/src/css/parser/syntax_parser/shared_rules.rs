@@ -10,7 +10,6 @@ use super::{
 };
 use crate::css::container_conditions::ContainerConditionsData;
 use crate::css::css_string::CssString;
-use crate::css::declaration_block::DeclarationBlockData;
 use crate::css::descriptor_block::DescriptorBlockData;
 use crate::css::font_feature_values::FontFeatureValuesData;
 use crate::css::function_signature::FunctionSignature;
@@ -384,11 +383,15 @@ impl<'a> SharedRule<'a> {
         }
     }
 
-    pub(crate) fn cascade_declarations(self) -> Option<Arc<DeclarationBlockData>> {
+    /// The rule's cascade declarations, which a style rule keeps unparsed until they are read.
+    pub(crate) fn rule_declarations(self) -> Option<super::RuleDeclarations> {
         match self.data {
             SharedRuleData::Rule(rule) if self.rule_type == NativeRuleType::Style => rule.declaration_block.clone(),
             SharedRuleData::Declarations(declarations) if self.rule_type == NativeRuleType::NestedDeclarations => {
-                declarations.declaration_block.clone()
+                declarations
+                    .declaration_block
+                    .clone()
+                    .map(super::RuleDeclarations::parsed)
             }
             _ => None,
         }

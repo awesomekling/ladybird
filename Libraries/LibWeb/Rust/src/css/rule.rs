@@ -211,6 +211,15 @@ impl NativeRule {
         }
     }
 
+    /// The rule's cascade declarations, which a style rule's sheet may keep as text until they are read.
+    pub(crate) fn rule_declarations(&self) -> Option<crate::css::parser::syntax_parser::RuleDeclarations> {
+        match &self.payload {
+            RulePayload::Style(style) => Some(style.declarations.rule_declarations()),
+            RulePayload::NestedDeclarations(declarations) => Some(declarations.rule_declarations()),
+            _ => None,
+        }
+    }
+
     pub(crate) fn style_rule(&self) -> &StyleRule {
         let RulePayload::Style(style) = &self.payload else {
             unreachable!("expected a style rule")

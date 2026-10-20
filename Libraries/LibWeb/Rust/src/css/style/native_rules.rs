@@ -8,7 +8,7 @@ use super::capacity::ShallowCapacityBytes;
 use super::memory::{MemoryCategory, MemoryController, MemoryLease};
 use super::{RetainedState, RuleID};
 use crate::css::container_conditions::ContainerConditionsData;
-use crate::css::declaration_block::DeclarationBlockData;
+use crate::css::parser::syntax_parser::RuleDeclarations;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -21,7 +21,7 @@ use targets::NativeRuleTargets;
 #[derive(Clone)]
 pub(super) struct NativeRuleTarget {
     pub identity: NonZeroU64,
-    pub declarations: Option<Arc<DeclarationBlockData>>,
+    pub declarations: Option<RuleDeclarations>,
     pub source_identity: u64,
     conditions: Option<Box<NativeRuleConditions>>,
 }
@@ -60,7 +60,8 @@ impl PartialEq for NativeRuleTarget {
         } = self;
         *identity == other.identity
             && *source_identity == other.source_identity
-            && declarations.as_ref().map(Arc::as_ptr) == other.declarations.as_ref().map(Arc::as_ptr)
+            && declarations.as_ref().map(RuleDeclarations::as_ptr)
+                == other.declarations.as_ref().map(RuleDeclarations::as_ptr)
             && self.layer_name() == other.layer_name()
             && self.containers().len() == other.containers().len()
             && self
@@ -82,7 +83,7 @@ impl Hash for NativeRuleTarget {
             conditions: _,
         } = self;
         identity.hash(hasher);
-        declarations.as_ref().map(Arc::as_ptr).hash(hasher);
+        declarations.as_ref().map(RuleDeclarations::as_ptr).hash(hasher);
         source_identity.hash(hasher);
         self.layer_name().hash(hasher);
         for container in self.containers() {
@@ -150,7 +151,7 @@ impl RetainedState {
         &mut self,
         id: RuleID,
         identity: u64,
-        declarations: Option<Arc<DeclarationBlockData>>,
+        declarations: Option<RuleDeclarations>,
         source_identity: u64,
         layer_name: &[u16],
         containers: Box<[Arc<ContainerConditionsData>]>,
@@ -217,7 +218,7 @@ mod tests {
             engine.register_native_rule(
                 id,
                 identity,
-                rule.cascade_declarations(),
+                rule.rule_declarations(),
                 source.identity(),
                 &[],
                 Box::default(),
@@ -264,7 +265,7 @@ mod tests {
         engine.register_native_rule(
             id,
             rust_rule_identity(rule),
-            rule.cascade_declarations(),
+            rule.rule_declarations(),
             source.identity(),
             &[],
             Box::default(),
@@ -308,7 +309,7 @@ mod tests {
         engine.register_native_rule(
             id,
             rust_rule_identity(old_rule),
-            old_rule.cascade_declarations(),
+            old_rule.rule_declarations(),
             old_source.identity(),
             &[],
             Box::default(),
@@ -316,7 +317,7 @@ mod tests {
         engine.register_native_rule(
             id,
             rust_rule_identity(new_rule),
-            new_rule.cascade_declarations(),
+            new_rule.rule_declarations(),
             new_source.identity(),
             &[],
             Box::default(),

@@ -29,8 +29,8 @@ fn declarations(source: &str) -> crate::css::declaration_block::DeclarationBlock
     }
 }
 
-fn first_rule_block(sheet: &ParsedStyleSheet) -> &crate::css::declaration_block::DeclarationBlockData {
-    sheet.rules[0].declaration_block.as_ref().unwrap()
+fn first_rule_block(sheet: &ParsedStyleSheet) -> Arc<crate::css::declaration_block::DeclarationBlockData> {
+    sheet.rules[0].declaration_block.as_ref().unwrap().data()
 }
 
 fn first_value(block: &crate::css::declaration_block::DeclarationBlock) -> Vec<u16> {
@@ -120,7 +120,7 @@ fn style_rule_mutation_forks_current_selectors_and_declarations() {
         parsed.declaration_block.clone().unwrap(),
     );
     drop(sheet);
-    let shared = StyleRule::new(rule.selectors(), rule.declarations.data());
+    let shared = StyleRule::new(rule.selectors(), rule.declarations.rule_declarations());
     let original_selectors = rule.selectors();
     assert!(Arc::ptr_eq(&original_selectors, &shared.selectors()));
     let mut block = rule.declarations.clone();
@@ -133,7 +133,7 @@ fn style_rule_mutation_forks_current_selectors_and_declarations() {
     assert!(!Arc::ptr_eq(&changed_selectors, &original_selectors));
     assert!(!rule.set_selector_text(TokenizerInput::Utf16(&utf16("[")), &[], StyleNestingParent::None));
     assert!(Arc::ptr_eq(&changed_selectors, &rule.selectors()));
-    let snapshot = StyleRule::new(rule.selectors(), rule.declarations.data());
+    let snapshot = StyleRule::new(rule.selectors(), rule.declarations.rule_declarations());
     assert!(Arc::ptr_eq(&changed_selectors, &snapshot.selectors()));
     for original in [&shared, &independent] {
         assert!(Arc::ptr_eq(&original_selectors, &original.selectors()));
@@ -376,13 +376,13 @@ fn worker_block_merging_and_shorthand_expansion_only_use_thread_safe_callbacks()
             panic!()
         };
         assert_eq!(margin.rule_kind, ParsedRuleKind::Margin);
-        let margin = margin.declaration_block.clone().unwrap();
+        let margin = margin.declaration_block.as_ref().unwrap().data();
         drop(sheet);
         assert_eq!(margin.properties.len(), 1);
         assert!(margin.properties[0].important);
         let sheet = parse(&utf16("a { margin: var(--gap) }"), &super::tests::parse_context());
         assert!(sheet.declarations.is_empty());
-        let expanded = sheet.rules[0].declaration_block.clone().unwrap();
+        let expanded = sheet.rules[0].declaration_block.as_ref().unwrap().data();
         drop(sheet);
         assert_eq!(expanded.properties.len(), 5);
         assert_eq!(expanded.properties[0].property_id, property_id::MARGIN);
@@ -1060,10 +1060,10 @@ fn declaration_mutation_does_not_change_cached_or_nested_shared_blocks() {
     let context = super::tests::parse_context();
     let first = parse(&source, &context);
     let second = parse(&source, &context);
-    let original = first.rules[0].declaration_block.clone().unwrap();
+    let original = first.rules[0].declaration_block.as_ref().unwrap().data();
     assert!(Arc::ptr_eq(
         &original,
-        second.rules[0].declaration_block.as_ref().unwrap()
+        &second.rules[0].declaration_block.as_ref().unwrap().data()
     ));
     let mut changed = DeclarationBlock::new(original.clone());
     let independent = DeclarationBlock::new(original.clone());
@@ -1077,7 +1077,7 @@ fn declaration_mutation_does_not_change_cached_or_nested_shared_blocks() {
     let third = parse(&source, &context);
     assert!(Arc::ptr_eq(
         &original,
-        third.rules[0].declaration_block.as_ref().unwrap()
+        &third.rules[0].declaration_block.as_ref().unwrap().data()
     ));
     drop((first, second, third, original));
     assert_eq!(

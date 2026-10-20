@@ -521,6 +521,14 @@ impl SourceStorage {
             Self::Utf16(units) => TokenizerInput::Utf16(units),
         }
     }
+
+    /// The code units of `range`.
+    pub(crate) fn slice(&self, range: Range<usize>) -> TokenizerInput<'_> {
+        match self {
+            Self::Ascii(units) => TokenizerInput::Ascii(&units[range]),
+            Self::Utf16(units) => TokenizerInput::Utf16(&units[range]),
+        }
+    }
 }
 
 pub(crate) enum ParserSourceIter<'a> {

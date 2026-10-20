@@ -6,6 +6,7 @@
 
 use crate::css::css_string::CssString;
 use crate::css::ffi_support::FfiUtf16View;
+use crate::css::parser::syntax_parser::RuleDeclarations;
 use crate::css::property_metadata::{property_is_logical_alias_including_shorthands, property_logical_group};
 use crate::css::style_compute::expand_shorthands_with;
 use crate::css::style_value::StyleValueData;
@@ -283,6 +284,8 @@ thread_local! {
 }
 
 enum DeclarationBlockState {
+    /// A style rule's block its sheet keeps as text, until its declarations are read.
+    Lazy(RuleDeclarations),
     Immutable(Arc<DeclarationBlockData>),
     Mutable(Rc<RefCell<DeclarationBlockOwner>>),
 }
@@ -309,8 +312,27 @@ impl DeclarationBlock {
         }
     }
 
+    /// A block of `declarations`, which reads them only as it is read.
+    pub(crate) fn from_rule_declarations(declarations: RuleDeclarations) -> Self {
+        Self {
+            state: RefCell::new(DeclarationBlockState::Lazy(declarations)),
+        }
+    }
+
+    /// The block's declarations, without reading them where its sheet still keeps them as text.
+    pub(crate) fn rule_declarations(&self) -> RuleDeclarations {
+        match &*self.state.borrow() {
+            DeclarationBlockState::Lazy(declarations) => declarations.clone(),
+            DeclarationBlockState::Immutable(data) => RuleDeclarations::parsed(data.clone()),
+            DeclarationBlockState::Mutable(owner) => RuleDeclarations::parsed(owner.borrow().data.clone()),
+        }
+    }
+
     fn owner(&self) -> Rc<RefCell<DeclarationBlockOwner>> {
         let mut state = self.state.borrow_mut();
+        if let DeclarationBlockState::Lazy(declarations) = &*state {
+            *state = DeclarationBlockState::Immutable(declarations.data());
+        }
         if let DeclarationBlockState::Immutable(data) = &*state {
             #[cfg(test)]
             DECLARATION_OWNER_ALLOCATIONS.with(|count| count.set(count.get().checked_add(1).unwrap()));
@@ -330,6 +352,7 @@ impl DeclarationBlock {
 
     pub(crate) fn data(&self) -> Arc<DeclarationBlockData> {
         match &*self.state.borrow() {
+            DeclarationBlockState::Lazy(declarations) => declarations.data(),
             DeclarationBlockState::Immutable(data) => data.clone(),
             DeclarationBlockState::Mutable(owner) => owner.borrow().data.clone(),
         }
@@ -337,7 +360,10 @@ impl DeclarationBlock {
 
     #[cfg(test)]
     pub(crate) fn is_immutable(&self) -> bool {
-        matches!(&*self.state.borrow(), DeclarationBlockState::Immutable(_))
+        matches!(
+            &*self.state.borrow(),
+            DeclarationBlockState::Lazy(_) | DeclarationBlockState::Immutable(_)
+        )
     }
 
     pub(crate) fn identity(&self) -> u64 {
@@ -399,7 +425,7 @@ pub extern "C" fn rust_declaration_block_identity(block: &DeclarationBlock) -> u
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_declaration_block_revision(block: &DeclarationBlock) -> u64 {
     match &*block.state.borrow() {
-        DeclarationBlockState::Immutable(_) => 0,
+        DeclarationBlockState::Lazy(_) | DeclarationBlockState::Immutable(_) => 0,
         DeclarationBlockState::Mutable(owner) => owner.borrow().revision,
     }
 }
@@ -496,6 +522,7 @@ pub extern "C" fn rust_declaration_data_dependencies(data: &DeclarationBlockData
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_declaration_block_dependencies(block: &DeclarationBlock) -> FfiDeclarationBlockDependencies {
     match &*block.state.borrow() {
+        DeclarationBlockState::Lazy(declarations) => declarations.data().dependencies(),
         DeclarationBlockState::Immutable(data) => data.dependencies(),
         DeclarationBlockState::Mutable(owner) => owner.borrow().data.dependencies(),
     }

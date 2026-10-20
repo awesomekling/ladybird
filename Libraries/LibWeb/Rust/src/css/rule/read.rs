@@ -493,10 +493,11 @@ impl<'a> RuleRef<'a> {
         }
     }
 
-    pub(crate) fn cascade_declarations(self) -> Option<Arc<DeclarationBlockData>> {
+    /// The rule's cascade declarations, which a style rule's sheet may keep as text until they are read.
+    pub(crate) fn rule_declarations(self) -> Option<crate::css::parser::syntax_parser::RuleDeclarations> {
         match self {
-            Self::Materialized(rule) => rule.cascade_declarations(),
-            Self::Shared(rule, _) => rule.cascade_declarations(),
+            Self::Materialized(rule) => rule.rule_declarations(),
+            Self::Shared(rule, _) => rule.rule_declarations(),
         }
     }
 

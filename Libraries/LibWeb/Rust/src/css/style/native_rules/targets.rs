@@ -7,6 +7,7 @@
 use super::NativeRuleTarget;
 use crate::css::container_conditions::ContainerConditionsData;
 use crate::css::declaration_block::DeclarationBlockData;
+use crate::css::parser::syntax_parser::RuleDeclarations;
 use crate::css::style::capacity::ShallowCapacityBytes;
 use crate::css::style::fast_hash::fast_hasher;
 use crate::css::style::memory::{MemoryCategory, MemoryController, MemoryLease};
@@ -92,8 +93,9 @@ pub(in crate::css::style) struct NativeRuleTargetRef<'a> {
 }
 
 impl<'a> NativeRuleTargetRef<'a> {
-    pub(in crate::css::style) fn declarations(&self) -> Option<&'a Arc<DeclarationBlockData>> {
-        self.data.declarations.as_ref()
+    /// The rule's declarations, read now where its sheet kept them as text.
+    pub(in crate::css::style) fn declarations(&self) -> Option<Arc<DeclarationBlockData>> {
+        self.data.declarations.as_ref().map(RuleDeclarations::data)
     }
 
     pub(in crate::css::style) fn layer_name(&self) -> &'a [u16] {

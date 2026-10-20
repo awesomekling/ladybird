@@ -5,7 +5,10 @@
  */
 
 use crate::css::css_tokenizer::TokenizerInput;
-use crate::css::declaration_block::{DeclarationBlock, DeclarationBlockData};
+use crate::css::declaration_block::DeclarationBlock;
+#[cfg(test)]
+use crate::css::declaration_block::DeclarationBlockData;
+use crate::css::parser::syntax_parser::RuleDeclarations;
 use crate::css::selector_parser::{
     RustParsedSelectorList, SelectorParsingMode, SelectorType, StyleNestingParent, parse_selector_list,
 };
@@ -18,10 +21,10 @@ pub(crate) struct StyleRule {
 }
 
 impl StyleRule {
-    pub(crate) fn new(selectors: Arc<RustParsedSelectorList>, declarations: Arc<DeclarationBlockData>) -> Self {
+    pub(crate) fn new(selectors: Arc<RustParsedSelectorList>, declarations: RuleDeclarations) -> Self {
         Self {
             selectors: RefCell::new(selectors),
-            declarations: DeclarationBlock::new(declarations),
+            declarations: DeclarationBlock::from_rule_declarations(declarations),
         }
     }
 
@@ -112,7 +115,7 @@ mod tests {
         engine.register_native_rule(
             id,
             crate::css::rule::rust_rule_identity(&rule),
-            rule.cascade_declarations(),
+            rule.rule_declarations(),
             source.identity(),
             &[],
             Box::default(),
@@ -179,7 +182,7 @@ mod tests {
         let rule = &rules.rule_at(0);
         let style = rule.style_rule();
         let snapshot = style.declarations.data();
-        let fork = StyleRule::new(style.selectors(), style.declarations.data());
+        let fork = StyleRule::new(style.selectors(), style.declarations.rule_declarations());
         assert!(style.declarations.is_immutable());
         assert!(fork.declarations.is_immutable());
         let retained_rule = Rc::clone(rule);

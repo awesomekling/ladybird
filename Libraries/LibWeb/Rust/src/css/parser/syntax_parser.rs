@@ -9,8 +9,8 @@ use crate::css::counter_style::{CounterStyleData, FfiCounterStyle};
 use crate::css::css_enums::{keyword_from_ascii_case_insensitive, keyword_to_generic_font_family};
 use crate::css::css_string::CssString;
 use crate::css::css_tokenizer::{
-    CssNumberType, ParserString, ParserToken, ParserTokenFeed, ParserTokenKind, SourcePosition, TokenizerInput,
-    tokenize_for_parser,
+    CssNumberType, ParserSource, ParserString, ParserToken, ParserTokenFeed, ParserTokenKind, SourcePosition,
+    SourceStorage, TokenizerInput, tokenize_for_parser,
 };
 use crate::css::declaration_block::{DeclarationBlock, DeclarationBlockData, DeclaredProperty};
 use crate::css::descriptor_block::{DescriptorBlockData, DescriptorData, FfiDescriptorBlock};
@@ -59,7 +59,14 @@ use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
 
+mod lazy_declarations;
 mod shared_rules;
+
+pub(crate) use lazy_declarations::RuleDeclarations;
+use lazy_declarations::{
+    LazyDeclarationContext, LazyDeclarationSource, LazyDeclarationText, LazyDeclarations,
+    contains_ascii_case_insensitive,
+};
 
 #[cfg(test)]
 mod ownership_tests;
@@ -154,6 +161,19 @@ pub(crate) struct QualifiedRule {
     pub declarations: Vec<Declaration>,
     pub children: Vec<RuleOrDeclarations>,
     pub source_position: Option<SourcePosition>,
+    /// The text of the rule's block, between its braces, in the source its tokens share.
+    block_source: BlockSource,
+}
+
+/// Where a rule's block is in the source its tokens share, which a parse of tokens that share none has no idea of.
+#[derive(Clone, Debug, Default)]
+struct BlockSource(Option<(Arc<SourceStorage>, std::ops::Range<usize>)>);
+
+// NB: Where a rule's block sits is no part of what the rule is.
+impl PartialEq for BlockSource {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1419,6 +1439,14 @@ impl Parser {
         self.tokens.token(self.position).map(|token| &token.kind)
     }
 
+    /// The source the token at `position` shares, and its range there.
+    fn shared_token_source(&mut self, position: usize) -> Option<(Arc<SourceStorage>, std::ops::Range<usize>)> {
+        match &self.tokens.token(position)?.source {
+            ParserSource::Shared { storage, range } => Some((storage.clone(), range.clone())),
+            _ => None,
+        }
+    }
+
     fn peek_kind(&mut self, offset: usize) -> Option<&ParserTokenKind> {
         self.tokens.token(self.position + offset).map(|token| &token.kind)
     }
@@ -1572,6 +1600,7 @@ impl Parser {
             declarations: Vec::new(),
             children: Vec::new(),
             source_position: None,
+            block_source: BlockSource::default(),
         };
         loop {
             let Some(kind) = self.next_kind() else {
@@ -1599,7 +1628,21 @@ impl Parser {
                     }
                     self.rule_context.push(qualified_context);
                     self.rule_names.push(context_rule_name(qualified_context));
+                    let block_start = self.shared_token_source(self.position);
                     rule.children = self.consume_block();
+                    let block_end = self
+                        .position
+                        .checked_sub(1)
+                        .filter(|&position| {
+                            matches!(
+                                self.tokens.token(position).map(|token| &token.kind),
+                                Some(ParserTokenKind::CloseCurly)
+                            )
+                        })
+                        .and_then(|position| self.shared_token_source(position));
+                    if let (Some((storage, open)), Some((_, close))) = (block_start, block_end) {
+                        rule.block_source = BlockSource(Some((storage, open.end..close.start)));
+                    }
                     self.rule_names.pop();
                     self.rule_context.pop();
                     if matches!(rule.children.first(), Some(RuleOrDeclarations::Declarations(_))) {
@@ -2096,7 +2139,7 @@ struct ParsedDeclaration {
 }
 
 struct ParsedRule {
-    declaration_block: Option<Arc<DeclarationBlockData>>,
+    declaration_block: Option<RuleDeclarations>,
     selector_list: Option<Arc<RustParsedSelectorList>>,
     /// What only rules other than style rules have, so that the many style rules pay one pointer for it.
     rare: Option<Box<RareRuleData>>,
@@ -2210,6 +2253,88 @@ struct SyntaxParseBuilder {
     /// The names of the declarations, which their name offsets point into until `finish` moves the names of the
     /// declarations it keeps into `values`.
     declaration_names: Vec<u16>,
+    /// What keeps a style rule's block as its text until its declarations are read, where the parse may.
+    lazy_blocks: Option<LazyBlocks>,
+}
+
+/// The blocks a sheet's parse keeps as text, which a block of the same text shares.
+struct LazyBlocks {
+    source: Arc<LazyDeclarationSource>,
+    ascii: Vec<u8>,
+    utf16: Vec<u16>,
+    by_text: crate::fast_hash::FastMap<u64, Vec<Arc<LazyDeclarations>>>,
+}
+
+impl LazyBlocks {
+    fn new(context: LazyDeclarationContext) -> Self {
+        Self {
+            source: Arc::new(LazyDeclarationSource {
+                text: std::sync::OnceLock::new(),
+                context,
+            }),
+            ascii: Vec::new(),
+            utf16: Vec::new(),
+            by_text: Default::default(),
+        }
+    }
+
+    fn block(&mut self, text: TokenizerInput<'_>) -> Arc<LazyDeclarations> {
+        use std::hash::{BuildHasher, Hash, Hasher};
+        // NB: A block's text is kept as ASCII where it is, in a sheet whose source is UTF-16 for a single other unit.
+        let ascii: Option<std::borrow::Cow<'_, [u8]>> = match text {
+            TokenizerInput::Ascii(units) => Some(units.into()),
+            TokenizerInput::Utf16(units) => units
+                .iter()
+                .all(|&unit| unit < 0x80)
+                .then(|| units.iter().map(|&unit| unit as u8).collect::<Vec<_>>().into()),
+        };
+        let mut hasher = foldhash::fast::FixedState::default().build_hasher();
+        match (&ascii, text) {
+            (Some(units), _) => units.hash(&mut hasher),
+            (None, TokenizerInput::Utf16(units)) => units.hash(&mut hasher),
+            (None, TokenizerInput::Ascii(_)) => unreachable!(),
+        }
+        let hash = hasher.finish();
+        let blocks = self.by_text.entry(hash).or_default();
+        let found = blocks.iter().find(|block| {
+            let (range, is_ascii) = block.range();
+            match (&ascii, text) {
+                (Some(units), _) => is_ascii && self.ascii[range] == **units,
+                (None, TokenizerInput::Utf16(units)) => !is_ascii && self.utf16[range] == *units,
+                (None, TokenizerInput::Ascii(_)) => unreachable!(),
+            }
+        });
+        if let Some(block) = found {
+            return block.clone();
+        }
+        let block = Arc::new(match (ascii, text) {
+            (Some(units), _) => {
+                let start = self.ascii.len();
+                self.ascii.extend_from_slice(&units);
+                LazyDeclarations::new(self.source.clone(), start..self.ascii.len(), true)
+            }
+            (None, TokenizerInput::Utf16(units)) => {
+                let start = self.utf16.len();
+                self.utf16.extend_from_slice(units);
+                LazyDeclarations::new(self.source.clone(), start..self.utf16.len(), false)
+            }
+            (None, TokenizerInput::Ascii(_)) => unreachable!(),
+        });
+        blocks.push(block.clone());
+        block
+    }
+
+    /// Gives the blocks their text, once the sheet's parse has kept all of it.
+    fn finish(self) {
+        let text = LazyDeclarationText {
+            ascii: self.ascii.into_boxed_slice(),
+            utf16: self.utf16.into_boxed_slice(),
+        };
+        assert!(
+            self.source.text.set(text).is_ok(),
+            "a sheet's lazy blocks get their text once"
+        );
+    }
 }
 
 /// Lets the declarations and declaration blocks a sheet repeats share one parse, for the length of the sheet's parse.
@@ -2335,7 +2460,7 @@ impl ParsedStyleSheet {
         let payload = match kind {
             NativeRuleType::Style => RulePayload::Style(StyleRule::new(
                 rule.selector_list.as_ref().unwrap().clone(),
-                rule.declaration_block.as_ref().unwrap().clone(),
+                rule.declaration_block.clone().unwrap(),
             )),
             NativeRuleType::Keyframe => RulePayload::Keyframe(Box::new(FfiKeyframe::new(
                 rule.rare().keyframe.as_ref().unwrap().clone(),
@@ -2378,7 +2503,7 @@ impl ParsedStyleSheet {
                     .collect();
                 RulePayload::Margin {
                     name: CssString::from_utf16(&name),
-                    declarations: Box::new(DeclarationBlock::new(rule.declaration_block.as_ref().unwrap().clone())),
+                    declarations: Box::new(DeclarationBlock::new(rule.declaration_block.as_ref().unwrap().data())),
                 }
             }
             NativeRuleType::FontFace => RulePayload::FontFace(Box::new(FfiDescriptorBlock::new(
@@ -2851,6 +2976,9 @@ impl SyntaxParseBuilder {
     }
 
     fn finish(mut self) -> ParsedStyleSheet {
+        if let Some(lazy_blocks) = self.lazy_blocks.take() {
+            lazy_blocks.finish();
+        }
         let mut declaration_errors = self.collect_declaration_errors().into_vec();
         let mut root_declarations = Vec::new();
         for item in &self.items {
@@ -2946,6 +3074,7 @@ impl SyntaxParseBuilder {
             custom_property_names: Default::default(),
             shared_simple_selectors: Default::default(),
             declaration_names: Vec::new(),
+            lazy_blocks: None,
         }
     }
 
@@ -3388,6 +3517,30 @@ impl SyntaxParseBuilder {
         Some(data.unwrap_or_default())
     }
 
+    /// The block of `rule` kept as its text, where the rule is a style rule whose block holds declarations only, which
+    /// parse the same way whenever they are read.
+    fn lazy_block(&mut self, rule: &Rule) -> Option<Arc<LazyDeclarations>> {
+        let lazy_blocks = self.lazy_blocks.as_mut()?;
+        let Rule::Qualified(rule) = rule else {
+            return None;
+        };
+        if !rule.prelude_is_selector
+            || rule.nesting_parent != StyleNestingParent::None
+            || !rule.children.is_empty()
+            || rule.declarations.is_empty()
+        {
+            return None;
+        }
+        let (storage, range) = rule.block_source.0.as_ref()?;
+        // NB: A random() value takes the index of its place in the sheet's parse, and the attributes attr() values read
+        //     are what the sheet's parse tells the engine to watch.
+        let text = storage.slice(range.clone());
+        if contains_ascii_case_insensitive(text, b"random(") || contains_ascii_case_insensitive(text, b"attr(") {
+            return None;
+        }
+        Some(lazy_blocks.block(storage.slice(range.clone())))
+    }
+
     fn append_rule(&mut self, rule: &Rule) -> Arc<ParsedRule> {
         let original_rule_kind = rule_kind(rule);
         let (is_qualified, name, prelude, declarations, children, has_block, source_position) = match rule {
@@ -3416,7 +3569,9 @@ impl SyntaxParseBuilder {
             Rule::At(rule) => font_feature_values_rule(rule.name.as_ref()).map(|(_, maximum)| maximum),
             Rule::Qualified(_) => None,
         };
-        let (declarations_start, declaration_count, _) = self.append_declarations(declarations, None);
+        let lazy_block = self.lazy_block(rule);
+        let (declarations_start, declaration_count, _) =
+            self.append_declarations(if lazy_block.is_some() { &[] } else { declarations }, None);
         let children = self.append_items(children, font_feature_maximum_value_count);
         let descriptor_block = Self::rule_descriptors(&children, original_rule_kind);
         let selector_list = match rule {
@@ -3622,7 +3777,9 @@ impl SyntaxParseBuilder {
             }
             ParsedRulePrelude::FontFeatureValuesRule(_) => {}
         }
-        let declaration_block = if let Rule::Qualified(qualified_rule) = rule {
+        let declaration_block = if lazy_block.is_some() {
+            None
+        } else if let Rule::Qualified(qualified_rule) = rule {
             // NB: A style rule's block is its own declarations, so the same text gives the same block.
             let block_key = qualified_rule
                 .prelude_is_selector
@@ -3700,7 +3857,10 @@ impl SyntaxParseBuilder {
             local_identity: u32::try_from(self.next_identity()).expect("parsed rule identity exceeds u32"),
             is_qualified,
             rule_kind,
-            declaration_block,
+            declaration_block: match lazy_block {
+                Some(lazy) => Some(RuleDeclarations::lazy(lazy)),
+                None => declaration_block.map(RuleDeclarations::parsed),
+            },
             children: (!children.is_empty()).then(|| {
                 Box::new(ParsedRuleChildren {
                     children,
@@ -3857,6 +4017,9 @@ pub(crate) unsafe fn parse_shared_stylesheet(
         parse_with_cache(source, parse_context.as_ref(), || {
             let mut parser = Parser::streaming(source);
             let mut parse = SyntaxParseBuilder::new(parse_context, false);
+            if lazy_declarations_enabled() {
+                parse.lazy_blocks = LazyDeclarationContext::capture(parse_context.as_ref()).map(LazyBlocks::new);
+            }
             while let Some(rule) = parser.consume_next_stylesheet_rule() {
                 parse.append_root(&rule);
             }
@@ -3865,6 +4028,29 @@ pub(crate) unsafe fn parse_shared_stylesheet(
             parse.finish()
         })
     }
+}
+
+/// Whether a sheet keeps the blocks of its style rules as text until their declarations are read, from
+/// LIBWEB_STYLE_LAZY_DECLARATIONS (`0` to parse every block at once).
+fn lazy_declarations_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("LIBWEB_STYLE_LAZY_DECLARATIONS").map_or(true, |value| value != "0"))
+}
+
+/// Parses the declarations of a style rule's block, `source`, as a sheet's parse parses them.
+fn parse_style_rule_block(source: TokenizerInput<'_>, context: &ParseContext) -> Arc<DeclarationBlockData> {
+    let (mut parser, _) = Parser::from_source(source, vec![RuleContext::Style]);
+    let items = parser.consume_block_contents();
+    let declarations = match items.first() {
+        Some(RuleOrDeclarations::Declarations(declarations)) => declarations.as_slice(),
+        _ => &[],
+    };
+    let mut parse = SyntaxParseBuilder::new(context, false);
+    let (start, count, _) = parse.append_declarations(declarations, None);
+    let mut block = DeclarationBlockData::default();
+    parse.append_declaration_block(&mut block, start, count, false);
+    block.compact();
+    Arc::new(block)
 }
 
 fn rule_contexts(contexts: &[u8]) -> Option<Vec<RuleContext>> {
@@ -4316,16 +4502,22 @@ mod tests {
         let values = parse
             .rules
             .iter()
-            .filter_map(|rule| rule.declaration_block.as_ref())
-            .flat_map(|block| block.properties.iter().map(|property| &property.value))
+            .filter_map(|rule| rule.declaration_block.as_ref().map(super::RuleDeclarations::data))
+            .flat_map(|block| {
+                block
+                    .properties
+                    .iter()
+                    .map(|property| property.value.clone())
+                    .collect::<Vec<_>>()
+            })
             .chain(
                 parse
                     .rules
                     .iter()
-                    .filter_map(|rule| rule.rare().property_rule.as_ref()?.initial_value.as_ref()),
+                    .filter_map(|rule| rule.rare().property_rule.as_ref()?.initial_value.clone()),
             )
             .filter(|value| matches!(value.as_ref(), crate::css::style_value::StyleValueData::Length { .. }))
-            .map(std::sync::Arc::downgrade)
+            .map(|value| std::sync::Arc::downgrade(&value))
             .collect::<Vec<_>>();
         assert!(values.len() >= 2);
         let syntaxes = parse
@@ -4343,7 +4535,8 @@ mod tests {
     #[test]
     fn consumers_can_retain_the_same_parsed_value_independently() {
         let parse = parse_test_stylesheet(b"a { width: 13.25px }");
-        let pointer = std::sync::Arc::as_ptr(&parse.rules[0].declaration_block.as_ref().unwrap().properties[0].value);
+        let pointer =
+            std::sync::Arc::as_ptr(&parse.rules[0].declaration_block.as_ref().unwrap().data().properties[0].value);
         let retain = || unsafe {
             std::sync::Arc::increment_strong_count(pointer);
             std::sync::Arc::from_raw(pointer)

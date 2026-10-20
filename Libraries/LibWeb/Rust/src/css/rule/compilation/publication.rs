@@ -10,7 +10,7 @@ use crate::css::selector_operations::{
     absolutize_selector_list, adapt_scope_end_selector_list, scope_root_selector_list,
 };
 use crate::css::selector_parser::{RustParsedSelectorList, StyleNestingParent};
-use crate::css::style::bridge::{BoundScopeChain, declares_transitions};
+use crate::css::style::bridge::BoundScopeChain;
 use crate::css::style::engine_calls::document_host;
 use crate::css::style::program::RuleKind;
 use crate::css::style::rule_writes::{BoundSelectors, CompiledRule, CompiledRuleKind, NamespaceTexts, RuleWrite};
@@ -277,11 +277,11 @@ impl<'a> Publisher<'a> {
             },
             _ => return NativeCompilationResult::default(),
         };
-        let declarations = rule.cascade_declarations();
+        let declarations = rule.rule_declarations();
         let declares_transitions = matches!(kind, CompiledRuleKind::Style { .. })
             && declarations
                 .as_ref()
-                .is_some_and(|declarations| declares_transitions(&declarations.properties));
+                .is_some_and(|declarations| declarations.may_declare_transitions());
         let in_a_layer = context.in_a_layer
             && matches!(
                 rule.rule_type(),

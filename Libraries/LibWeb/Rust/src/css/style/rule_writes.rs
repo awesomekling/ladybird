@@ -20,6 +20,7 @@ use super::program::{CascadeLayerID, RuleID, RuleKind, SheetID, StyleSheetObject
 use super::tree::TreeScopeID;
 use crate::css::container_conditions::ContainerConditionsData;
 use crate::css::declaration_block::DeclarationBlockData;
+use crate::css::parser::syntax_parser::RuleDeclarations;
 use crate::css::selector::CompiledSelector;
 use crate::css::selector_parser::RustParsedSelectorList;
 use crate::css::style_sheet::NativeStyleSheet;
@@ -198,7 +199,7 @@ pub(crate) enum CompiledRuleKind {
 pub(crate) struct CompiledRule {
     pub(crate) identity: u64,
     pub(crate) kind: CompiledRuleKind,
-    pub(crate) declarations: Option<Arc<DeclarationBlockData>>,
+    pub(crate) declarations: Option<RuleDeclarations>,
     /// The native sheet the rule comes from, which may be a sheet the rule's sheet imports.
     pub(crate) source_identity: u64,
     pub(crate) conditions_hold: bool,
@@ -229,7 +230,7 @@ impl CompiledRule {
                     (Some(rule), Some(waits)) => engine.host.dormant_rules.insert(rule, &waits, selectors.clone()),
                     _ => {
                         if let Some(declarations) = &self.declarations {
-                            publish_rule_declarations(engine, id, declarations);
+                            publish_rule_declarations(engine, id, &declarations.data());
                         }
                     }
                 }
@@ -395,7 +396,8 @@ pub(crate) fn publish_native_rule_declarations(
     declarations: Option<Arc<DeclarationBlockData>>,
     rule: RuleID,
 ) {
-    engine.native_rules.targets.get_mut(&rule).unwrap().declarations = declarations.clone();
+    engine.native_rules.targets.get_mut(&rule).unwrap().declarations =
+        declarations.clone().map(RuleDeclarations::parsed);
     let version = engine.next_declaration_block_version();
     engine.record_rule_declarations_changed(rule, version);
     // NB: A dormant rule publishes the declarations its native target holds when it wakes.
@@ -413,7 +415,7 @@ fn publish_target_declarations(engine: &mut StyleEngine, rule: RuleID) {
         .native_rules
         .targets
         .get(&rule)
-        .and_then(|target| target.declarations().cloned());
+        .and_then(|target| target.declarations());
     if let Some(declarations) = declarations {
         publish_rule_declarations(engine, rule.0 + 1, &declarations);
     }
