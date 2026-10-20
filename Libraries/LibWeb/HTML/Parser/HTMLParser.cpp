@@ -116,11 +116,13 @@ static Utf16String utf16_string_from_ffi(u16 const* ptr, size_t len)
     return utf16_string_from_span(ReadonlySpan<char16_t> { reinterpret_cast<char16_t const*>(ptr), len });
 }
 
-static Utf16String utf8_string_from_ffi(u8 const* ptr, size_t len)
+// NB: The values are interned, so the elements that carry the same value share it: a document writes most of its
+//     attribute values, such as its classes and roles, on many elements alike.
+static Utf16String attribute_value_from_ffi(u8 const* ptr, size_t len)
 {
-    if (!ptr)
+    if (!ptr || len == 0)
         return {};
-    return utf16_string_from_span(ReadonlySpan<char> { reinterpret_cast<char const*>(ptr), len });
+    return Utf16FlyString::from_utf8_without_validation({ reinterpret_cast<char const*>(ptr), len }).to_utf16_string();
 }
 
 static constexpr size_t newline_then_spaces_table_size = 64;
@@ -1096,7 +1098,7 @@ GC::Ref<DOM::Element> HTMLParser::create_element_for(Utf16FlyString const& local
         if (attribute.prefix_len != 0)
             prefix = Utf16FlyString::from_utf8_without_validation({ reinterpret_cast<char const*>(attribute.prefix_ptr), attribute.prefix_len });
         DOM::QualifiedName qualified_name { Utf16FlyString::from_raw(attribute.local_name), move(prefix), attribute_namespace_from_html_parser_ffi(attribute.namespace_) };
-        element->append_attribute(move(qualified_name), utf8_string_from_ffi(attribute.value_ptr, attribute.value_len));
+        element->append_attribute(move(qualified_name), attribute_value_from_ffi(attribute.value_ptr, attribute.value_len));
     }
 
     // AD-HOC: The muted attribute on media elements is only set if the muted content attribute is present when the element is first created.
