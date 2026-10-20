@@ -352,8 +352,17 @@ fn set_visual_context_node_handles(
         return;
     }
     column
-        .set(index, handles.map(Arc::new))
+        .set(index, handles.map(shared_node_handles))
         .expect("the row is in the column");
+}
+
+/// The handles in an `Arc`, which rows without nodes share: most boxes append none.
+fn shared_node_handles(handles: BoxVisualContextNodeHandles) -> Arc<BoxVisualContextNodeHandles> {
+    static EMPTY: std::sync::LazyLock<Arc<BoxVisualContextNodeHandles>> = std::sync::LazyLock::new(Arc::default);
+    if handles == EMPTY_BOX_VISUAL_CONTEXT_NODE_HANDLES {
+        return Arc::clone(&EMPTY);
+    }
+    Arc::new(handles)
 }
 
 pub(crate) struct PaintableRows<Arena> {
