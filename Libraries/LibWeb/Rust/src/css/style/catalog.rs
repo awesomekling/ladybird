@@ -74,7 +74,7 @@ impl SelectorTruthSetCatalog {
     ) -> bool {
         match self
             .verified_derived_answers
-            .entry((truth, tree_scope, program_version.0))
+            .entry((truth, tree_scope, u64::from(program_version.0)))
         {
             std::collections::hash_map::Entry::Vacant(entry) => {
                 entry.insert(answer.into());

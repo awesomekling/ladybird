@@ -471,7 +471,7 @@ impl StyleSheetProgram {
     }
 
     fn bump_version(&mut self) {
-        self.version = ProgramVersion(self.version.0 + 1);
+        self.version = ProgramVersion(self.version.0.checked_add(1).expect("rule program version overflow"));
     }
 
     fn bump_routing_liveness_version(&mut self) {

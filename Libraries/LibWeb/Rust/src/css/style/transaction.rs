@@ -33,7 +33,7 @@ use super::tree::TreeScopeID;
 /// Version of the attached stylesheet program: compiled selectors, declarations, conditions, and
 /// their attachment to style scopes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ProgramVersion(pub u64);
+pub struct ProgramVersion(pub u32);
 
 /// Monotonic identity of one normalized style transaction published by a document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

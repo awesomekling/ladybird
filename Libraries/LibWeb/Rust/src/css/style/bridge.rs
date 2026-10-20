@@ -3086,7 +3086,7 @@ pub(crate) unsafe fn take_style_transaction(
             "a style transaction emitted more than one batch"
         );
         output.transaction_version = transaction_version.0;
-        output.program_version = program_version.0;
+        output.program_version = u64::from(program_version.0);
         output.answers.extend_from_slice(answers);
     });
     output.reclaimed_style_atoms = std::mem::take(&mut engine.host.reclaimed_style_atoms);
