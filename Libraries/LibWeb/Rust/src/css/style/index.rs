@@ -4036,17 +4036,28 @@ impl FactStaging {
         }
         const RETAINED_ENTRY_CAPACITY_RATIO: usize = 4;
         const MIN_RETAINED_ENTRY_CAPACITY: usize = 64;
+        // NB: A transaction that styles the whole document, as the one a page loads with does, stages a row for every
+        //     element. The room for those would stay for as long as the document lives, so at most the room a
+        //     transaction that restyles part of it takes is kept.
+        const MAX_RETAINED_ENTRY_CAPACITY: usize = 1024;
         let transaction_high_water = self.entries.len();
-        if self.entries.capacity()
-            > transaction_high_water
-                .saturating_mul(RETAINED_ENTRY_CAPACITY_RATIO)
-                .max(MIN_RETAINED_ENTRY_CAPACITY)
-        {
-            self.entries.shrink_to(transaction_high_water);
-        }
+        let retained_capacity = transaction_high_water.min(MAX_RETAINED_ENTRY_CAPACITY);
+        let retained_capacity_limit = transaction_high_water
+            .saturating_mul(RETAINED_ENTRY_CAPACITY_RATIO)
+            .max(MIN_RETAINED_ENTRY_CAPACITY)
+            .min(MAX_RETAINED_ENTRY_CAPACITY);
         self.entries.clear();
         self.touched.clear();
         self.dirty.clear();
+        if self.entries.capacity() > retained_capacity_limit {
+            self.entries.shrink_to(retained_capacity);
+        }
+        if self.touched.capacity() > retained_capacity_limit {
+            self.touched.shrink_to(retained_capacity);
+        }
+        if self.dirty.capacity() > retained_capacity_limit {
+            self.dirty.shrink_to(retained_capacity);
+        }
         self.live_count = 0;
         self.dirty_count = 0;
         self.capacity_bytes = self.storage_capacity_bytes();
