@@ -1059,6 +1059,9 @@ private:
     QualifiedName m_qualified_name;
     Optional<Utf16FlyString> m_id;
     Vector<Utf16FlyString, 1> m_classes;
+    // NB: Only elements with presentational hints keep any, which SVG icons have many of, so they are kept in a block
+    //     of their own rather than in the element's rare data.
+    OwnPtr<Vector<CSS::StyleProperty>> m_published_presentational_hint_properties;
 
     OwnPtr<AttributeList> m_attributes;
     u64 m_subtree_attribute_name_filter { 0 };
@@ -1072,7 +1075,6 @@ private:
     u64 m_animation_style_generation { 0 };
     u64 m_animation_subtree_style_generation { 0 };
     PublishedCustomPropertyNames m_published_custom_property_names;
-    Vector<CSS::StyleProperty> m_published_presentational_hint_properties;
 
     void register_element_reference_pseudo_element(CSS::PseudoElement type, GC::Ref<Element> element);
     SyntheticPseudoElement& ensure_synthetic_pseudo_element(CSS::PseudoElement) const;
