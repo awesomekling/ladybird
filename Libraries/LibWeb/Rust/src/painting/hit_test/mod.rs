@@ -52,7 +52,8 @@ pub struct HitTestItem {
     pub caret_line_index: Option<usize>,
     pub block_container: NodeSlotId,
     pub context: ContextRef,
-    pub border_radii: BorderRadii,
+    /// The corner radii of a box that has any. Few do, so the items of the others keep no room for them.
+    pub border_radii: Option<Arc<BorderRadii>>,
     pub path: Option<Arc<libgfx_rust::path::OwnedPath>>,
     pub winding_rule: i32,
     pub writing_mode: u8,

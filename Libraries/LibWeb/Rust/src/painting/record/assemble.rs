@@ -495,7 +495,6 @@ impl<'a, H: AssemblyHost> Assembler<'a, H> {
 mod tests {
     use super::*;
     use crate::css::css_pixels::CssPixelRect;
-    use crate::painting::border_radii::BorderRadii;
     use crate::painting::display_list::builder::RecordedDisplayList;
     use crate::painting::display_list::commands::ContextRef;
     use crate::painting::display_list::recorder::DisplayListRecorder;
@@ -672,7 +671,7 @@ mod tests {
                     caret_line_index: Some(index as usize + content.version as usize * 100),
                     block_container: NodeSlotId::INVALID,
                     context: ContextRef::default(),
-                    border_radii: BorderRadii::default(),
+                    border_radii: None,
                     path: None,
                     winding_rule: 0,
                     writing_mode: 0,

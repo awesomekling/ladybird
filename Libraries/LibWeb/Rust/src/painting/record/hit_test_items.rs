@@ -465,7 +465,7 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
             caret_rect: rect,
             caret_line_index,
             block_container,
-            border_radii,
+            border_radii: border_radii.has_any_radius().then(|| std::sync::Arc::new(border_radii)),
             can_produce_caret_position,
             ..self.base_hit_test_item(HitTestItemKind::Box, paintable_box, context)
         };
@@ -486,7 +486,7 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
             caret_line_index: None,
             block_container: NodeSlotId::INVALID,
             context,
-            border_radii: BorderRadii::default(),
+            border_radii: None,
             path: None,
             winding_rule: 0,
             writing_mode: self.writing_mode_of(target),

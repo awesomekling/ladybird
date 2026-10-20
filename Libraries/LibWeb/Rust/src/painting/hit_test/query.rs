@@ -100,7 +100,11 @@ impl HitTestList {
         let local_point = to_css_point(local);
         match item.kind {
             HitTestItemKind::Box => {
-                item.rect.contains_point(local_point) && item.border_radii.contains(local_point, item.rect)
+                item.rect.contains_point(local_point)
+                    && item
+                        .border_radii
+                        .as_deref()
+                        .is_none_or(|radii| radii.contains(local_point, item.rect))
             }
             HitTestItemKind::SvgPath => {
                 // SVG paths test in float: their local units can map to many device pixels each.
