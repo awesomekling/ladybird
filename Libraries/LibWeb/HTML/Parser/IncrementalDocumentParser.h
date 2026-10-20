@@ -71,6 +71,8 @@ private:
     ByteBuffer m_input_bytes;
     size_t m_decoded_byte_count { 0 };
     Utf16StringBuilder m_source;
+    size_t m_source_length_in_code_units { 0 };
+    bool m_released_encoding_change_buffers { false };
     bool m_body_is_exhausted { false };
     bool m_processed_implied_eof { false };
 };

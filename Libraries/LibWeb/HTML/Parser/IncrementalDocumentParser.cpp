@@ -159,7 +159,10 @@ bool IncrementalDocumentParser::tokenizer_will_consume_input_immediately() const
 
 void IncrementalDocumentParser::append_decoded(Utf16View decoded)
 {
-    m_source.append(decoded);
+    m_source_length_in_code_units += decoded.length_in_code_units();
+    // NB: The decoded source is only compared with a redecoding while the input bytes are kept for one.
+    if (!m_released_encoding_change_buffers)
+        m_source.append(decoded);
     m_parser->tokenizer().append_to_input_stream(decoded);
 }
 
@@ -279,7 +282,7 @@ void IncrementalDocumentParser::finish_body()
 
     // https://html.spec.whatwg.org/multipage/document-lifecycle.html#read-html
     // When no more bytes are available, have the parser process the implied EOF character.
-    m_document->set_source(m_source.to_string());
+    m_document->set_source_length_in_code_units(m_source_length_in_code_units);
     m_processed_implied_eof = true;
     m_parser->tokenizer().close_input_stream();
     pump();
@@ -301,7 +304,10 @@ ErrorOr<bool> IncrementalDocumentParser::change_encoding(StringView new_encoding
         builder.append(TRY(decoder->finish_to_utf16()));
     auto redecoded_source = builder.to_string();
 
-    auto current_source = m_processed_implied_eof ? m_document->source().utf16_view() : m_source.view();
+    // NB: The bytes and the source a redecoding is compared with are no longer kept, so it cannot match.
+    if (m_released_encoding_change_buffers)
+        return false;
+    auto current_source = m_source.view();
     if (!redecoded_source.starts_with(current_source)
         || (m_processed_implied_eof && redecoded_source.length_in_code_units() != current_source.length_in_code_units())) {
         // FIXME: A mismatch requires restarting the navigation with the new encoding, as described by step 6 of the
@@ -338,7 +344,11 @@ void IncrementalDocumentParser::decode_and_process(size_t length)
 
 void IncrementalDocumentParser::release_encoding_change_buffers()
 {
-    // Only bytes the decoder has yet to convert are still needed; the rest were kept solely to compare decoders.
+    // Only bytes the decoder has yet to convert are still needed; the rest were kept solely to compare decoders, with
+    // the source decoded so far.
+    m_released_encoding_change_buffers = true;
+    // NB: Building the string takes the builder's buffer, which the string gives back as it goes.
+    (void)m_source.to_string();
     auto undecoded_bytes = undecoded_input_bytes();
     auto undecoded_size = undecoded_bytes.size();
     undecoded_bytes.copy_to(m_input_bytes.span());

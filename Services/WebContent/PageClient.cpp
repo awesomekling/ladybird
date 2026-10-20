@@ -20,9 +20,12 @@
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/ShareableBitmap.h>
 #include <LibHTTP/Cookie/ParsedCookie.h>
+#include <LibHTTP/HeaderList.h>
 #include <LibIPC/TransportHandle.h>
 #include <LibJS/Console.h>
 #include <LibJS/Runtime/ConsoleObject.h>
+#include <LibRequests/Request.h>
+#include <LibTextCodec/Decoder.h>
 #include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/CSS/StyleSheetIdentifier.h>
 #include <LibWeb/CSS/StyleSheetImport.h>
@@ -53,6 +56,8 @@
 #include <LibWeb/Infra/SerializedURL.h>
 #include <LibWeb/InvalidateDisplayList.h>
 #include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Loader/LoadRequest.h>
+#include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
@@ -2384,13 +2389,70 @@ Optional<NonnullRefPtr<JS::SourceCode const>> PageClient::devtools_source_code(W
     return document->script_registry().source_code(source_id.script_id);
 }
 
-Optional<Web::HTML::ScriptRegistry::Content> PageClient::devtools_source_content(Web::HTML::ScriptRegistry::Identifier const& source_id) const
+void PageClient::fetch_document_source(Web::DOM::Document const& document, Function<void(Optional<String>)> on_source)
+{
+    struct SourceFetch : public RefCounted<SourceFetch> {
+        ByteBuffer body;
+        Optional<Core::ImmutableBytes> cached_body;
+        String encoding;
+        Function<void(Optional<String>)> on_source;
+    };
+    auto fetch = adopt_ref(*new SourceFetch);
+    fetch->encoding = document.encoding_or_default().to_utf8();
+    fetch->on_source = move(on_source);
+
+    // NB: The document keeps no copy of its source, which is fetched again, from the HTTP cache where it is there.
+    Web::LoadRequest request { HTTP::HeaderList::create() };
+    request.set_url(document.url());
+    request.set_page(page());
+    request.set_method("GET"sv);
+    request.set_cache_mode(HTTP::CacheMode::ForceCache);
+
+    auto& heap = document.heap();
+    auto on_headers_received = GC::create_function(heap, [](Requests::Request*, HTTP::HeaderList const&, Optional<u32>, Optional<String> const&, Optional<Core::ImmutableBytes>, Optional<u64>, Requests::CacheState) { });
+    auto on_data_received = GC::create_function(heap, [fetch](Requests::ResponseData data) {
+        fetch->body.append(data.bytes());
+    });
+    auto on_cached_body_available = GC::create_function(heap, [fetch](Core::ImmutableBytes data) {
+        fetch->cached_body = move(data);
+    });
+    auto on_complete = GC::create_function(heap, [fetch](bool success, Requests::RequestTimingInfo const&, Optional<StringView>) {
+        auto decoder = TextCodec::decoder_for(fetch->encoding);
+        if (!success || !decoder.has_value()) {
+            fetch->on_source({});
+            return;
+        }
+        auto bytes = fetch->cached_body.has_value() ? fetch->cached_body->bytes() : fetch->body.bytes();
+        auto source = decoder->to_utf8(StringView { bytes }, TextCodec::IgnoreBOM::No, TextCodec::ErrorMode::Replacement);
+        fetch->on_source(source.is_error() ? Optional<String> {} : source.release_value());
+    });
+    (void)Web::ResourceLoader::the().load(request, on_headers_received, on_data_received, on_cached_body_available, on_complete);
+}
+
+void PageClient::request_devtools_source_content(Web::HTML::ScriptRegistry::Identifier const& source_id, Function<void(Optional<Web::HTML::ScriptRegistry::Content>)> on_content)
 {
     auto* document = document_for_devtools_source(*this, source_id);
-    if (!document)
-        return {};
+    if (!document) {
+        on_content({});
+        return;
+    }
 
-    return document->script_registry().script_content(source_id.script_id, document->source().utf16_view());
+    auto script = document->script_registry().scripts().get(source_id.script_id);
+    if (!script.has_value() || !script->description.is_inline_source) {
+        on_content(document->script_registry().script_content(source_id.script_id, {}));
+        return;
+    }
+
+    // An inline script's content is its document's source.
+    fetch_document_source(*document, [this, source_id, on_content = move(on_content)](Optional<String> source) {
+        auto* document = document_for_devtools_source(*this, source_id);
+        if (!document) {
+            on_content({});
+            return;
+        }
+        auto source_text = source.has_value() ? Utf16String::from_utf8(*source) : Utf16String {};
+        on_content(document->script_registry().script_content(source_id.script_id, source_text.utf16_view()));
+    });
 }
 
 Vector<WebView::DebuggerSourcePosition> PageClient::devtools_source_breakpoint_positions(Web::HTML::ScriptRegistry::Identifier const& source_id) const

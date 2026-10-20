@@ -658,8 +658,10 @@ public:
     void capture_events();
     void release_events();
 
-    Utf16String const& source() const { return m_source; }
-    void set_source(Utf16String source) { m_source = move(source); }
+    // NB: A document keeps no copy of its source: view-source and DevTools fetch it again. It keeps the source's
+    //     length, which DevTools describes its inline scripts with.
+    size_t source_length_in_code_units() const { return m_source_length_in_code_units; }
+    void set_source_length_in_code_units(size_t length) { m_source_length_in_code_units = length; }
 
     HTML::EnvironmentSettingsObject& relevant_settings_object() const;
 
@@ -1845,7 +1847,7 @@ private:
     bool m_has_been_destroyed { false };
     bool m_observers_consider_document_fully_active { false };
 
-    Utf16String m_source;
+    size_t m_source_length_in_code_units { 0 };
 
     GC::Ptr<HTML::HTMLScriptElement> m_pending_parsing_blocking_script;
     GC::Ptr<SVG::SVGScriptElement> m_pending_parsing_blocking_svg_script;

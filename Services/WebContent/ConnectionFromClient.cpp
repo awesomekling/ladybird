@@ -1174,8 +1174,10 @@ void ConnectionFromClient::get_source(Web::PageId page_id)
 {
     if (auto page = this->page(page_id); page.has_value()) {
         if (auto doc = page->page().local_traversable()->active_document()) {
-            auto html = Web::highlight_source(doc->url(), doc->base_url(), doc->source().to_utf8(), Syntax::Language::HTML);
-            async_did_get_highlighted_source(page_id, move(html));
+            page->fetch_document_source(*doc, [this, page_id, url = doc->url(), base_url = doc->base_url()](Optional<String> source) {
+                auto html = Web::highlight_source(url, base_url, source.value_or({}), Syntax::Language::HTML);
+                async_did_get_highlighted_source(page_id, move(html));
+            });
         }
     }
 }
@@ -2042,7 +2044,9 @@ void ConnectionFromClient::request_devtools_source(Web::PageId page_id, Web::HTM
     if (!page.has_value())
         return;
 
-    async_did_get_devtools_source(page_id, source_id, page->devtools_source_content(source_id));
+    page->request_devtools_source_content(source_id, [this, page_id, source_id](Optional<Web::HTML::ScriptRegistry::Content> content) {
+        async_did_get_devtools_source(page_id, source_id, move(content));
+    });
 }
 
 void ConnectionFromClient::attach_debugger(Web::PageId page_id)

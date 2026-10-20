@@ -129,7 +129,8 @@ public:
     Vector<Web::HTML::ScriptRegistry::Description> list_devtools_sources() const;
     Optional<Web::HTML::ScriptRegistry::Description> devtools_source_description(JS::SourceCode const&) const;
     Optional<NonnullRefPtr<JS::SourceCode const>> devtools_source_code(Web::HTML::ScriptRegistry::Identifier const&) const;
-    Optional<Web::HTML::ScriptRegistry::Content> devtools_source_content(Web::HTML::ScriptRegistry::Identifier const&) const;
+    void request_devtools_source_content(Web::HTML::ScriptRegistry::Identifier const&, Function<void(Optional<Web::HTML::ScriptRegistry::Content>)>);
+    void fetch_document_source(Web::DOM::Document const&, Function<void(Optional<String>)>);
     Vector<WebView::DebuggerSourcePosition> devtools_source_breakpoint_positions(Web::HTML::ScriptRegistry::Identifier const&) const;
 
     virtual double zoom_level() const override { return m_zoom_level; }

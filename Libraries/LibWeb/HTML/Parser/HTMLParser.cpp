@@ -311,7 +311,7 @@ void HTMLParser::run(HTMLTokenizer::StopAtInsertionPoint stop_at_insertion_point
 void HTMLParser::run(URL::URL const& url, HTMLTokenizer::StopAtInsertionPoint stop_at_insertion_point)
 {
     m_document->set_url(url);
-    m_document->set_source(m_tokenizer.source());
+    m_document->set_source_length_in_code_units(m_tokenizer.source().length_in_code_units());
     run_until_completion(stop_at_insertion_point);
 }
 
@@ -1676,7 +1676,7 @@ bool HTMLParser::try_parse_document_fast(DOM::Document& document, Utf16View inpu
 
     // NB: These are what creating the parser for a decoded string and running it would have set.
     document.set_encoding("UTF-8"_utf16);
-    document.set_source(Utf16String::from_utf16(input));
+    document.set_source_length_in_code_units(input.length_in_code_units());
     document.set_quirks_mode(DOM::QuirksMode::Yes);
 
     auto registry = look_up_a_custom_element_registry(document);
