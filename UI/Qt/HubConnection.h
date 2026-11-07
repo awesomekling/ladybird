@@ -29,6 +29,7 @@ private:
     virtual void die() override;
 
     // ^HubClientEndpoint
+    virtual void settings_changed(ByteString settings_json) override;
     virtual void action_changed(Hub::ActionState state) override;
     virtual void bookmarks_menu_changed(Vector<Hub::MenuEntry> entries) override;
     virtual void view_show_context_menu(u64 view_id, Vector<Hub::MenuEntry> entries, Gfx::IntPoint widget_position) override;
