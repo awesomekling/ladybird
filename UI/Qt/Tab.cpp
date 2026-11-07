@@ -1460,7 +1460,7 @@ void Tab::show_zoom_popover()
 
 void Tab::show_bookmark_popover()
 {
-    auto& store = WebView::Application::bookmark_store();
+    auto& store = Application::bookmark_store();
     auto just_added = BookmarkPopover::JustAdded::No;
     auto bookmark = store.find_bookmark_by_url(view().url());
     if (!bookmark.has_value()) {
