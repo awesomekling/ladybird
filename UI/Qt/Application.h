@@ -58,11 +58,25 @@ public:
 
     static ErrorOr<NonnullOwnPtr<Application>> create(Main::Arguments const&);
     static Application& the() { return *s_the; }
+#ifdef LADYBIRD_HUB_IN_OWN_PROCESS
+    static ErrorOr<ByteString> hub_executable_path();
+    static WebView::BrowserOptions const& browser_options() { return s_the->m_browser_options; }
+#else
     static Hub::Application& hub() { return Hub::Application::the(); }
-
     static WebView::BrowserOptions const& browser_options() { return WebView::Application::browser_options(); }
+#endif
+    bool has_translator() const;
+    // The status to exit with right away, if the browser has nothing for this process to do.
+    Optional<int> exit_status_if_done() const;
+    ErrorOr<int> execute();
+
+    Function<void(Vector<URL::URL> const&)> on_open_urls;
+    Function<void(Vector<URL::URL> const&)> on_new_tab;
+    Function<void(Vector<URL::URL> const&)> on_new_window;
     static WebView::Settings& settings() { return *s_the->m_settings; }
+#ifndef LADYBIRD_HUB_IN_OWN_PROCESS
     static WebView::Profile const& profile() { return WebView::Application::profile(); }
+#endif
     static WebView::BookmarkStore& bookmark_store() { return *s_the->m_bookmark_store; }
 
     virtual ~Application() override;
@@ -227,7 +241,7 @@ private:
 
     void update_tabs_display() const;
 
-    virtual void rebuild_bookmarks_menu() const override;
+    void rebuild_bookmarks_menu() const;
     void show_bookmark_context_menu(Gfx::IntPoint, Optional<WebView::BookmarkItem const&>, Optional<String const&> target_folder_id, Optional<String const&> parent_folder_id);
     NonnullRefPtr<BookmarkPromise> display_add_bookmark_dialog(Optional<String const&> target_folder_id = {}) const;
     NonnullRefPtr<BookmarkPromise> display_edit_bookmark_dialog(WebView::BookmarkItem const& current_bookmark, Optional<String const&> parent_folder_id) const;
@@ -240,10 +254,23 @@ private:
 
     static Application* s_the;
 
+#ifdef LADYBIRD_HUB_IN_OWN_PROCESS
+    ErrorOr<void> connect_to_hub(Main::Arguments const&);
+    Hub::UIInfo current_ui_info() const;
+
+    // NB: QApplication holds on to these by reference, so they must live as long as it does.
+    Main::Arguments m_arguments_for_qt;
+
+    Core::EventLoop* m_event_loop { nullptr };
+    WebView::BrowserOptions m_browser_options;
+    bool m_has_translator { false };
+    Optional<int> m_exit_status_if_done;
+#else
     OwnPtr<Hub::Application> m_hub;
+    RefPtr<Hub::ConnectionFromUI> m_connection_from_ui;
+#endif
     OwnPtr<WebView::Settings> m_settings;
     OwnPtr<WebView::BookmarkStore> m_bookmark_store;
-    RefPtr<Hub::ConnectionFromUI> m_connection_from_ui;
     RefPtr<HubConnection> m_hub_connection;
     OwnPtr<QApplication> m_application;
     HashMap<u64, NonnullOwnPtr<WebView::PictureInPictureWindow>> m_picture_in_picture_windows;

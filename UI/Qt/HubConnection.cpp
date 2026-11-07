@@ -5,6 +5,8 @@
  */
 
 #include <AK/JsonValue.h>
+#include <LibCore/Process.h>
+#include <LibWebView/CrashReportOutbox.h>
 #include <UI/Qt/Application.h>
 #include <UI/Qt/HubConnection.h>
 #include <UI/Qt/RemoteActions.h>
@@ -37,8 +39,42 @@ HubConnection* HubConnection::the_if_connected()
     return s_the;
 }
 
+void HubConnection::did_initialize()
+{
+    m_did_initialize = true;
+    set_peer_owns_this_process(true);
+}
+
 void HubConnection::die()
 {
+    // NB: A Hub that ends before answering initialize() has just found that there is nothing for us to do.
+    if (!m_did_initialize)
+        return;
+
+    // The UI has nothing left to show without the Hub.
+    Core::Process::terminate_immediately(1);
+}
+
+void HubConnection::crash_reports_changed()
+{
+#ifdef LADYBIRD_HUB_IN_OWN_PROCESS
+    // NB: The Hub has an outbox of its own, and it is that one that saw the change. In one process there is only the one,
+    //     which has told its observers already, and telling them again here would have the Hub send this once more.
+    WebView::CrashReportOutbox::the().reports_changed();
+#endif
+}
+
+void HubConnection::post_report(URL::URL const& url, Vector<HTTP::Header> headers, ByteString body, Function<void(WebView::ReportSubmission::PostResponse)> on_response)
+{
+    auto post_id = m_next_report_post_id++;
+    m_report_posts.set(post_id, move(on_response));
+    async_post_report(post_id, url, move(headers), move(body));
+}
+
+void HubConnection::report_post_finished(u64 post_id, bool had_network_error, Optional<u32> response_code, Vector<HTTP::Header> response_headers, ByteString body)
+{
+    if (auto on_response = m_report_posts.take(post_id); on_response.has_value())
+        (*on_response)({ .had_network_error = had_network_error, .response_code = response_code, .headers = move(response_headers), .body = move(body) });
 }
 
 void HubConnection::view_install_backing_stores(u64 view_id, u64 page_id, Vector<i32> bitmap_ids, Vector<Gfx::SharedImage> backing_stores)
@@ -470,6 +506,24 @@ void HubConnection::view_page_dumps(u64 view_id, u64 request_id, Optional<String
         view->did_get_page_dumps(request_id, move(dumps));
 }
 
+void HubConnection::app_open_urls(Vector<URL::URL> urls)
+{
+    if (auto& application = Application::the(); application.on_open_urls)
+        application.on_open_urls(urls);
+}
+
+void HubConnection::app_open_new_tab(Vector<URL::URL> urls)
+{
+    if (auto& application = Application::the(); application.on_new_tab)
+        application.on_new_tab(urls);
+}
+
+void HubConnection::app_open_new_window(Vector<URL::URL> urls)
+{
+    if (auto& application = Application::the(); application.on_new_window)
+        application.on_new_window(urls);
+}
+
 void HubConnection::settings_changed(ByteString settings_json)
 {
     auto settings = JsonValue::from_string(settings_json);
@@ -486,6 +540,7 @@ void HubConnection::action_changed(Hub::ActionState state)
 void HubConnection::bookmarks_menu_changed(Vector<Hub::MenuEntry> entries)
 {
     RemoteActions::the().set_bookmarks_menu(entries);
+    Application::the().rebuild_bookmarks_menu();
 }
 
 void HubConnection::view_show_context_menu(u64 view_id, Vector<Hub::MenuEntry> entries, Gfx::IntPoint widget_position)

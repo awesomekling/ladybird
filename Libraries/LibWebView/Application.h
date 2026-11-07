@@ -271,7 +271,7 @@ public:
 
     void reset_private_browsing_session();
 
-    void notify_webdriver_window_created(String const& handle);
+    virtual void notify_webdriver_window_created(String const& handle);
     void notify_webdriver_window_closed(String const& handle);
     void webdriver_browser_connection_died(Badge<WebDriverBrowserConnection>);
     void push_webdriver_session_config(ViewImplementation&);

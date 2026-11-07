@@ -9,6 +9,7 @@
 #include <Hub/HubClientEndpoint.h>
 #include <Hub/HubServerEndpoint.h>
 #include <LibIPC/ConnectionToServer.h>
+#include <LibWebView/ReportSubmission.h>
 
 namespace Ladybird {
 
@@ -25,10 +26,24 @@ public:
     static HubConnection& the();
     static HubConnection* the_if_connected();
 
+    // The Hub has answered initialize(), so from now on the UI cannot go on without it.
+    void did_initialize();
+
+    void post_report(URL::URL const&, Vector<HTTP::Header>, ByteString body, Function<void(WebView::ReportSubmission::PostResponse)>);
+
 private:
+    bool m_did_initialize { false };
+    u64 m_next_report_post_id { 1 };
+    HashMap<u64, Function<void(WebView::ReportSubmission::PostResponse)>> m_report_posts;
+
     virtual void die() override;
 
     // ^HubClientEndpoint
+    virtual void crash_reports_changed() override;
+    virtual void report_post_finished(u64 post_id, bool had_network_error, Optional<u32> response_code, Vector<HTTP::Header> response_headers, ByteString body) override;
+    virtual void app_open_urls(Vector<URL::URL> urls) override;
+    virtual void app_open_new_tab(Vector<URL::URL> urls) override;
+    virtual void app_open_new_window(Vector<URL::URL> urls) override;
     virtual void view_selected_text(u64 view_id, u64 request_id, Optional<ByteString> text) override;
     virtual void view_close_preflight_finished(u64 view_id, u64 request_id, bool may_close) override;
     virtual void view_page_dumps(u64 view_id, u64 request_id, Optional<String> dumps) override;

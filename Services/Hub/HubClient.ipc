@@ -1,6 +1,8 @@
+#include <LibHTTP/Header.h>
 #include <LibCompositing/Types.h>
 #include <LibGfx/Color.h>
 #include <LibGfx/Cursor.h>
+#include <LibGfx/GpuDeviceIdentity.h>
 #include <LibGfx/Point.h>
 #include <LibGfx/ShareableBitmap.h>
 #include <LibGfx/Rect.h>
@@ -9,6 +11,7 @@
 #include <LibURL/Origin.h>
 #include <LibWebCommon/NotificationsAPI/NotificationData.h>
 #include <LibURL/URL.h>
+#include <LibWebCommon/CSS/PreferredColorScheme.h>
 #include <LibWebCommon/WebView/DictionaryLookup.h>
 #include <LibWebCommon/HTML/FileFilter.h>
 #include <LibWebCommon/HTML/SelectItem.h>
@@ -210,6 +213,38 @@ struct WebView::AutocompleteSuggestion {
     bool can_be_inline_completed;
 }
 
+// What only the UI can tell, which the Hub needs from the start.
+struct Hub::UIInfo {
+    Optional<String> ui_font_family;
+    Optional<String> system_font_family;
+    Web::CSS::PreferredColorScheme interface_color_scheme;
+    bool supports_picture_in_picture;
+    bool supports_selection_clipboard;
+    bool supports_system_menu_bar;
+    bool supports_vertical_tabs;
+    bool supports_private_browsing_windows;
+    bool supports_client_side_window_decorations;
+    bool reports_scroll_momentum;
+    bool scrolls_elastically;
+    bool scrollbar_track_press_jumps;
+    Vector<String> preferred_languages;
+    Optional<Gfx::GpuDeviceIdentity> presentation_gpu_device;
+    Vector<u64> presentation_drm_format_modifiers;
+}
+
+// What the UI needs from the Hub before it can show anything.
+struct Hub::InitialState {
+    ByteString settings_json;
+    ByteString bookmarks_json;
+    Hub::ApplicationActions actions;
+    Vector<Hub::DownloadState> downloads;
+    Vector<URL::URL> urls;
+    Vector<ByteString> raw_urls;
+    ByteString crash_report_directory;
+    Optional<u16> devtools_port;
+    bool has_translator;
+}
+
 // What the UI needs to know about a view at any time, without having to ask.
 struct Hub::ViewState {
     URL::URL url;
@@ -241,6 +276,11 @@ struct Hub::ViewState {
 // What the Hub tells the UI.
 endpoint HubClient
 {
+    crash_reports_changed() =|
+    report_post_finished(u64 post_id, bool had_network_error, Optional<u32> response_code, Vector<HTTP::Header> response_headers, ByteString body) =|
+    app_open_urls(Vector<URL::URL> urls) =|
+    app_open_new_tab(Vector<URL::URL> urls) =|
+    app_open_new_window(Vector<URL::URL> urls) =|
     view_selected_text(u64 view_id, u64 request_id, Optional<ByteString> text) =|
     view_close_preflight_finished(u64 view_id, u64 request_id, bool may_close) =|
     view_page_dumps(u64 view_id, u64 request_id, Optional<String> dumps) =|

@@ -4,18 +4,53 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Hex.h>
+#include <AK/MemoryStream.h>
+#include <AK/Queue.h>
 #include <Hub/ActionMirror.h>
 #include <Hub/Application.h>
 #include <Hub/ConnectionFromUI.h>
 #include <Hub/Proxies.h>
+#include <LibCore/ArgsParser.h>
 #include <LibCore/EventLoop.h>
+#include <LibIPC/Decoder.h>
 #include <LibWebView/WebContentPage.h>
 
 namespace Hub {
 
-Application::Application(ApplicationHost& host)
-    : m_host(&host)
+Application::Application(ApplicationHost* host)
+    : m_host(host)
 {
+}
+
+void Application::create_platform_arguments(Core::ArgsParser& args_parser)
+{
+    args_parser.add_option(m_encoded_ui_info, "What the UI tells the Hub to start with", "ui-info", 0, "hex");
+}
+
+Hub::UIInfo const* Application::ui_info() const
+{
+    if (!m_ui_info.has_value() && !m_encoded_ui_info.is_empty()) {
+        auto bytes = decode_hex(m_encoded_ui_info);
+        if (bytes.is_error())
+            return nullptr;
+        FixedMemoryStream stream { bytes.value().bytes() };
+        Queue<IPC::Attachment> attachments;
+        IPC::Decoder decoder { stream, attachments };
+        auto info = decoder.decode<Hub::UIInfo>();
+        if (info.is_error())
+            return nullptr;
+        m_ui_info = info.release_value();
+    }
+    return m_ui_info.has_value() ? &*m_ui_info : nullptr;
+}
+
+void Application::set_ui_info(Hub::UIInfo info)
+{
+    auto scrollbar_track_press_jumps_changed = !m_ui_info.has_value() || m_ui_info->scrollbar_track_press_jumps != info.scrollbar_track_press_jumps;
+    m_ui_info = move(info);
+    if (scrollbar_track_press_jumps_changed)
+        platform_scrollbar_track_press_behavior_changed();
 }
 
 View& Application::create_view(View::InitialState initial_state, Optional<WebView::CanonicalTraversable&> traversable)
@@ -25,6 +60,25 @@ View& Application::create_view(View::InitialState initial_state, Optional<WebVie
     m_views.set(view->view_id(), move(view));
     view_reference.initialize(traversable);
     return view_reference;
+}
+
+void Application::notify_webdriver_window_created(String const& handle)
+{
+    // NB: WebDriver drives a window from the moment it hears of it. So, it must not hear of one before the UI has asked for
+    //     what its windows start out showing, or that would replace the page WebDriver went to.
+    if (ConnectionFromUI::the() && !m_ui_did_start) {
+        m_webdriver_windows_awaiting_ui.append(handle);
+        return;
+    }
+    WebView::Application::notify_webdriver_window_created(handle);
+}
+
+void Application::ui_did_start()
+{
+    m_ui_did_start = true;
+    for (auto const& handle : m_webdriver_windows_awaiting_ui)
+        WebView::Application::notify_webdriver_window_created(handle);
+    m_webdriver_windows_awaiting_ui.clear();
 }
 
 void Application::set_active_view(Optional<u64> view_id)
@@ -366,11 +420,8 @@ NonnullRefPtr<Application::BookmarkPromise> Application::display_edit_bookmark_f
 
 void Application::rebuild_bookmarks_menu() const
 {
-    if (!m_host)
-        return;
     if (auto* ui = ConnectionFromUI::the())
         ui->async_bookmarks_menu_changed(ActionMirror::the().entries_of(const_cast<Application&>(*this).bookmarks_menu()));
-    m_host->rebuild_bookmarks_menu();
 }
 
 void Application::on_devtools_enabled() const
@@ -407,6 +458,8 @@ Optional<String> Application::ui_font_family() const
 {
     if (m_host)
         return m_host->ui_font_family();
+    if (auto const* info = ui_info())
+        return info->ui_font_family;
     return WebView::Application::ui_font_family();
 }
 
@@ -414,6 +467,8 @@ Web::CSS::PreferredColorScheme Application::interface_color_scheme() const
 {
     if (m_host)
         return m_host->interface_color_scheme();
+    if (auto const* info = ui_info())
+        return info->interface_color_scheme;
     return WebView::Application::interface_color_scheme();
 }
 
@@ -421,6 +476,8 @@ Optional<String> Application::system_font_family() const
 {
     if (m_host)
         return m_host->system_font_family();
+    if (auto const* info = ui_info())
+        return info->system_font_family;
     return WebView::Application::system_font_family();
 }
 
@@ -428,6 +485,8 @@ bool Application::supports_picture_in_picture() const
 {
     if (m_host)
         return m_host->supports_picture_in_picture();
+    if (auto const* info = ui_info())
+        return info->supports_picture_in_picture;
     return WebView::Application::supports_picture_in_picture();
 }
 
@@ -507,6 +566,8 @@ bool Application::supports_clipboard_type(WebView::Application::ClipboardType ty
 {
     if (m_host)
         return m_host->supports_clipboard_type(type);
+    if (auto const* info = ui_info())
+        return type == ClipboardType::Text || info->supports_selection_clipboard;
     return WebView::Application::supports_clipboard_type(type);
 }
 
@@ -514,6 +575,8 @@ bool Application::supports_system_menu_bar() const
 {
     if (m_host)
         return m_host->supports_system_menu_bar();
+    if (auto const* info = ui_info())
+        return info->supports_system_menu_bar;
     return WebView::Application::supports_system_menu_bar();
 }
 
@@ -521,6 +584,8 @@ bool Application::supports_vertical_tabs() const
 {
     if (m_host)
         return m_host->supports_vertical_tabs();
+    if (auto const* info = ui_info())
+        return info->supports_vertical_tabs;
     return WebView::Application::supports_vertical_tabs();
 }
 
@@ -528,6 +593,8 @@ bool Application::supports_private_browsing_windows() const
 {
     if (m_host)
         return m_host->supports_private_browsing_windows();
+    if (auto const* info = ui_info())
+        return info->supports_private_browsing_windows;
     return WebView::Application::supports_private_browsing_windows();
 }
 
@@ -535,6 +602,8 @@ bool Application::supports_client_side_window_decorations() const
 {
     if (m_host)
         return m_host->supports_client_side_window_decorations();
+    if (auto const* info = ui_info())
+        return info->supports_client_side_window_decorations;
     return WebView::Application::supports_client_side_window_decorations();
 }
 
@@ -542,6 +611,8 @@ bool Application::platform_reports_scroll_momentum() const
 {
     if (m_host)
         return m_host->platform_reports_scroll_momentum();
+    if (auto const* info = ui_info())
+        return info->reports_scroll_momentum;
     return WebView::Application::platform_reports_scroll_momentum();
 }
 
@@ -549,6 +620,8 @@ bool Application::platform_scrolls_elastically() const
 {
     if (m_host)
         return m_host->platform_scrolls_elastically();
+    if (auto const* info = ui_info())
+        return info->scrolls_elastically;
     return WebView::Application::platform_scrolls_elastically();
 }
 
@@ -556,6 +629,8 @@ bool Application::platform_scrollbar_track_press_jumps() const
 {
     if (m_host)
         return m_host->platform_scrollbar_track_press_jumps();
+    if (auto const* info = ui_info())
+        return info->scrollbar_track_press_jumps;
     return WebView::Application::platform_scrollbar_track_press_jumps();
 }
 
@@ -563,6 +638,8 @@ Vector<String> Application::platform_preferred_languages() const
 {
     if (m_host)
         return m_host->platform_preferred_languages();
+    if (auto const* info = ui_info())
+        return info->preferred_languages;
     return WebView::Application::platform_preferred_languages();
 }
 
@@ -570,6 +647,8 @@ Optional<Gfx::GpuDeviceIdentity> Application::platform_presentation_gpu_device()
 {
     if (m_host)
         return m_host->platform_presentation_gpu_device();
+    if (auto const* info = ui_info())
+        return info->presentation_gpu_device;
     return WebView::Application::platform_presentation_gpu_device();
 }
 
@@ -577,6 +656,8 @@ Vector<u64> Application::platform_presentation_drm_format_modifiers() const
 {
     if (m_host)
         return m_host->platform_presentation_drm_format_modifiers();
+    if (auto const* info = ui_info())
+        return info->presentation_drm_format_modifiers;
     return WebView::Application::platform_presentation_drm_format_modifiers();
 }
 
