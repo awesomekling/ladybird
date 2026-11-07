@@ -7,6 +7,7 @@
 #include <AK/Hex.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/Environment.h>
+#include <LibCore/GeolocationProvider.h>
 #include <LibCore/Process.h>
 #include <LibCore/Socket.h>
 #include <LibCore/System.h>
@@ -38,6 +39,7 @@
 #include <Hub/ActionMirror.h>
 #include <LibWebView/NoOpNotificationBackend.h>
 #include <LibWebView/SessionStore.h>
+#include <LibWebView/Translator.h>
 #include <LibWebView/URL.h>
 #include <LibWebView/Utilities.h>
 #include <LibWebView/WebContentPage.h>
@@ -63,6 +65,10 @@
 #    include <UI/Qt/ApplicationIcon.h>
 #    include <UI/Qt/MacWindow.h>
 #    include <UI/Qt/ScrollbarPreferencesMac.h>
+#endif
+
+#if defined(LADYBIRD_HAS_TRANSLATOR)
+#    include <UI/Qt/TranslatorMac.h>
 #endif
 
 #if defined(AK_OS_LINUX)
@@ -96,9 +102,12 @@
 #    include <QUtiMimeConverter>
 #endif
 
+#if defined(AK_OS_MACOS) || defined(AK_OS_WINDOWS)
+#    include <LibCore/TimeZoneWatcher.h>
+#endif
+
 #if defined(AK_OS_WINDOWS)
 #    include <AK/Windows.h>
-#    include <LibCore/TimeZoneWatcher.h>
 #    include <QAbstractNativeEventFilter>
 #endif
 
@@ -685,6 +694,8 @@ Hub::UIInfo Application::current_ui_info() const
     info.system_font_family = system_font_family();
     info.interface_color_scheme = interface_color_scheme();
     info.supports_picture_in_picture = supports_picture_in_picture();
+    info.has_location_source = Core::GeolocationProvider::is_available();
+    info.has_translator = has_translator();
     info.supports_selection_clipboard = supports_clipboard_type(ClipboardType::Selection);
     info.supports_system_menu_bar = supports_system_menu_bar();
     info.supports_vertical_tabs = supports_vertical_tabs();
@@ -702,6 +713,10 @@ Hub::UIInfo Application::current_ui_info() const
 ErrorOr<void> Application::connect_to_hub(Main::Arguments const& arguments)
 {
     auto hub_path = TRY(hub_executable_path());
+
+#    if defined(LADYBIRD_HAS_TRANSLATOR)
+    m_translator = create_platform_translator();
+#    endif
 
     IPC::MessageBuffer ui_info_buffer;
     IPC::Encoder encoder { ui_info_buffer };
@@ -798,7 +813,6 @@ ErrorOr<void> Application::connect_to_hub(Main::Arguments const& arguments)
     m_browser_options.urls = move(state.urls);
     m_browser_options.raw_urls = move(state.raw_urls);
     m_browser_options.devtools_port = state.devtools_port;
-    m_has_translator = state.has_translator;
 #    if defined(AK_OS_MACOS)
     set_profile_application_icon(state.profile_identifier, state.profile_identity, state.profile_is_temporary);
 #    endif
@@ -810,6 +824,17 @@ ErrorOr<void> Application::connect_to_hub(Main::Arguments const& arguments)
     WebView::ReportSubmission::set_post_function([](auto const& url, auto headers, auto body, auto on_response) {
         HubConnection::the().post_report(url, move(headers), move(body), move(on_response));
     });
+
+#    if defined(AK_OS_MACOS)
+    // NB: The system tells of this through the run loop, and only this process has one.
+    if (!Core::Environment::has("TZ"sv)) {
+        m_time_zone_watcher = TRY(Core::TimeZoneWatcher::create());
+        m_time_zone_watcher->on_time_zone_changed = [] {
+            if (auto* hub = HubConnection::the_if_connected())
+                hub->async_system_time_zone_changed();
+        };
+    }
+#    endif
 
     QObject::connect(&SystemAppearance::the(), &SystemAppearance::changed, [this] {
         if (auto* hub = HubConnection::the_if_connected())
@@ -846,7 +871,7 @@ Vector<WebView::ProcessSnapshot> Application::process_snapshots()
     return snapshots;
 }
 
-bool Application::has_translator() const { return m_has_translator; }
+bool Application::has_translator() const { return m_translator != nullptr; }
 Optional<int> Application::exit_status_if_done() const { return m_exit_status_if_done; }
 
 ErrorOr<int> Application::execute()
