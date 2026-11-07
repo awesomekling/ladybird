@@ -308,7 +308,7 @@ static QIcon const& app_icon(WebView::IsPrivate is_private)
     return cached_icon;
 }
 
-BrowserWindow::BrowserWindow(Vector<URL::URL> const& initial_urls, IsPopupWindow is_popup_window, WebView::IsPrivate is_private, Tab* parent_tab, Optional<WebView::CanonicalTraversable&> traversable, Optional<WebView::SessionWindowId> restored_session_window_id)
+BrowserWindow::BrowserWindow(Vector<URL::URL> const& initial_urls, IsPopupWindow is_popup_window, WebView::IsPrivate is_private, Tab* parent_tab, Optional<u64> hub_view_id, Optional<WebView::SessionWindowId> restored_session_window_id)
     : m_is_private(is_private)
     , m_session(WebView::Application::session_for_new_view(is_private))
     , m_tabs_container(new TabWidget(is_private, this))
@@ -387,7 +387,7 @@ BrowserWindow::BrowserWindow(Vector<URL::URL> const& initial_urls, IsPopupWindow
     });
 
     if (parent_tab) {
-        create_new_tab(Web::HTML::ActivateTab::Yes, traversable);
+        create_new_tab(Web::HTML::ActivateTab::Yes, hub_view_id);
     } else {
         for (size_t i = 0; i < initial_urls.size(); ++i)
             create_new_tab((i == 0) ? Web::HTML::ActivateTab::Yes : Web::HTML::ActivateTab::No, TabLocation::end());
@@ -791,13 +791,13 @@ Tab& BrowserWindow::create_restored_tab(WebView::RestoredSessionTab const& resto
     return *tab;
 }
 
-Tab& BrowserWindow::create_new_tab(Web::HTML::ActivateTab activate_tab, Optional<WebView::CanonicalTraversable&> traversable)
+Tab& BrowserWindow::create_new_tab(Web::HTML::ActivateTab activate_tab, Optional<u64> hub_view_id)
 {
     cancel_window_close_preflight();
-    if (!traversable.has_value())
+    if (!hub_view_id.has_value())
         return create_new_tab(activate_tab, TabLocation::end());
 
-    auto* tab = new Tab(this, traversable);
+    auto* tab = new Tab(this, hub_view_id);
 
     // FIXME: Merge with other overload
     if (m_current_tab == nullptr) {
@@ -912,7 +912,7 @@ void BrowserWindow::initialize_tab_view(Tab* tab)
         }
     });
 
-    tab->view().on_new_web_view = [this, tab](auto activate_tab, Web::HTML::WebViewHints hints, WebView::CanonicalTraversable& traversable) {
+    tab->view().on_open_new_view = [this, tab](auto activate_tab, Web::HTML::WebViewHints hints, u64 hub_view_id) {
         if (hints.popup) {
             auto cascaded_configuration = Application::the().configuration_for_new_window();
             WindowConfiguration configuration {
@@ -921,11 +921,10 @@ void BrowserWindow::initialize_tab_view(Tab* tab)
                 .width = hints.width,
                 .height = hints.height,
             };
-            auto& window = Application::the().new_window({}, configuration, IsPopupWindow::Yes, m_is_private, tab, traversable);
-            return window.current_tab()->view().handle();
+            Application::the().new_window({}, configuration, IsPopupWindow::Yes, m_is_private, tab, hub_view_id);
+            return;
         }
-        auto& new_tab = create_new_tab(activate_tab, traversable);
-        return new_tab.view().handle();
+        create_new_tab(activate_tab, hub_view_id);
     };
 }
 
