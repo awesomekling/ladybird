@@ -125,6 +125,8 @@ inline void append_build_information_for_process(StringBuilder& builder, Process
 
     switch (type) {{
     case ProcessType::Browser:
+    case ProcessType::UI:
+    case ProcessType::Hub:
         break;
 """
 
