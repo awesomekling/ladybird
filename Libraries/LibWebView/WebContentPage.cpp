@@ -2408,10 +2408,14 @@ void WebContentPage::did_request_clipboard_entries(u64 request_id)
         async_retrieved_clipboard_entries(request_id, items);
         return;
     }
-    if (auto item = view().clipboard_item(); !item.system_clipboard_representations.is_empty())
-        items.append(move(item));
-
-    async_retrieved_clipboard_entries(request_id, items);
+    view().read_clipboard_item([page = NonnullRefPtr { *this }, request_id](Web::Clipboard::SystemClipboardItem item) {
+        if (!page->is_open())
+            return;
+        Vector<Web::Clipboard::SystemClipboardItem> items;
+        if (!item.system_clipboard_representations.is_empty())
+            items.append(move(item));
+        page->async_retrieved_clipboard_entries(request_id, items);
+    });
 }
 
 void WebContentPage::did_request_spell_check(u64 request_id, Utf16String text)
@@ -3239,8 +3243,10 @@ void WebContentPage::did_request_primary_paste()
 {
     if (!has_transient_user_activation())
         return;
-    auto text = Application::the().clipboard_text(Application::ClipboardType::Selection);
-    async_paste(text);
+    Application::the().read_clipboard_text(Application::ClipboardType::Selection, [page = NonnullRefPtr { *this }](Utf16String text) {
+        if (page->is_open())
+            page->async_paste(text);
+    });
 }
 
 void WebContentPage::did_update_primary_selection(String text)
