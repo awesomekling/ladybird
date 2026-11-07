@@ -137,7 +137,6 @@ if (APPLE)
         NativeTextEditingBindings.mm
         Menu.mm
         ScrollbarPreferencesMac.mm
-        SpellCheckerMac.mm
         SystemAppearanceMac.mm
         TranslateIconMac.mm
         WebContentViewAccessibility.mm
@@ -146,7 +145,6 @@ if (APPLE)
     target_link_libraries(ladybird_impl PRIVATE Qt::GuiPrivate "-framework ApplicationServices" "-framework Cocoa" "-framework IOSurface" "-framework QuartzCore")
     set_source_files_properties(
         LadybirdAccessibilityElement.mm
-        SpellCheckerMac.mm
         TranslateIconMac.mm
         TranslatorMac.mm
         WebContentViewAccessibility.mm
