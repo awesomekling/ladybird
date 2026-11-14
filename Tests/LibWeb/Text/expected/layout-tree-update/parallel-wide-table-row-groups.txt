@@ -1,0 +1,11 @@
+group-0: 170 boxes: BlockContainer=67 BlockContainer(anonymous)=9 Box=27 TextNode=67
+  text: 0 wide short 0 a 1 a b 2 a b 3 a 4 a b 5 a b 6 a 7 a b 8 a b 9 a 10 a b 11 a b 12 a 13 a b 14 a b 15 a 16 a b 17 a b 18 a 19 a b 20 a b 21 a 22 a b 23 a b
+group-23: 170 boxes: BlockContainer=67 BlockContainer(anonymous)=9 Box=27 TextNode=67
+  text: 23 wide short 0 a 1 a b 2 a b 3 a 4 a b 5 a b 6 a 7 a b 8 a b 9 a 10 a b 11 a b 12 a 13 a b 14 a b 15 a 16 a b 17 a b 18 a 19 a b 20 a b 21 a 22 a b 23 a b
+group-47: 170 boxes: BlockContainer=67 BlockContainer(anonymous)=9 Box=27 TextNode=67
+  text: 47 wide short 0 a 1 a b 2 a b 3 a 4 a b 5 a b 6 a 7 a b 8 a b 9 a 10 a b 11 a b 12 a 13 a b 14 a b 15 a 16 a b 17 a b 18 a 19 a b 20 a b 21 a 22 a b 23 a b
+total: 510 boxes
+root: 8163 boxes: BlockContainer=3217 BlockContainer(anonymous)=432 Box=1297 TableWrapper(anonymous)=1 TextNode=3216
+PASS: first build
+PASS: add a cell to a short row
+PASS: remove a spanning cell

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<style>
+    .flex { display: flex; flex-wrap: wrap; }
+    .card::before { content: "card "; }
+</style>
+<div id="root"><div id="block-list"></div><div id="flex-list" class="flex"></div></div>
+<script src="../include.js"></script>
+<script src="resources/parallel-scale.js"></script>
+<script>
+    // Long child lists that gain many children at once, enough for their boxes to be planned on several threads: one
+    // update appends hundreds of subtrees to each list, inserts more in the middle, and puts inline content between
+    // them.
+    function makeCard(index) {
+        return `<div class="card"><h3>title ${index}</h3><p>text <b>${index}</b> more</p><ul><li>a</li><li>b</li></ul></div>`;
+    }
+    const markup = repeatMarkup(600, makeCard);
+    for (const id of ["block-list", "flex-list"])
+        document.getElementById(id).innerHTML = markup;
+
+    function appendCards(list, count, prefix) {
+        const template = document.createElement("template");
+        template.innerHTML = repeatMarkup(count, index => makeCard(`${prefix}${index}`));
+        list.append(template.content);
+    }
+
+    test(() => {
+        const root = document.getElementById("root");
+        runSequentialFullRebuildComparisons([
+            ["append 500 cards to each list", () => {
+                for (const list of root.children) appendCards(list, 500, "appended ");
+            }],
+            ["insert 300 cards in the middle of each list", () => {
+                for (const list of root.children) {
+                    const template = document.createElement("template");
+                    template.innerHTML = repeatMarkup(300, index => makeCard(`middle ${index}`));
+                    list.children[300].before(template.content);
+                }
+            }],
+            ["append inline content after the cards", () => {
+                for (const list of root.children) list.append("tail text ", Object.assign(document.createElement("span"), { textContent: "span" }));
+            }],
+        ]);
+        for (const list of root.children) {
+            const summary = summarizeLayoutSubtree(list);
+            println(`${list.id}: ${summary.boxes} boxes: ${summary.kinds}`);
+        }
+    });
+</script>

@@ -1,0 +1,9 @@
+section-0: 50 boxes: BlockContainer=1 SVGClipBox=6 SVGGeometryBox=30 SVGMaskBox=6 SVGPatternBox=6 SVGSVGBox=1
+section-1: 50 boxes: BlockContainer=1 SVGClipBox=6 SVGGeometryBox=30 SVGMaskBox=6 SVGPatternBox=6 SVGSVGBox=1
+section-2: 50 boxes: BlockContainer=1 SVGClipBox=6 SVGGeometryBox=30 SVGMaskBox=6 SVGPatternBox=6 SVGSVGBox=1
+section-3: 50 boxes: BlockContainer=1 SVGClipBox=6 SVGGeometryBox=30 SVGMaskBox=6 SVGPatternBox=6 SVGSVGBox=1
+total: 200 boxes
+PASS: first build
+PASS: remove the mask from the first section's shapes
+PASS: add a child to the mask
+PASS: hide a section

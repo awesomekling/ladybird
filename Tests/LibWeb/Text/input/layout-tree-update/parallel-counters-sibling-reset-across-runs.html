@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<style>
+    .inc { counter-increment: c 3; }
+    .read::before { content: counter(c) " "; }
+    .all::before { content: counters(c, ".") " "; }
+    .scope { counter-reset: c; }
+    .scope > i { counter-increment: c; }
+    .scope > i::before { content: counters(c, ".") ";"; }
+</style>
+<div id="root"><div id="list"></div><div id="after" class="read all"></div></div>
+<script src="../include.js"></script>
+<script src="resources/parallel-scale.js"></script>
+<script>
+    // A long child list planned in runs, whose parent has no counter `c`: the children reset, increment and read the
+    // counter their earlier siblings, in earlier runs, instantiated.
+    function makeChild(index) {
+        const classes = [];
+        if (index % 4 === 1) classes.push("inc");
+        if (index % 2 === 0) classes.push("read");
+        if (index % 61 === 5) classes.push("all");
+        const reset = index % 97 === 13 ? ` style="counter-reset: c ${index * 10}"` : "";
+        const scope = index % 50 === 25 ? '<div class="scope"><i></i><i></i></div>' : "";
+        return `<div class="${classes.join(" ")}"${reset}><span>${index}</span><b><i></i></b>${scope}</div>`;
+    }
+    const list = document.getElementById("list");
+    list.innerHTML = repeatMarkup(1100, makeChild);
+
+    function printGeneratedTexts() {
+        const children = [...list.children];
+        for (let start = 0; start < children.length; start += 40) {
+            const texts = children.slice(start, start + 40).map(child => summarizeLayoutSubtree(child).text);
+            println(`${start}: ${texts.join("|")}`);
+        }
+        println(`after: ${summarizeLayoutSubtree(document.getElementById("after")).text}`);
+    }
+
+    test(() => {
+        printGeneratedTexts();
+        runSequentialFullRebuildComparisons([
+            ["insert a reset in the middle of the list", () => list.children[540].insertAdjacentHTML("beforebegin", '<div class="read" style="counter-reset: c 7"></div>')],
+            ["remove the first increment", () => list.querySelector(".inc").remove()],
+            ["make a reader increment", () => list.children[700].classList.add("inc")],
+        ]);
+        printGeneratedTexts();
+    });
+</script>

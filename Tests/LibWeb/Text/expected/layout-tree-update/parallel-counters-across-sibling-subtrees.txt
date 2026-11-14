@@ -1,0 +1,23 @@
+first: 58 boxes: BlockContainer=18 GeneratedTextNode(anonymous)=24 InlineNode(anonymous)=16
+  text: 101 102 103 104 105 115 116 117 118 119 120 121 122 . 1 123 . 2 124 . 3 125 . 4
+section-1: 58 boxes: BlockContainer=18 GeneratedTextNode(anonymous)=24 InlineNode(anonymous)=16
+  text: 126 127 128 129 130 140 141 142 143 144 145 146 147 . 1 148 . 2 149 . 3 150 . 4
+section-2: 58 boxes: BlockContainer=18 GeneratedTextNode(anonymous)=24 InlineNode(anonymous)=16
+  text: 151 152 153 154 155 165 166 167 168 169 170 171 172 . 1 173 . 2 174 . 3 175 . 4
+section-3: 58 boxes: BlockContainer=18 GeneratedTextNode(anonymous)=24 InlineNode(anonymous)=16
+  text: 176 177 178 179 180 190 191 192 193 194 195 196 197 . 1 198 . 2 199 . 3 200 . 4
+total: 232 boxes
+PASS: first build
+PASS: hide a whole section
+PASS: remove a section
+PASS: insert a section
+FAIL: remove a counter-increment of 10 from the first section
+FAIL: insert a counter-increment of 10 at the start of the first section
+first: 58 boxes: BlockContainer=18 GeneratedTextNode(anonymous)=24 InlineNode(anonymous)=16
+  text: 110 111 112 113 114 115 116 117 118 119 120 121 122 . 1 123 . 2 124 . 3 125 . 4
+section-1: 0 boxes: 
+SECTION: 61 boxes: BlockContainer=21 GeneratedTextNode(anonymous)=20 InlineNode(anonymous)=20
+  text: 126 127 128 129 130 131 132 133 134 135 136 137 138 139 140 141 142 143 144 145
+section-3: 58 boxes: BlockContainer=18 GeneratedTextNode(anonymous)=24 InlineNode(anonymous)=16
+  text: 146 147 148 149 150 160 161 162 163 164 165 166 167 . 1 168 . 2 169 . 3 170 . 4
+total: 177 boxes

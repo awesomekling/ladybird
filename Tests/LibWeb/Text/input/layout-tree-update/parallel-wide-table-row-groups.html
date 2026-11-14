@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<div id="root"></div>
+<script src="../include.js"></script>
+<script src="resources/parallel-scale.js"></script>
+<script>
+    // Enough row groups, each with enough rows, for the rows of different row groups to be built by different jobs.
+    const root = document.getElementById("root");
+    root.innerHTML = "<table>"
+        + repeatMarkup(48, group => `<tbody id="group-${group}">\n`
+            + `<tr><td rowspan="2">${group}</td><td colspan="2">wide</td></tr>\n`
+            + `<tr><td>short</td></tr>\n`
+            + repeatMarkup(24, row => `<tr> <td>${row}</td> <td>a</td>${row % 3 === 0 ? "" : " <td>b</td>"} </tr>\n`)
+            + "</tbody>\n")
+        + "</table>";
+
+    test(() => {
+        const groups = [...root.querySelectorAll("tbody")];
+        printLayoutSummaries([groups[0], groups[23], groups[47]]);
+        const summary = summarizeLayoutSubtree(root);
+        println(`root: ${summary.boxes} boxes: ${summary.kinds}`);
+        runSequentialFullRebuildComparisons([
+            ["add a cell to a short row", () => groups[11].rows[1].insertAdjacentHTML("beforeend", "<td>new</td>")],
+            ["remove a spanning cell", () => groups[30].rows[0].cells[0].remove()],
+        ]);
+    });
+</script>

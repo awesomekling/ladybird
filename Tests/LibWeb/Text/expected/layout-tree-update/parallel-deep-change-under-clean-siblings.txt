@@ -1,0 +1,12 @@
+7525 boxes: BlockContainer=2916 InlineNode=1728 TextNode=2880 Viewport=1
+PASS: first build
+change a text deep in one item: 576 of 576 item boxes preserved
+PASS: change a text deep in one item
+change two items in different sections: 576 of 576 item boxes preserved
+PASS: change two items in different sections
+open a dialog: 576 of 576 item boxes preserved
+PASS: open a dialog
+show the hidden subtree: 576 of 576 item boxes preserved
+PASS: show the hidden subtree
+close the dialog: 576 of 576 item boxes preserved
+PASS: close the dialog
