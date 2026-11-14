@@ -1,12 +1,12 @@
-section-0: 91 boxes: BlockContainer=7 BlockContainer(anonymous)=30 GeneratedTextNode(anonymous)=12 InlineNode=18 TextNode=24
-  text: before   x y after text before   x y after text before   x y after text before   x y after text before   x y after text before   x y after text
-section-1: 91 boxes: BlockContainer=7 BlockContainer(anonymous)=30 GeneratedTextNode(anonymous)=12 InlineNode=18 TextNode=24
-  text: before   x y after text before   x y after text before   x y after text before   x y after text before   x y after text before   x y after text
-section-2: 91 boxes: BlockContainer=7 BlockContainer(anonymous)=30 GeneratedTextNode(anonymous)=12 InlineNode=18 TextNode=24
-  text: before   x y after text before   x y after text before   x y after text before   x y after text before   x y after text before   x y after text
-section-3: 91 boxes: BlockContainer=7 BlockContainer(anonymous)=30 GeneratedTextNode(anonymous)=12 InlineNode=18 TextNode=24
-  text: before   x y after text before   x y after text before   x y after text before   x y after text before   x y after text before   x y after text
-total: 364 boxes
+section-0: 73 boxes: BlockContainer=7 BlockContainer(anonymous)=12 GeneratedTextNode(anonymous)=12 InlineNode=18 TextNode=24
+  text:   text x before y after   text x before y after   text x before y after   text x before y after   text x before y after   text x before y after
+section-1: 73 boxes: BlockContainer=7 BlockContainer(anonymous)=12 GeneratedTextNode(anonymous)=12 InlineNode=18 TextNode=24
+  text:   text x before y after   text x before y after   text x before y after   text x before y after   text x before y after   text x before y after
+section-2: 73 boxes: BlockContainer=7 BlockContainer(anonymous)=12 GeneratedTextNode(anonymous)=12 InlineNode=18 TextNode=24
+  text:   text x before y after   text x before y after   text x before y after   text x before y after   text x before y after   text x before y after
+section-3: 73 boxes: BlockContainer=7 BlockContainer(anonymous)=12 GeneratedTextNode(anonymous)=12 InlineNode=18 TextNode=24
+  text:   text x before y after   text x before y after   text x before y after   text x before y after   text x before y after   text x before y after
+total: 292 boxes
 PASS: first build
 PASS: add a block ::before to every second span
 PASS: remove the block ::after from the first section

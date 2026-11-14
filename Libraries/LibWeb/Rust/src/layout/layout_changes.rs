@@ -367,8 +367,6 @@ pub(crate) enum LayoutWrite<'a> {
     /// Detaches the layout subtree `root` heads from its parent, if it has one, and frees it. The host prepared its rows
     /// for leaving the tree before.
     DropSubtree { root: NodeSlotId },
-    /// Detaches the layout placement of the top layer element and clears every stale projected subtree of it.
-    DetachTopLayerElement(StyleNodeID),
     /// Detaches what is left of the boxes of each node the style node identities name as the nodes leave the document,
     /// while the identities still name them: their synthetic pseudo-elements' boxes and their boxes' top layer
     /// placements go, and their boxes are cleared for the parent's rebuild to free. An identity of 0 names no node.
@@ -385,9 +383,6 @@ pub(crate) enum LayoutWrite<'a> {
     PropagateRootStylesToViewport,
     /// Prepares every row of the subtree the row heads for leaving the layout tree.
     PrepareSubtreeForDetach { root: NodeSlotId },
-    /// Clears the committed box of every row of the subtree the row heads, and prepares each for leaving the layout
-    /// tree, as a removal does before it drops the subtree.
-    PrepareSubtreeForRemoval { root: NodeSlotId },
 }
 
 /// What a write answers: whether the subtree it dropped was attached, and what it owes the host.
@@ -413,11 +408,8 @@ impl LayoutWrite<'_> {
                     false
                 }
             }
-            Self::DetachTopLayerElement(element) => {
-                super::tree_builder::detach_top_layer_element_layout_subtree(host_calls, arena, element);
-                false
-            }
             Self::DetachRemainingRowsForRemoval(nodes) => {
+                super::tree_builder::note_removed_list_entries(arena, nodes);
                 for node in nodes.iter().filter_map(|&node| StyleNodeID::from_raw(node)) {
                     super::tree_builder::detach_remaining_rows_for_removal(host_calls, arena, node);
                 }
@@ -456,17 +448,6 @@ impl LayoutWrite<'_> {
             }
             Self::PrepareSubtreeForDetach { root } => {
                 super::layout_node_arena::prepare_subtree_for_detach(host_calls, arena, root);
-                false
-            }
-            Self::PrepareSubtreeForRemoval { root } => {
-                let mut rows = Vec::new();
-                arena.for_each_node_in_layout_subtree_in_pre_order(root, |row| rows.push(row));
-                for &row in &rows {
-                    crate::painting::ffi::paintable_cleared_from_node(host_calls, arena, row);
-                }
-                for row in rows {
-                    super::layout_node_arena::prepare_row_for_detach(host_calls, arena, row);
-                }
                 false
             }
         };

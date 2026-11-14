@@ -8,7 +8,7 @@ section-3: 161 boxes: BlockContainer=9 GeneratedTextNode(anonymous)=48 InlineNod
   text:   a <2 2> b  <2 c <3 3> 2>   a <2 2> b  <2 c <3 3> 2>   a <2 2> b  <2 c <3 3> 2>   a <2 2> b  <2 c <3 3> 2>   a <2 2> b  <2 c <3 3> 2>   a <2 2> b  <2 c <3 3> 2>   a <2 2> b  <2 c <3 3> 2>   a <2 2> b  <2 c <3 3> 2>
 total: 652 boxes
 PASS: first build
-FAIL: remove the unclosed open-quote of the first section
-FAIL: insert an unclosed open-quote at the start of the second section
+PASS: remove the unclosed open-quote of the first section
+PASS: insert an unclosed open-quote at the start of the second section
 PASS: remove the first section
 PASS: hide the second section
