@@ -1,0 +1,36 @@
+<!doctype html>
+<script src="../../include.js"></script>
+<script src="../../work-test.js"></script>
+<style>
+    #fades {
+        transition: opacity 1s;
+    }
+    #all {
+        transition: all 1s;
+    }
+    #named {
+        transition: --theme 1s;
+    }
+</style>
+<div id="theme">
+    <div id="plain"></div>
+    <div id="fades"></div>
+    <div id="all"></div>
+    <div id="named"></div>
+</div>
+<script>
+    test(() => {
+        const theme = document.getElementById("theme");
+        theme.style.setProperty("--theme", "red");
+        internals.updateStyle();
+        const work = styleWork(() => {
+            theme.style.setProperty("--theme", "blue");
+            internals.updateStyle();
+        });
+        println(`restyled [${work.restyled().map(shortStyleName).join(", ")}]`);
+        for (const id of ["plain", "fades", "all", "named"]) {
+            const value = getComputedStyle(document.getElementById(id)).getPropertyValue("--theme");
+            println(`${id}: ${value}`);
+        }
+    });
+</script>

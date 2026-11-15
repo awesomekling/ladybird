@@ -1,0 +1,5 @@
+restyled [theme, fades, all, named]
+plain: blue
+fades: blue
+all: blue
+named: blue
