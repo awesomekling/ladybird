@@ -101,13 +101,10 @@ pub(super) fn reads_none_moved(
         }
     }
     reads.iter().all(|read| {
-        [old, new].into_iter().all(|store| {
-            store.is_none_or(|store| {
-                store
-                    .resolved_value_identity(&ak::Utf16FlyString::from_utf16(read))
-                    .is_some()
-            })
-        })
+        let name = crate::css::css_tokenizer::fly_string_of_identifier(read);
+        [old, new]
+            .into_iter()
+            .all(|store| store.is_none_or(|store| store.resolved_value_identity(&name).is_some()))
     })
 }
 

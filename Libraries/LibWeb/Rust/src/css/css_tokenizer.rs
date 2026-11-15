@@ -339,9 +339,62 @@ pub(crate) enum ParserString {
     Pending(Range<usize>),
 }
 
+/// How many identifiers a thread remembers the fly strings of.
+const REMEMBERED_IDENTIFIER_COUNT: usize = 1024;
+
+/// The identifiers a thread interned last, each with the hash of its code units.
+#[derive(Default)]
+struct RememberedIdentifiers {
+    hasher: hashbrown::DefaultHashBuilder,
+    identifiers: hashbrown::HashTable<(u64, Utf16FlyString)>,
+}
+
+thread_local! {
+    static REMEMBERED_IDENTIFIERS: std::cell::RefCell<RememberedIdentifiers> = Default::default();
+}
+
+fn fly_string_holds(string: &Utf16FlyString, units: &[u16]) -> bool {
+    match string.as_units() {
+        ak::Utf16StringUnits::Ascii(bytes) | ak::Utf16StringUnits::Latin1(bytes) => {
+            bytes.len() == units.len() && bytes.iter().zip(units).all(|(&byte, &unit)| u16::from(byte) == unit)
+        }
+        ak::Utf16StringUnits::Utf16(string) => string == units,
+    }
+}
+
+/// The fly string of the identifier `units`.
+///
+/// OPTIMIZATION: AK's fly-string table sits behind one lock, which the style threads wait on each other for where
+///               each tokenizes the custom property values of its elements. A thread asks the table only for an
+///               identifier it does not remember.
+pub(crate) fn fly_string_of_identifier(units: &[u16]) -> Utf16FlyString {
+    use std::hash::BuildHasher;
+    // NB: A short ASCII string is its own fly string, which takes no table.
+    if units.len() < size_of::<usize>() {
+        return Utf16FlyString::from_utf16(units);
+    }
+    REMEMBERED_IDENTIFIERS.with_borrow_mut(|remembered| {
+        let hash = remembered.hasher.hash_one(units);
+        if let Some((_, string)) = remembered
+            .identifiers
+            .find(hash, |(_, string)| fly_string_holds(string, units))
+        {
+            return string.clone();
+        }
+        let string = Utf16FlyString::from_utf16(units);
+        if remembered.identifiers.len() >= REMEMBERED_IDENTIFIER_COUNT {
+            remembered.identifiers.clear();
+        }
+        remembered
+            .identifiers
+            .insert_unique(hash, (hash, string.clone()), |&(hash, _)| hash);
+        string
+    })
+}
+
 impl ParserString {
     fn intern(&mut self) {
-        let value = Utf16FlyString::from_utf16(self);
+        let value = fly_string_of_identifier(self);
         let original = std::mem::replace(self, Self::Inline(SmallVec::new()));
         let (storage, range) = match original {
             Self::Shared { storage, range } => (storage, range),

@@ -188,6 +188,7 @@ RENDER_STATE_ALLOWED = {
         ],
     ),
     f"{RENDER_STATE_CRATE}/src/css/custom_properties.rs:COMPARED_STORES": "per-thread memo of comparing immutable stores; a thread without one only walks their values again",
+    f"{RENDER_STATE_CRATE}/src/css/css_tokenizer.rs:REMEMBERED_IDENTIFIERS": "per-thread memo of interned identifiers, which are process-wide and immutable; a thread without one only asks the fly string table again",
     f"{RENDER_STATE_CRATE}/src/css/parser/stylesheet_cache.rs:PARSE_DEPENDENCIES": "per-thread record of the parse running on this thread; scoped to that parse",
     f"{RENDER_STATE_CRATE}/src/css/style_value.rs:VALUES": "built-once keyword values, and a replay-only table of the same name",
     f"{RENDER_STATE_CRATE}/src/css/parser/value_parser.rs:LISTS": "built-once immutable lists of initial background values",
