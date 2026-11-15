@@ -24,6 +24,12 @@ impl<T> Counted for Arc<T> {
     }
 }
 
+impl<T> Counted for Arc<[T]> {
+    fn address(&self) -> usize {
+        Arc::as_ptr(self).cast::<T>().addr()
+    }
+}
+
 impl Counted for RetainedStyleValueData {
     fn address(&self) -> usize {
         self.pointer().addr()

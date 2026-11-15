@@ -104,6 +104,10 @@ pub(in crate::css::style) struct StoreCache {
 #[derive(Default)]
 pub(in crate::css::style) struct StoresOfCascades {
     stores: hashbrown::HashTable<StoreOfCascade>,
+    /// What the cascades resolved to by the declarations a record holds of one, over the stores of a parent, each
+    /// with those stores kept alive: what an element holding the record takes without reading the declarations.
+    by_declarations:
+        crate::fast_hash::FastMap<PointerKey<CustomDeclarations, ParentStores>, ([KeptStore; 2], ResolvedCascade)>,
 }
 
 /// The stores the parent of an element hands down and holds, by their identities.
@@ -146,20 +150,50 @@ impl StoreCache {
     }
 
     /// Keep `resolved` as what the cascade of `cascaded` over `parents` resolved to, and answer what the cascade
-    /// resolves to for every thread: `resolved`, or what another thread kept first.
+    /// resolves to for every thread: `resolved`, or what another thread kept first. A record holding the cascade
+    /// as `declarations` then names what it resolved to.
     fn keep_store_of_cascade(
         &mut self,
         hash: u64,
         parents: [Option<&Arc<CustomPropertyStore>>; 2],
         cascaded: &[(CustomDeclaration, RetainedStyleValueData)],
+        declarations: Option<&CustomDeclarations>,
         resolved: ResolvedCascade,
     ) -> ResolvedCascade {
+        let keep = |stores: &mut StoresOfCascades| {
+            let resolved = stores.keep_store_of_cascade(hash, parents, cascaded, resolved);
+            if let Some(declarations) = declarations {
+                stores.by_declarations.insert(
+                    PointerKey::new(declarations, identities_of(parents)),
+                    (
+                        parents.map(|store| store.map(|store| PointerKey::new(store, ()))),
+                        resolved.clone(),
+                    ),
+                );
+            }
+            resolved
+        };
         match &self.shared_by_cascade {
-            Some(shared) => shared
-                .write()
-                .expect("no thread panicked while styling")
-                .keep_store_of_cascade(hash, parents, cascaded, resolved),
-            None => self.by_cascade.keep_store_of_cascade(hash, parents, cascaded, resolved),
+            Some(shared) => keep(&mut shared.write().expect("no thread panicked while styling")),
+            None => keep(&mut self.by_cascade),
+        }
+    }
+
+    /// What the cascade a record holds as `declarations` resolved to over `parents`, where one did.
+    fn store_of_declarations(
+        &self,
+        declarations: &CustomDeclarations,
+        parents: ParentStores,
+    ) -> Option<ResolvedCascade> {
+        let find = |stores: &StoresOfCascades| {
+            stores
+                .by_declarations
+                .get(&PointerLookup::new(declarations, parents))
+                .map(|(_, resolved)| resolved.clone())
+        };
+        match &self.shared_by_cascade {
+            Some(shared) => find(&shared.read().expect("no thread panicked while styling")),
+            None => find(&self.by_cascade),
         }
     }
 }
@@ -265,7 +299,7 @@ pub(in crate::css::style) trait SubstitutingSubject {
     fn apply_container_unit_bases(&self, length: &mut crate::css::style_compute::FfiLengthResolutionContext);
 }
 
-use super::records::HeldCustomProperties;
+use super::records::{CustomDeclarations, HeldCustomProperties};
 
 /// What a drive of an element's longhands found of its registered custom properties.
 pub(in crate::css::style) struct DrivenWithRegisteredProperties {
@@ -316,6 +350,19 @@ impl RetainedState {
         stores: &mut StoreCache,
         subject: &dyn SubstitutingSubject,
     ) -> Option<Option<Arc<CustomPropertyStore>>> {
+        self.custom_property_store_of(parent_store, parent_held, cascaded, None, stores, subject)
+    }
+
+    /// `custom_property_store`, for a cascade a record holds as `declarations`, where one does.
+    pub(in crate::css::style) fn custom_property_store_of(
+        &self,
+        parent_store: Option<&Arc<CustomPropertyStore>>,
+        parent_held: Option<&Arc<CustomPropertyStore>>,
+        cascaded: &[(CustomDeclaration, RetainedStyleValueData)],
+        declarations: Option<&CustomDeclarations>,
+        stores: &mut StoreCache,
+        subject: &dyn SubstitutingSubject,
+    ) -> Option<Option<Arc<CustomPropertyStore>>> {
         if cascaded.is_empty() {
             return Some(parent_store.cloned());
         }
@@ -330,18 +377,35 @@ impl RetainedState {
         };
         let parents = [parent_store, parent_held];
         let parent_identities = identities_of(parents);
-        let hash = StoresOfCascades::hash_of_cascade(parent_identities, cascaded);
-        match stores.store_of_cascade(hash, parent_identities, cascaded) {
-            Some(None) => return Some(parent_store.cloned()),
-            Some(Some(resolved)) => return Some(previous(resolved)),
-            None => {}
-        }
-        let values = self.declared_custom_properties(parent_store, cascaded)?;
-        if values.is_empty() {
-            return Some(match stores.keep_store_of_cascade(hash, parents, cascaded, None) {
+        if let Some(resolved) =
+            declarations.and_then(|declarations| stores.store_of_declarations(declarations, parent_identities))
+        {
+            return Some(match resolved {
                 None => parent_store.cloned(),
                 Some(resolved) => previous(resolved),
             });
+        }
+        let hash = StoresOfCascades::hash_of_cascade(parent_identities, cascaded);
+        if let Some(resolved) = stores.store_of_cascade(hash, parent_identities, cascaded) {
+            // NB: Keeping takes the lock the threads of a pass share for writing, which only a record's declarations
+            //     to find the cascade by next are worth.
+            let resolved = match declarations {
+                Some(_) => stores.keep_store_of_cascade(hash, parents, cascaded, declarations, resolved),
+                None => resolved,
+            };
+            return Some(match resolved {
+                None => parent_store.cloned(),
+                Some(resolved) => previous(resolved),
+            });
+        }
+        let values = self.declared_custom_properties(parent_store, cascaded)?;
+        if values.is_empty() {
+            return Some(
+                match stores.keep_store_of_cascade(hash, parents, cascaded, declarations, None) {
+                    None => parent_store.cloned(),
+                    Some(resolved) => previous(resolved),
+                },
+            );
         }
         if cascaded
             .iter()
@@ -370,7 +434,7 @@ impl RetainedState {
         if let Some((_, store)) = stores.stores.get(&key) {
             let store = store.clone();
             return Some(
-                match stores.keep_store_of_cascade(hash, parents, cascaded, Some(store)) {
+                match stores.keep_store_of_cascade(hash, parents, cascaded, declarations, Some(store)) {
                     None => parent_store.cloned(),
                     Some(resolved) => previous(resolved),
                 },
@@ -382,7 +446,7 @@ impl RetainedState {
             .stores
             .insert(key, ([parent_store.cloned(), parent_held.cloned()], resolved.clone()));
         Some(
-            match stores.keep_store_of_cascade(hash, parents, cascaded, Some(resolved)) {
+            match stores.keep_store_of_cascade(hash, parents, cascaded, declarations, Some(resolved)) {
                 None => parent_store.cloned(),
                 Some(resolved) => previous(resolved),
             },

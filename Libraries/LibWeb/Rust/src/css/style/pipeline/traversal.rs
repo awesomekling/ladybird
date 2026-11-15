@@ -1711,10 +1711,11 @@ impl<'a> Scratch<'a> {
         };
         let custom_properties = match &old.custom_declarations() {
             Some(declarations) => {
-                match state.custom_property_store(
+                match state.custom_property_store_of(
                     handed_down.as_deref(),
                     held.as_deref(),
                     declarations,
+                    Some(declarations),
                     &mut self.custom_property_stores,
                     &SubstitutionSubject::new(context, node, None),
                 ) {
