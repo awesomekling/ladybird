@@ -380,6 +380,8 @@ pub(crate) struct CascadeResolutionContext<'a> {
     /// Where the custom properties and sibling position style queries read are kept, if anywhere.
     pub(crate) style_query_dependencies:
         Option<&'a mut Option<Box<crate::css::custom_properties::StyleQueryDependencies>>>,
+    /// The tokens of declared values the thread keeps between its elements, if it keeps any.
+    pub(crate) declared_value_tokens: Option<&'a mut crate::css::custom_properties::DeclaredValueTokens>,
 }
 
 /// Length, tree-counting and color inputs used when evaluating style queries.
@@ -424,6 +426,7 @@ pub(crate) fn resolve_declared_custom_properties(
         resolution_context.attributes,
         resolution_context.custom_functions,
     );
+    environment.declared_value_tokens = resolution_context.declared_value_tokens.as_deref_mut();
     let (outputs, reads) = crate::css::custom_properties::resolve_element_custom_properties(
         &resolution_context.inputs,
         &mut environment,

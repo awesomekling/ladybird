@@ -362,6 +362,7 @@ pub(super) fn engine_resolution_context<'a>(
         attributes: attributes.map_or(&[][..], |attributes| attributes.attributes.as_slice()),
         custom_functions: functions.map_or(&EMPTY_CUSTOM_FUNCTIONS, |functions| &functions.registry),
         style_query_dependencies: None,
+        declared_value_tokens: None,
     }
 }
 

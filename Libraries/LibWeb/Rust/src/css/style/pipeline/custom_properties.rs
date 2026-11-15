@@ -15,6 +15,7 @@ use super::super::custom_property_cascade::{
 use super::super::*;
 use crate::css::cascaded_properties::resolve_declared_custom_properties;
 use crate::css::custom_properties::{CustomPropertyFinalization, CustomPropertyStore};
+use crate::css::style::pointer_key::{PointerKey, PointerLookup};
 use crate::css::style_value::RetainedStyleValueData;
 use std::ffi::c_void;
 use std::sync::Arc;
@@ -75,10 +76,162 @@ struct RegisteredValueContext<'a, 'r> {
 /// text, its importance, and the declared value.
 type DeclaredCustomProperty = (usize, bool, *const c_void);
 
+/// The addresses of the stores a parent hands down and holds, and the declarations cascaded over them that the
+/// parent's store does not hold: the name, importance and value of each.
+type StoreKey = (usize, usize, Vec<(usize, bool, usize)>);
+
 /// The stores a style thread resolved, keyed by the stores the parent hands down and holds and
 /// the declarations cascaded over them, each with the parent's stores kept alive so no key's
 /// address is reused.
-pub(in crate::css::style) type StoreCache = HashMap<(usize, usize, Vec<(usize, bool, usize)>), CachedStore>;
+#[derive(Default)]
+pub(in crate::css::style) struct StoreCache {
+    stores: HashMap<StoreKey, CachedStore>,
+    /// The tokens of the declared values the thread substituted into.
+    tokens: crate::css::custom_properties::DeclaredValueTokens,
+    /// The store each cascade resolved to over the stores of its parent, where it read nothing else of its element.
+    ///
+    /// OPTIMIZATION: A rule declaring custom properties for every element has each element cascade the same
+    ///               declarations over the store its siblings do. Looking each declaration up in the parent's store
+    ///               to leave out the ones it holds costs more than everything else the element computes, so the
+    ///               elements after the first take the store by the declarations themselves.
+    by_cascade: StoresOfCascades,
+    /// The stores the threads of a pass resolved, in place of this thread's own: a store one thread resolved is the
+    /// store every other thread takes.
+    pub(super) shared_by_cascade: Option<Arc<std::sync::RwLock<StoresOfCascades>>>,
+}
+
+/// The stores cascades resolved to.
+#[derive(Default)]
+pub(in crate::css::style) struct StoresOfCascades {
+    stores: hashbrown::HashTable<StoreOfCascade>,
+}
+
+/// The stores the parent of an element hands down and holds, by their identities.
+type ParentStores = [Option<PointerLookup>; 2];
+
+/// A store a kept cascade resolved over, kept alive.
+type KeptStore = Option<PointerKey<Arc<CustomPropertyStore>>>;
+
+/// A declaration of a kept cascade, with its value kept alive.
+type KeptDeclaration = (CustomDeclaration, PointerKey<RetainedStyleValueData>);
+
+/// What a cascade resolved to: a store, or none where the element takes the store its parent hands down as it is.
+type ResolvedCascade = Option<Option<Arc<CustomPropertyStore>>>;
+
+/// The store a cascade resolved to: the hash of its key, the stores its parent hands down and holds and its
+/// declarations with their values, each kept alive so that nothing else takes its address, and what it resolved to.
+struct StoreOfCascade {
+    hash: u64,
+    parents: [KeptStore; 2],
+    declarations: Box<[KeptDeclaration]>,
+    resolved: ResolvedCascade,
+}
+
+impl StoreCache {
+    /// What the cascade of `cascaded` over `parents` resolved to, where a cascade of the same did.
+    fn store_of_cascade(
+        &self,
+        hash: u64,
+        parents: ParentStores,
+        cascaded: &[(CustomDeclaration, RetainedStyleValueData)],
+    ) -> Option<ResolvedCascade> {
+        match &self.shared_by_cascade {
+            Some(shared) => shared
+                .read()
+                .expect("no thread panicked while styling")
+                .store_of_cascade(hash, parents, cascaded)
+                .cloned(),
+            None => self.by_cascade.store_of_cascade(hash, parents, cascaded).cloned(),
+        }
+    }
+
+    /// Keep `resolved` as what the cascade of `cascaded` over `parents` resolved to, and answer what the cascade
+    /// resolves to for every thread: `resolved`, or what another thread kept first.
+    fn keep_store_of_cascade(
+        &mut self,
+        hash: u64,
+        parents: [Option<&Arc<CustomPropertyStore>>; 2],
+        cascaded: &[(CustomDeclaration, RetainedStyleValueData)],
+        resolved: ResolvedCascade,
+    ) -> ResolvedCascade {
+        match &self.shared_by_cascade {
+            Some(shared) => shared
+                .write()
+                .expect("no thread panicked while styling")
+                .keep_store_of_cascade(hash, parents, cascaded, resolved),
+            None => self.by_cascade.keep_store_of_cascade(hash, parents, cascaded, resolved),
+        }
+    }
+}
+
+fn identities_of(parents: [Option<&Arc<CustomPropertyStore>>; 2]) -> ParentStores {
+    parents.map(|store| store.map(|store| PointerLookup::new(store, ())))
+}
+
+impl StoresOfCascades {
+    fn hash_of_cascade(parents: ParentStores, cascaded: &[(CustomDeclaration, RetainedStyleValueData)]) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = crate::fast_hash::fast_hasher();
+        parents.hash(&mut hasher);
+        for (declared, value) in cascaded {
+            declared.hash(&mut hasher);
+            PointerLookup::new(value, ()).hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
+    fn store_of_cascade(
+        &self,
+        hash: u64,
+        parents: ParentStores,
+        cascaded: &[(CustomDeclaration, RetainedStyleValueData)],
+    ) -> Option<&ResolvedCascade> {
+        use std::borrow::Borrow;
+        let identity = |store: &KeptStore| store.as_ref().map(|store| *Borrow::<PointerLookup>::borrow(store));
+        self.stores
+            .find(hash, |held| {
+                held.hash == hash
+                    && held.parents.each_ref().map(identity) == parents
+                    && held.declarations.len() == cascaded.len()
+                    && held
+                        .declarations
+                        .iter()
+                        .zip(cascaded)
+                        .all(|((held_declared, held_value), (declared, value))| {
+                            held_declared == declared
+                                && *Borrow::<PointerLookup>::borrow(held_value) == PointerLookup::new(value, ())
+                        })
+            })
+            .map(|held| &held.resolved)
+    }
+
+    fn keep_store_of_cascade(
+        &mut self,
+        hash: u64,
+        parents: [Option<&Arc<CustomPropertyStore>>; 2],
+        cascaded: &[(CustomDeclaration, RetainedStyleValueData)],
+        resolved: ResolvedCascade,
+    ) -> ResolvedCascade {
+        if let Some(kept) = self.store_of_cascade(hash, identities_of(parents), cascaded) {
+            return kept.clone();
+        }
+        let declarations = cascaded
+            .iter()
+            .map(|(declared, value)| (*declared, PointerKey::new(value, ())))
+            .collect();
+        self.stores.insert_unique(
+            hash,
+            StoreOfCascade {
+                hash,
+                parents: parents.map(|store| store.map(|store| PointerKey::new(store, ()))),
+                declarations,
+                resolved: resolved.clone(),
+            },
+            |held| held.hash,
+        );
+        resolved
+    }
+}
 
 /// A store a style thread resolved, after the stores of the parent it resolved over.
 type CachedStore = ([Option<Arc<CustomPropertyStore>>; 2], Option<Arc<CustomPropertyStore>>);
@@ -166,10 +319,6 @@ impl RetainedState {
         if cascaded.is_empty() {
             return Some(parent_store.cloned());
         }
-        let values = self.declared_custom_properties(parent_store, cascaded)?;
-        if values.is_empty() {
-            return Some(parent_store.cloned());
-        }
         // A store holding what the element's environment held before gives way to that environment's store, which the
         // environment is named by.
         let (node, pseudo) = subject.target();
@@ -179,11 +328,33 @@ impl RetainedState {
                     .unwrap_or(store)
             })
         };
+        let parents = [parent_store, parent_held];
+        let parent_identities = identities_of(parents);
+        let hash = StoresOfCascades::hash_of_cascade(parent_identities, cascaded);
+        match stores.store_of_cascade(hash, parent_identities, cascaded) {
+            Some(None) => return Some(parent_store.cloned()),
+            Some(Some(resolved)) => return Some(previous(resolved)),
+            None => {}
+        }
+        let values = self.declared_custom_properties(parent_store, cascaded)?;
+        if values.is_empty() {
+            return Some(match stores.keep_store_of_cascade(hash, parents, cascaded, None) {
+                None => parent_store.cloned(),
+                Some(resolved) => previous(resolved),
+            });
+        }
         if cascaded
             .iter()
             .any(|(_, value)| value_reads_substitution_subject(value.data()))
         {
-            let (store, _) = self.resolve_custom_property_store(parent_store, parent_held, values, None, Some(subject));
+            let (store, _) = self.resolve_custom_property_store(
+                parent_store,
+                parent_held,
+                values,
+                None,
+                Some(subject),
+                Some(&mut stores.tokens),
+            );
             return Some(previous(store));
         }
         // What the store resolves to reads nothing of the element but these declarations and the
@@ -196,12 +367,26 @@ impl RetainedState {
                 .map(|(name, important, value)| (*name, *important, *value as usize))
                 .collect::<Vec<_>>(),
         );
-        if let Some((_, store)) = stores.get(&key) {
-            return Some(previous(store.clone()));
+        if let Some((_, store)) = stores.stores.get(&key) {
+            let store = store.clone();
+            return Some(
+                match stores.keep_store_of_cascade(hash, parents, cascaded, Some(store)) {
+                    None => parent_store.cloned(),
+                    Some(resolved) => previous(resolved),
+                },
+            );
         }
-        let (resolved, _) = self.resolve_custom_property_store(parent_store, parent_held, values, None, None);
-        stores.insert(key, ([parent_store.cloned(), parent_held.cloned()], resolved.clone()));
-        Some(previous(resolved))
+        let (resolved, _) =
+            self.resolve_custom_property_store(parent_store, parent_held, values, None, None, Some(&mut stores.tokens));
+        stores
+            .stores
+            .insert(key, ([parent_store.cloned(), parent_held.cloned()], resolved.clone()));
+        Some(
+            match stores.keep_store_of_cascade(hash, parents, cascaded, Some(resolved)) {
+                None => parent_store.cloned(),
+                Some(resolved) => previous(resolved),
+            },
+        )
     }
 
     /// The engine: the store an element holds once it computed to `computed`, where its custom
@@ -263,6 +448,7 @@ impl RetainedState {
                 .iter()
                 .any(|(_, value)| value_reads_substitution_subject(value.data()))
                 .then_some(subject),
+            None,
         );
         // A value reading the element's place among its siblings or its containers is the
         // element's alone.
@@ -319,6 +505,7 @@ impl RetainedState {
         values: Vec<DeclaredCustomProperty>,
         computed: Option<RegisteredValueContext<'_, '_>>,
         subject: Option<&dyn SubstitutingSubject>,
+        tokens: Option<&mut crate::css::custom_properties::DeclaredValueTokens>,
     ) -> (
         Option<Arc<CustomPropertyStore>>,
         crate::css::custom_properties::RegisteredValueReads,
@@ -357,6 +544,7 @@ impl RetainedState {
             style_query.as_ref(),
             functions.as_ref(),
         );
+        resolution_context.declared_value_tokens = tokens;
         // https://drafts.csswg.org/css-values-5/#random-caching
         // A random function in a registered value computes against the base value its random
         // caching key draws once. The keys not drawn yet are drawn between passes, and the

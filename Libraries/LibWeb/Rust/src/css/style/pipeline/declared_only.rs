@@ -103,7 +103,7 @@ impl RetainedState {
         let subject = DeclaredOnlySubject { state: self, node };
         let substitutions = std::cell::RefCell::new(SubstitutionCache::default());
         let custom_properties = self
-            .custom_property_store(None, None, &cascade.custom_winners, &mut HashMap::default(), &subject)
+            .custom_property_store(None, None, &cascade.custom_winners, &mut Default::default(), &subject)
             .expect("the style engine answers every row");
         let mut groups = super::compute::GroupCache::default();
         let mut absolutized = crate::css::style_compute::AbsolutizedValues::default();

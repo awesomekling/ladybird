@@ -2625,6 +2625,8 @@ unsafe impl Send for Scratch<'_> {}
 struct Scratches<'a> {
     pool: Option<&'a rayon::ThreadPool>,
     slots: Vec<Mutex<Option<Scratch<'a>>>>,
+    /// The custom property stores the threads resolved, which they share.
+    custom_property_stores: std::sync::Arc<std::sync::RwLock<super::custom_properties::StoresOfCascades>>,
 }
 
 impl<'a> Scratches<'a> {
@@ -2638,6 +2640,9 @@ impl<'a> Scratches<'a> {
             .expect("a thread's scratch is only ever held by that thread");
         run(slot.get_or_insert_with(|| {
             let mut scratch = Scratch::new(context);
+            if context.uses_caches {
+                scratch.custom_property_stores.shared_by_cascade = Some(self.custom_property_stores.clone());
+            }
             if context.uses_caches
                 && let Some(cache) = context.group_caches.and_then(|caches| caches.get(index))
             {
@@ -2988,6 +2993,7 @@ fn style_queued<T: Sync>(
     let scratches = Scratches {
         pool,
         slots: (0..=workers).map(|_| Mutex::new(None)).collect(),
+        custom_property_stores: Default::default(),
     };
     if !pseudo_elements.is_empty() {
         scratches.with(context, |scratch| {

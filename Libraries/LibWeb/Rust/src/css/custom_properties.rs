@@ -7,6 +7,7 @@
 //! Rust-owned custom-property data with the same structurally shared parent shape as the C++
 //! `CustomPropertyData` shell.
 
+use crate::css::style::pointer_key::{PointerKey, PointerLookup};
 use crate::css::style_value::{RandomValueSharingPayload, UnresolvedPayload};
 use std::borrow::Cow;
 use std::cell::Cell;
@@ -1382,6 +1383,8 @@ struct ASFResolutionContext<'a> {
     substitution_limit_hits: u64,
     function_local_scopes: Vec<FunctionLocalScope<'a>>,
     token_cache: Option<&'a mut CustomPropertyTokenCache>,
+    /// The tokens of declared values the thread keeps between its elements, if it keeps any.
+    declared_value_tokens: Option<&'a mut DeclaredValueTokens>,
     /// Where the custom properties of the element the substitution under way looks up are noted, if anywhere.
     element_property_reads: Option<&'a mut HashSet<Utf16FlyString>>,
 }
@@ -1408,10 +1411,50 @@ pub(crate) struct StyleQueryDependencies {
 type CustomPropertyTokenCache =
     HashMap<*const StyleValueData, (Option<RetainedStyleValueData>, Arc<ComponentValueList>)>;
 
+/// How many declared values a thread keeps the tokens of.
+const KEPT_DECLARED_VALUE_COUNT: usize = 4096;
+
+/// The tokens of the values custom properties are declared as and of the values they substitute, by the addresses of
+/// the values, each kept for as long as its tokens are.
+///
+/// OPTIMIZATION: Every element a declaration with a substitution function applies to substitutes into the same
+///               tokens, and mostly the same inherited values into them, so a style thread tokenizes each value once
+///               for all of its elements.
+#[derive(Default)]
+pub(crate) struct DeclaredValueTokens {
+    tokens: FastMap<PointerKey<RetainedStyleValueData>, Arc<ComponentValueList>>,
+}
+
+impl DeclaredValueTokens {
+    /// The tokens of `value`, an unresolved value holding `unresolved_payload`, without the whitespace a trailing
+    /// comment leaves behind.
+    fn of(
+        cache: Option<&mut Self>,
+        value: &RetainedStyleValueData,
+        unresolved_payload: &UnresolvedPayload,
+    ) -> Arc<ComponentValueList> {
+        let tokenize = || Arc::new(tokens_for_unresolved_custom_property_value(unresolved_payload).into_list());
+        let Some(cache) = cache else {
+            return tokenize();
+        };
+        if let Some(tokens) = cache.tokens.get(&PointerLookup::new(value, ())) {
+            return Arc::clone(tokens);
+        }
+        let tokens = tokenize();
+        if cache.tokens.len() >= KEPT_DECLARED_VALUE_COUNT {
+            cache.tokens.clear();
+        }
+        cache.tokens.insert(PointerKey::new(value, ()), Arc::clone(&tokens));
+        tokens
+    }
+}
+
 pub(crate) struct VarResolutionEnvironment<'a> {
     attributes: HashMap<Vec<u16>, Vec<u16>>,
     custom_functions: &'a CustomFunctionRegistry<'a>,
     token_cache: CustomPropertyTokenCache,
+    /// The tokens of declared values the thread keeps between its elements, if it keeps any.
+    pub(crate) declared_value_tokens: Option<&'a mut DeclaredValueTokens>,
 }
 
 fn source_ends_with_comment(source: crate::css::css_tokenizer::TokenizerInput<'_>) -> bool {
@@ -1592,6 +1635,7 @@ pub(crate) fn prepare_var_resolution_environment<'a>(
         attributes,
         custom_functions,
         token_cache: HashMap::new(),
+        declared_value_tokens: None,
     }
 }
 
@@ -1644,7 +1688,11 @@ fn compute_element_custom_property(
     };
 
     let value = if let Some(unresolved_payload) = substituted {
-        let tokens = tokens_for_unresolved_custom_property_value(unresolved_payload);
+        let tokens = DeclaredValueTokens::of(
+            context.declared_value_tokens.as_deref_mut(),
+            &entry.value,
+            unresolved_payload,
+        );
         let tainted = unresolved_payload.contains_attr_tainted_values;
         let guarded_contexts = GuardedSubstitutionContexts {
             contexts: Rc::new(RefCell::new(
@@ -1669,6 +1717,7 @@ fn compute_element_custom_property(
             element_values: context.element_values.as_deref_mut(),
             function_local_scopes: Vec::new(),
             token_cache: context.token_cache.as_deref_mut(),
+            declared_value_tokens: context.declared_value_tokens.as_deref_mut(),
             element_property_reads: context.element_property_reads.as_deref_mut(),
             ..*context
         };
@@ -1676,7 +1725,7 @@ fn compute_element_custom_property(
         let result = substitute_arbitrary_substitution_functions(
             Some(store),
             Some(registry),
-            tokens.slice(),
+            ComponentValueSlice::from(&*tokens),
             &mut property_context,
             recursion_depth,
             Some(SubstitutionContextDependency::Property(name.clone(), None)),
@@ -1747,6 +1796,7 @@ pub(crate) fn resolve_element_custom_properties(
         element_store: Some(store),
         element_values: Some(&mut FastMap::default()),
         token_cache: Some(&mut environment.token_cache),
+        declared_value_tokens: environment.declared_value_tokens.as_deref_mut(),
         ..Default::default()
     };
 
@@ -1786,7 +1836,9 @@ fn computed_property_tokens(value: &RetainedStyleValueData, context: &mut ASFRes
         //     resolution, so its tokens are not cached by its address, or the cache holds it.
         StyleValueData::Unresolved(unresolved_payload) => {
             context.contains_attr_tainted_values |= unresolved_payload.contains_attr_tainted_values;
-            TokenResolution::Resolved(tokens_for_unresolved_custom_property_value(unresolved_payload).into_list())
+            let tokens =
+                DeclaredValueTokens::of(context.declared_value_tokens.as_deref_mut(), value, unresolved_payload);
+            TokenResolution::Resolved(tokens.as_ref().clone())
         }
         _ => TokenResolution::Resolved(cached_held_value_tokens(value, context).as_ref().clone()),
     }
@@ -3799,6 +3851,7 @@ pub(crate) fn custom_properties_a_substitution_reads(
         attributes,
         custom_functions,
         token_cache,
+        ..
     } = environment;
     let mut reads = HashSet::new();
     let mut context = ASFResolutionContext {
@@ -3865,6 +3918,7 @@ pub(crate) fn resolve_vars(
         attributes,
         custom_functions,
         token_cache,
+        ..
     } = environment;
     let mut context = ASFResolutionContext {
         attributes: Some(attributes),
