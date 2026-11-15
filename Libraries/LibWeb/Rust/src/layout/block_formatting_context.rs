@@ -724,6 +724,8 @@ struct OutcomeOfChildLaidOutAhead {
     margins_left_by_contents: BlockMarginState,
     depends_on_percentage_block_size: bool,
     outgoing_outside_marker_line: Option<OutsideMarkerLine>,
+    has_unbreakable_lines: bool,
+    broke_inside: bool,
 }
 
 /// An in-flow child to lay out ahead of the walk over its siblings, with what its layout reads from outside its subtree
@@ -737,6 +739,8 @@ struct InFlowChildJob {
     containing_block_inline_position_in_root: CssPixels,
     key: in_flow_block_cache::InFlowBlockKey,
     validity: fc_run_cache::FcRunCacheValidity,
+    /// Whether the walk measures the content of a multi-column box, which breaks at forced breaks only.
+    measures_column_content: bool,
 }
 
 /// What laying out an in-flow child ahead of the walk over its siblings leaves for that walk, as if no float were
@@ -746,6 +750,16 @@ struct InFlowChildLaidOutAhead {
     entry: in_flow_block_cache::InFlowBlockEntry,
     root: fragment_tree::RunRootFragment,
     host_findings: Option<Box<run_state::HostFindings>>,
+    column_findings: Option<ColumnFindingsOfChildLaidOutAhead>,
+}
+
+/// What a child laid out ahead found out for the walk that measures the content of a multi-column box.
+#[derive(Clone, Copy)]
+struct ColumnFindingsOfChildLaidOutAhead {
+    /// See [`fragmentation::ColumnBoxLayout::block_size_that_stays_unbroken`].
+    block_size_that_stays_unbroken: CssPixels,
+    /// The tallest block size the child found that no column can break.
+    tallest_unbreakable_block_size: CssPixels,
 }
 
 /// A child to lay out ahead of the walk over its siblings.
@@ -786,10 +800,24 @@ fn lay_out_in_flow_child_ahead(pass: LayoutPass<'_>, job: InFlowChildJob) -> Opt
         containing_block_inline_position_in_root,
         key,
         validity,
+        measures_column_content,
     } = job;
     let treat_block_axis_percentage_insets_as_auto_beyond_root =
         key.treat_block_axis_percentage_insets_as_auto_beyond_root;
     let fragments = fragment_tree::RunFragmentBuilder::new(&pass, child, Some(block_container.node));
+    // NB: The child of a walk that measures the content of a multi-column box lays out in a column of its own with no
+    //     end, as that walk lays it out, so that it finds the same breaks and unbreakable sizes.
+    let column = measures_column_content.then(|| fragmentation::FragmentainerSpace {
+        block_size: None,
+        honors_forced_breaks: true,
+        incoming: None,
+        inline_items: Default::default(),
+        box_layouts: Default::default(),
+        keeps_box_layouts: true,
+        early_break_before: None,
+        allows_early_break_requests: true,
+    });
+    let column = column.as_ref();
     RunState::with_root_building_fragments(
         pass,
         child,
@@ -803,9 +831,12 @@ fn lay_out_in_flow_child_ahead(pass: LayoutPass<'_>, job: InFlowChildJob) -> Opt
                 pass,
                 formatting_context::RunMode::Commit { devtools: false },
                 treat_block_axis_percentage_insets_as_auto_beyond_root,
-                None,
+                column,
             );
             let flow = BlockFormattingContext::new(&run, root_cells, None, None);
+            // NB: The child is taken as following content in its column, so that it stops at every forced break in it,
+            //     which leaves it to the walk.
+            flow.fragmentainer_has_content.set(column.is_some());
             flow.block_offset_of_current_block_container
                 .set(Some(CssPixels::default()));
             let containing_block_position_in_root = FfiCssPixelPoint {
@@ -828,6 +859,35 @@ fn lay_out_in_flow_child_ahead(pass: LayoutPass<'_>, job: InFlowChildJob) -> Opt
             {
                 return None;
             }
+            let column_findings = if column.is_some() {
+                let found = state.fragmentainer_outcome().borrow();
+                // NB: A child that a forced break ends early is laid out by the walk, which goes on from the break.
+                if outcome.broke_inside || found.outgoing.is_some() || found.needs_early_break_before.is_some() {
+                    return None;
+                }
+                let border_box_block_size = outcome.cells.border_box_block_size(false);
+                let border_box_block_start_in_root = containing_block_position_in_root.y
+                    + flow.block_offset_adjustment_from_pending_ancestor_block_start_margins(block_container.node)
+                    + outcome.content_offset.y
+                    - outcome.cells.border_box_top(false);
+                let is_breakable = flow.box_can_break_inside(child, outcome.has_unbreakable_lines)
+                    && !fragmentation::avoids_column_break_inside(flow.style(child).break_inside());
+                Some(ColumnFindingsOfChildLaidOutAhead {
+                    block_size_that_stays_unbroken: flow
+                        .lowest_column_content_block_end_in_root
+                        .get()
+                        .map_or(border_box_block_size, |block_end| {
+                            (block_end - border_box_block_start_in_root).max(border_box_block_size)
+                        }),
+                    tallest_unbreakable_block_size: if is_breakable {
+                        found.tallest_unbreakable_block_size
+                    } else {
+                        found.tallest_unbreakable_block_size.max(border_box_block_size)
+                    },
+                })
+            } else {
+                None
+            };
             let float_reads = flow.float_reads.get();
             let (read_start_from_border_box, floats_in_reach) = flow.floats_in_reach_of_contents_laid_out_here(
                 child,
@@ -873,6 +933,7 @@ fn lay_out_in_flow_child_ahead(pass: LayoutPass<'_>, job: InFlowChildJob) -> Opt
                 entry,
                 root,
                 host_findings: state.take_host_findings(),
+                column_findings,
             })
         },
     )
@@ -4258,6 +4319,8 @@ impl<'pass> BlockFormattingContext<'pass> {
                 .with_own_top_margin_group(unplaced.own_top_margin_group_of_contents),
             depends_on_percentage_block_size: unplaced.depends_on_percentage_block_size,
             outgoing_outside_marker_line: self.outside_marker_line.get(),
+            has_unbreakable_lines: unplaced.has_unbreakable_lines,
+            broke_inside: unplaced.broken_token_of_box.is_some(),
         }
     }
 
@@ -4527,6 +4590,15 @@ impl<'pass> BlockFormattingContext<'pass> {
             + position_past_floats.unwrap_or(flow_position)
             + block_start_margin;
         !fragmentainer.exceeds(border_box_block_start_in_root + layout.block_size_that_stays_unbroken)
+    }
+
+    /// Whether this run measures the content of a multi-column box up to the next forced break: a run in a column with
+    /// no end, which nothing else breaks, and which keeps the layouts of its boxes for the columns laid out after it.
+    fn measures_column_content(&self) -> bool {
+        self.run
+            .fragmentainer
+            .as_deref()
+            .is_some_and(|fragmentainer| fragmentainer.keeps_box_layouts && fragmentainer.block_size.is_none())
     }
 
     pub(crate) fn keeps_column_box_layouts(&self) -> bool {
@@ -5017,10 +5089,15 @@ impl<'pass> BlockFormattingContext<'pass> {
     ) -> Option<ChildJobAhead> {
         let pass = &self.run.pass;
         let facts = self.facts(child);
+        let measures_column_content = self.measures_column_content();
         if facts.is_box()
             && !facts.is_floating_or_absolutely_positioned()
             && !facts.is_list_item_marker_box()
-            && self.in_flow_child_depends_only_on_its_key_and_floats(child, block_container.node, None)
+            && if measures_column_content {
+                self.in_flow_child_reads_only_its_key_and_floats_in_any_run(child, block_container.node, None)
+            } else {
+                self.in_flow_child_depends_only_on_its_key_and_floats(child, block_container.node, None)
+            }
         {
             let key = self.in_flow_block_key_of(
                 child,
@@ -5029,7 +5106,7 @@ impl<'pass> BlockFormattingContext<'pass> {
                 child_input.clone(),
             );
             let validity = fc_run_cache::run_root_validity(pass, child);
-            if self.stored_in_flow_layout_of(child, validity, &key).is_some() {
+            if !measures_column_content && self.stored_in_flow_layout_of(child, validity, &key).is_some() {
                 return None;
             }
             return Some(ChildJobAhead::InFlow(Box::new(InFlowChildJob {
@@ -5041,7 +5118,13 @@ impl<'pass> BlockFormattingContext<'pass> {
                 containing_block_inline_position_in_root: containing_block_position_in_root.x,
                 key,
                 validity,
+                measures_column_content,
             })));
+        }
+        // NB: A box with a formatting context of its own in a column is laid out by the walk, as the column fragments
+        //     it.
+        if measures_column_content {
+            return None;
         }
         let shape =
             self.run_shape_of_child_ahead(child, block_container, child_input, containing_block_position_in_root)?;
@@ -5069,13 +5152,32 @@ impl<'pass> BlockFormattingContext<'pass> {
         }
         // NB: Sizing a child ahead reads floats only to be repeated when the child is laid out in this flow.
         let float_reads = self.float_reads.get();
-        let jobs =
-            parallel_layout::fork_candidates(&pass, pass.siblings_from(first_child, Node::INVALID), |child| child)
-                .into_iter()
-                .filter_map(|child| {
-                    self.job_of_child_ahead(child, block_container, child_input, containing_block_position_in_root)
-                })
-                .collect();
+        // NB: The walk that measures the content of a multi-column box stops at the next forced break or column
+        //     spanner, and a later run lays out what follows, so no box past either is laid out ahead here.
+        let stops_at_forced_breaks = self.measures_column_content() && self.break_mode.get() != BreakMode::NoBreaks;
+        let mut previous_child_forces_break_after = false;
+        let children_up_to_forced_break = pass.siblings_from(first_child, Node::INVALID).take_while(|&child| {
+            if !stops_at_forced_breaks || !self.facts(child).is_box() || !self.is_first_or_last_in_flow_candidate(child)
+            {
+                return true;
+            }
+            if child != first_child
+                && (previous_child_forces_break_after
+                    || fragmentation::is_forced_column_break(self.propagated_break_before(child))
+                    || (block_container.node == self.run.box_ && self.is_column_spanner(child)))
+            {
+                return false;
+            }
+            previous_child_forces_break_after =
+                fragmentation::is_forced_column_break(self.propagated_break_after(child));
+            true
+        });
+        let jobs = parallel_layout::fork_candidates(&pass, children_up_to_forced_break, |child| child)
+            .into_iter()
+            .filter_map(|child| {
+                self.job_of_child_ahead(child, block_container, child_input, containing_block_position_in_root)
+            })
+            .collect();
         self.float_reads.set(float_reads);
         let Ok(tasks) =
             parallel_layout::lay_out_in_parallel(&pass, jobs, ChildJobAhead::child, |pass, job| job.lay_out(pass))
@@ -5102,6 +5204,12 @@ impl<'pass> BlockFormattingContext<'pass> {
     ) -> bool {
         let entry = &laid_out_ahead.entry;
         if self.outside_marker_line.get() != entry.key.incoming_outside_marker_line {
+            return false;
+        }
+        // NB: A column discards the margin of its first box, and keeps the layout of no box in an open margin group.
+        if self.run.fragmentainer.is_some()
+            && (self.discard_block_start_margin_of_next_child.get() || self.margin_state().has_open_top_margin_group())
+        {
             return false;
         }
         if !self.has_floating_boxes() {
@@ -5173,6 +5281,7 @@ impl<'pass> BlockFormattingContext<'pass> {
             mut entry,
             root,
             host_findings,
+            column_findings,
             ..
         } = laid_out_ahead;
         let margins_before_box = self.margin_state().margins_since_reset;
@@ -5197,9 +5306,38 @@ impl<'pass> BlockFormattingContext<'pass> {
         );
         let baselines = entry.baselines;
         // NB: Reuse hands the box nothing past its fragment, and has the host hear nothing.
-        if self.abspos_containing_block_info_contributions_received()
+        let hands_nothing_past_fragment = self.abspos_containing_block_info_contributions_received()
             == abspos_containing_block_info_contributions_received
-            && self.run.pass.host_findings_noted_so_far() == host_findings_noted_so_far
+            && self.run.pass.host_findings_noted_so_far() == host_findings_noted_so_far;
+        if let Some(fragmentainer) = self.run.fragmentainer.as_ref() {
+            let column_findings =
+                column_findings.expect("a child laid out ahead in a column was laid out in a column of its own");
+            fragmentainer.note_unbreakable_block_size(column_findings.tallest_unbreakable_block_size);
+            let used = self.cells_laid_out_here(sized_child);
+            let border_box_block_start_in_root = containing_block_position_in_root.y
+                + self.block_offset_adjustment_from_pending_ancestor_block_start_margins(self.containing_block(node))
+                + reused.content_offset.y
+                - used.border_box_top(false);
+            self.note_column_content_block_end(
+                border_box_block_start_in_root + column_findings.block_size_that_stays_unbroken,
+            );
+            if hands_nothing_past_fragment
+                && let Some(placed) = reused.placed.as_ref().filter(|placed| !placed.exports_payloads)
+            {
+                entry.fragment_identity = placed.fragment.identity;
+                entry.floats_read_by_contents.margins_before_box = margins_before_box;
+                entry.floats_read_by_contents.stored_in_open_top_margin_group = in_open_top_margin_group;
+                entry.floats_read_by_contents.introduced_clearance = reused.introduced_clearance;
+                fragmentainer.box_layouts.keep(
+                    node,
+                    fragmentation::ColumnBoxLayout {
+                        entry: std::sync::Arc::new(entry),
+                        fragment: placed.fragment.clone(),
+                        block_size_that_stays_unbroken: column_findings.block_size_that_stays_unbroken,
+                    },
+                );
+            }
+        } else if hands_nothing_past_fragment
             && let Some(placed) = reused.placed.as_ref().filter(|placed| !placed.exports_payloads)
             && let Some(store) = self.run.pass.in_flow_block_cache_store()
         {
@@ -5266,7 +5404,9 @@ impl<'pass> BlockFormattingContext<'pass> {
         if block_container.node == self.run.box_ {
             self.root_flow_children.borrow_mut().clear();
         }
-        let mut lays_out_children_ahead = fragmentainer.is_none();
+        // NB: The run that measures the content of a multi-column box lays out every box in it once, in a column with no
+        //     end, so its children can be laid out ahead like those of a flow in no column.
+        let mut lays_out_children_ahead = fragmentainer.is_none() || self.measures_column_content();
         let mut summary = ChildrenSummary::default();
         let mut deferred_floats = Vec::new();
         if let Some(state) = fragmentation_state.as_mut() {
