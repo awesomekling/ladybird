@@ -595,31 +595,36 @@ impl ChildImpact {
                     }
                 })
         };
-        if new.payloads.current_color() != old.payloads.current_color()
-            || new.payloads.inherited_values() != old.payloads.inherited_values()
-            // https://drafts.csswg.org/css-color-adjust-1/#color-scheme-prop
-            // A child whose `color-scheme` is the one it inherits uses the scheme its parent uses.
-            || new.effective_color_scheme() != old.effective_color_scheme()
-            || new.facts().publication_dependency_flags() != old.facts().publication_dependency_flags()
-            || new.facts().display != old.facts().display
-            || ungrouped_inherited_moved()
-            // https://drafts.csswg.org/css-color-4/#resolving-other-colors
-            // A child inheriting a value that reads `currentcolor` resolves it against its own
-            // color, so the specified values the record retains reach the children where the
-            // colors they resolve to here did not move.
-            || crate::css::computed_longhand_table::inherited_inheritance_dependent_value_moved(
-                old.inheritance_dependent_values(),
-                new.inheritance_dependent_values(),
-            )
+        // OPTIMIZATION: An element that only took other custom properties from its parent holds the style it held, so
+        //               none of its values moved.
+        let holds_the_style = new.holds_the_style_of(old);
+        if !holds_the_style
+            && (new.payloads.current_color() != old.payloads.current_color()
+                || new.payloads.inherited_values() != old.payloads.inherited_values()
+                // https://drafts.csswg.org/css-color-adjust-1/#color-scheme-prop
+                // A child whose `color-scheme` is the one it inherits uses the scheme its parent uses.
+                || new.effective_color_scheme() != old.effective_color_scheme()
+                || new.facts().publication_dependency_flags() != old.facts().publication_dependency_flags()
+                || new.facts().display != old.facts().display
+                || ungrouped_inherited_moved()
+                // https://drafts.csswg.org/css-color-4/#resolving-other-colors
+                // A child inheriting a value that reads `currentcolor` resolves it against its own
+                // color, so the specified values the record retains reach the children where the
+                // colors they resolve to here did not move.
+                || crate::css::computed_longhand_table::inherited_inheritance_dependent_value_moved(
+                    old.inheritance_dependent_values(),
+                    new.inheritance_dependent_values(),
+                ))
         {
             return ChildImpact::All;
         }
         let impact = match ChildImpact::of_groups(&new.payloads, inherited) {
             ChildImpact::None
-                if crate::css::computed_longhand_table::non_inherited_inheritance_changes(
-                    old.inheritance_dependent_values(),
-                    new.inheritance_dependent_values(),
-                ) != 0 =>
+                if !holds_the_style
+                    && crate::css::computed_longhand_table::non_inherited_inheritance_changes(
+                        old.inheritance_dependent_values(),
+                        new.inheritance_dependent_values(),
+                    ) != 0 =>
             {
                 Self::ResetReaders
             }
@@ -893,6 +898,28 @@ impl Record {
             && self.rare().value_facts.publication_equals(&other.rare().value_facts)
             && self.holds_the_same_values_as(other)
             && self.rare().table_flags.publication_equals(&other.rare().table_flags)
+    }
+
+    /// Whether this record holds the very style of `other` over custom properties that can be others: each group, flag
+    /// and fact of `other` itself, as the record an element takes to hold the custom properties its parent hands down
+    /// anew does. The move between two such records damages nothing, and reaches the children through the custom
+    /// properties alone.
+    pub(in super::super) fn holds_the_style_of(&self, other: &Record) -> bool {
+        let (mine, theirs) = (self.rare(), other.rare());
+        self.facts() == other.facts()
+            && self.payloads.holds_the_payloads_of(&other.payloads)
+            && same_arc(self.custom_declarations(), other.custom_declarations())
+            && (Arc::ptr_eq(mine, theirs)
+                || (matches!(
+                    (&mine.longhand_home, &theirs.longhand_home),
+                    (LonghandHome::Groups, LonghandHome::Groups)
+                ) && Arc::ptr_eq(&mine.table_flags, &theirs.table_flags)
+                    && mine.value_facts.holds_the_facts_of(&theirs.value_facts)
+                    && mine.custom_property_reads == theirs.custom_property_reads
+                    && mine.reads == theirs.reads
+                    && mine.counter_style_environment_identity == theirs.counter_style_environment_identity
+                    && mine.animation_name_scope == theirs.animation_name_scope
+                    && mine.pseudo_element_styles == theirs.pseudo_element_styles))
     }
 
     /// Whether `other` holds the computed values this record does.

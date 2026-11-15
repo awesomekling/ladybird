@@ -1936,6 +1936,19 @@ impl StyleGroups {
             )
     }
 
+    /// Whether `other` holds the very same payload of every group, and the same values beside them: what a copy of
+    /// these groups holds, whatever custom properties and rare facts stand beside either.
+    pub(crate) fn holds_the_payloads_of(&self, other: &StyleGroups) -> bool {
+        self.reset == other.reset
+            && self.current_color == other.current_color
+            && self.root == other.root
+            && (self.inherited.ptr_eq(&other.inherited)
+                || (self.inherited_values() == other.inherited_values()
+                    && self.inherited.get().groups == other.inherited.get().groups))
+            && (self.rare.ptr_eq(&other.rare) || self.rare.get().groups == other.rare.get().groups)
+            && (self.visual.ptr_eq(&other.visual) || self.visual.get().groups == other.visual.get().groups)
+    }
+
     /// Whether `other` holds equal payloads of every group, and the same inherited bits and
     /// zoom: the very same ones where it holds a set itself, and else each group's very same
     /// payload or an equal one.
@@ -4199,6 +4212,29 @@ impl GroupValueFacts {
             .iter()
             .find(|(held, _)| *held == property)
             .map(|(_, value)| value)
+    }
+
+    /// Whether `other` holds these very facts: the same recorded values themselves, and equal ones beside them.
+    pub(crate) fn holds_the_facts_of(&self, other: &Self) -> bool {
+        fn same<T: ?Sized>(mine: Option<&std::sync::Arc<T>>, theirs: Option<&std::sync::Arc<T>>) -> bool {
+            match (mine, theirs) {
+                (None, None) => true,
+                (Some(mine), Some(theirs)) => std::sync::Arc::ptr_eq(mine, theirs),
+                _ => false,
+            }
+        }
+        same(
+            self.inheritance_dependent_values.as_ref(),
+            other.inheritance_dependent_values.as_ref(),
+        ) && same(
+            self.uncoordinated_background_values.as_ref(),
+            other.uncoordinated_background_values.as_ref(),
+        ) && self.effective_zoom.to_bits() == other.effective_zoom.to_bits()
+            && self.display_before_box_type_transformation == other.display_before_box_type_transformation
+            && self.effective_color_scheme == other.effective_color_scheme
+            && self.native_appearance_disabled == other.native_appearance_disabled
+            && self.read_in_place_bits == other.read_in_place_bits
+            && self.current_color_groups == other.current_color_groups
     }
 
     fn same_uncoordinated_background_values(&self, other: &Self) -> bool {

@@ -1039,8 +1039,18 @@ impl RetainedState {
         let Some(old) = self.computed_group_sets.style_record_view(old_style_record) else {
             return unreadable_record_damage();
         };
+        let facts = self.element_damage_facts(node, false);
+        // OPTIMIZATION: An element that only took other custom properties from its parent holds the style it held,
+        //               which damages nothing.
+        if old.animated_overlay.is_none() && new.holds_the_style_of(old.record) {
+            if facts.verifies_reads && element_record_damage_of_views(facts, RecordMove { old, new: new.view() }) != 0 {
+                eprintln!("a record holding the style of another damages what moves between them");
+                std::process::abort();
+            }
+            return 0;
+        }
         let new = new.view();
-        element_record_damage_of_views(self.element_damage_facts(node, false), RecordMove { old, new })
+        element_record_damage_of_views(facts, RecordMove { old, new })
     }
 
     /// What moving `node`'s pseudo-element of `pseudo_kind` from one installed record to another
