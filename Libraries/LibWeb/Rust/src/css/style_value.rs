@@ -417,8 +417,15 @@ const SHARED_INTEGERS: usize = 384;
 const SHARED_NUMBERS: usize = 256;
 const SHARED_LENGTHS: usize = 1024;
 const SHARED_PERCENTAGES: usize = 101;
-const SHARED_VALUE_COUNT: usize =
-    SHARED_KEYWORDS + SHARED_INTEGERS + SHARED_NUMBERS + SHARED_LENGTHS + SHARED_PERCENTAGES;
+// NB: A custom property declared `initial` holds the guaranteed-invalid value. Elements that declare the same share
+//     what their custom properties resolve to by the identity of the values they declare.
+const SHARED_GUARANTEED_INVALID: usize = 1;
+const SHARED_VALUE_COUNT: usize = SHARED_KEYWORDS
+    + SHARED_INTEGERS
+    + SHARED_NUMBERS
+    + SHARED_LENGTHS
+    + SHARED_PERCENTAGES
+    + SHARED_GUARANTEED_INVALID;
 static VALUES: [std::sync::OnceLock<StyleValueArc>; SHARED_VALUE_COUNT] =
     [const { std::sync::OnceLock::new() }; SHARED_VALUE_COUNT];
 
@@ -441,6 +448,7 @@ pub(crate) fn shared_style_value(value: StyleValueData) -> StyleValueArc {
         }
         StyleValueData::Percentage { value } => integer_index(*value, SHARED_PERCENTAGES)
             .map(|index| SHARED_KEYWORDS + SHARED_INTEGERS + SHARED_NUMBERS + SHARED_LENGTHS + index),
+        StyleValueData::GuaranteedInvalid => Some(SHARED_VALUE_COUNT - SHARED_GUARANTEED_INVALID),
         _ => None,
     };
     if let Some(index) = index {
