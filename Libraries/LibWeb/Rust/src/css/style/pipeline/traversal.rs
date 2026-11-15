@@ -1686,6 +1686,8 @@ impl<'a> Scratch<'a> {
         // properties beyond its own record, as do transitions, which start from the values that
         // moved. A custom property the element declares that is registered computes against the
         // element's own context, where one it only inherits arrives computed.
+        // NB: The element substitutes none of the custom properties that moved, so only a transition of a custom
+        //     property starts from them: one its transitions name, or one of `all`.
         if !records.pseudo_element_records(node).is_empty()
             || records.composition(node).is_some()
             || records.sampled_custom_properties(node).is_some()
@@ -1697,7 +1699,7 @@ impl<'a> Scratch<'a> {
                 old.longhand(LonghandID::new(
                     crate::css::property_metadata::property_id::TRANSITION_DURATION,
                 )),
-            )
+            ) && !crate::css::style_compute::custom_property_transition_entries(old.view().longhands()).is_empty()
             || old.custom_declarations().is_some_and(|declarations| {
                 declarations
                     .iter()

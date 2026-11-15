@@ -1,4 +1,4 @@
-restyled [theme, fades, all, named]
+restyled [theme, all, named]
 plain: blue
 fades: blue
 all: blue
