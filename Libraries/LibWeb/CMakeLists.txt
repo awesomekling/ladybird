@@ -226,6 +226,7 @@ set(SOURCES
     DOM/PseudoElement.cpp
     DOM/QualifiedName.cpp
     DOM/Range.cpp
+    DOM/RootedNodeList.cpp
     DOM/SelectorQuery.cpp
     DOM/ShadowRoot.cpp
     DOM/Slot.cpp
