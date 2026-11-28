@@ -16,6 +16,9 @@ use crate::css::ffi_support::OwnedBox;
 use std::convert::Infallible;
 use std::ffi::c_void;
 
+use crate::dom::child_index::ChildIndexAmong;
+use crate::dom::child_index::child_index;
+use crate::dom::child_index::child_index_from_end;
 use crate::dom::element::Element;
 use crate::dom::element_core::Attribute;
 use crate::dom::node::Node;
@@ -40,17 +43,6 @@ use super::style::selector_evaluation::SelectorEvaluator;
 use super::style::selector_evaluation::SelectorSubject;
 use super::style::selector_evaluation::SelectorTree;
 
-/// Which of an element's child indices a child-indexed pseudo-class counts with.
-#[repr(u8)]
-#[derive(Clone, Copy)]
-pub enum FfiChildIndex {
-    FromStart,
-    FromEnd,
-    /// Among the siblings with the element's local name and namespace.
-    OfTypeFromStart,
-    OfTypeFromEnd,
-}
-
 /// What the matcher asks of the DOM that the nodes' cores do not tell it. Every node is a live node for the duration of
 /// the query, and every node a callback returns is one too, or null for none.
 #[repr(C)]
@@ -58,8 +50,6 @@ pub struct FfiDomSelectorCallbacks {
     /// Writes the declarations of the element's style attribute to the attribute, as C++ does before the attribute is
     /// read. Only called before the attributes of the element are borrowed, and changes no other element.
     pub synchronize_style_attribute: unsafe extern "C" fn(element: &NodeCell),
-    /// The element's 1-based index among its inclusive element siblings, as `which` counts them.
-    pub child_index: unsafe extern "C" fn(element: &NodeCell, which: FfiChildIndex) -> u32,
     /// The bit of the DOM's filter of the attribute names and classes in a subtree for a name.
     pub name_filter_bit: unsafe extern "C" fn(local_name: usize) -> u64,
     /// Whether the element is in a state, by the state's `StateFact` value.
@@ -940,13 +930,18 @@ impl<'q> SelectorSubject for DomSubject<'q> {
         if position.step == 0 && position.offset <= NEAR_POSITION_SCAN_LIMIT {
             return Ok(None);
         }
-        let which = match (position.of_type, position.from_end) {
-            (false, false) => FfiChildIndex::FromStart,
-            (false, true) => FfiChildIndex::FromEnd,
-            (true, false) => FfiChildIndex::OfTypeFromStart,
-            (true, true) => FfiChildIndex::OfTypeFromEnd,
+        let Some(element) = node.as_element() else {
+            return Ok(None);
         };
-        Ok(Some(i64::from(unsafe { (self.dom.child_index)(node.cell(), which) })))
+        let among = match position.of_type {
+            false => ChildIndexAmong::Siblings,
+            true => ChildIndexAmong::SiblingsOfType,
+        };
+        let index = match position.from_end {
+            false => child_index(element, among),
+            true => child_index_from_end(element, among),
+        };
+        Ok(Some(i64::from(index)))
     }
 
     const REMEMBERS_ANCESTOR_ANSWERS: bool = true;
