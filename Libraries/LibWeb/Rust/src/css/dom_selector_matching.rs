@@ -16,9 +16,12 @@ use crate::css::ffi_support::OwnedBox;
 use std::convert::Infallible;
 use std::ffi::c_void;
 
+use crate::dom::element::Element;
+use crate::dom::element_core::Attribute;
 use crate::dom::node::Node;
 use crate::dom::node::NodeCell;
 use crate::dom::node_core::NodeType;
+use crate::dom::strings::FlyStringField;
 use crate::stage::MainThread;
 
 use smallvec::SmallVec;
@@ -37,31 +40,6 @@ use super::style::selector_evaluation::SelectorEvaluator;
 use super::style::selector_evaluation::SelectorSubject;
 use super::style::selector_evaluation::SelectorTree;
 
-/// What a selector compares of one element: its names, as interned string identities, and how many of its attributes
-/// have a local name the matcher asked for.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct FfiDomElement {
-    pub local_name: usize,
-    /// Zero for the null namespace.
-    pub namespace_uri: usize,
-    /// Zero for an element with no id.
-    pub id: usize,
-    pub classes: *const usize,
-    pub class_count: usize,
-    pub attribute_count: usize,
-}
-
-/// One attribute of an element, borrowed from the DOM until it next changes.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct FfiDomAttribute<'a> {
-    pub local_name: usize,
-    /// Zero for the null namespace.
-    pub namespace_uri: usize,
-    pub value: FfiUtf16View<'a>,
-}
-
 /// Which of an element's child indices a child-indexed pseudo-class counts with.
 #[repr(u8)]
 #[derive(Clone, Copy)]
@@ -77,40 +55,15 @@ pub enum FfiChildIndex {
 /// the query, and every node a callback returns is one too, or null for none.
 #[repr(C)]
 pub struct FfiDomSelectorCallbacks {
-    /// Writes the element to `facts`, and the first `capacity` of its attributes whose local name is one of the
-    /// `name_count` in `names` to `attributes`.
-    pub element: unsafe extern "C" fn(
-        element: &NodeCell,
-        names: *const usize,
-        name_count: usize,
-        attributes: *mut FfiDomAttribute,
-        capacity: usize,
-        facts: &mut FfiDomElement,
-    ),
-    /// Whether two elements have the same local name and namespace.
-    pub same_type: unsafe extern "C" fn(element: &NodeCell, other: &NodeCell) -> bool,
+    /// Writes the declarations of the element's style attribute to the attribute, as C++ does before the attribute is
+    /// read. Only called before the attributes of the element are borrowed, and changes no other element.
+    pub synchronize_style_attribute: unsafe extern "C" fn(element: &NodeCell),
     /// The element's 1-based index among its inclusive element siblings, as `which` counts them.
     pub child_index: unsafe extern "C" fn(element: &NodeCell, which: FfiChildIndex) -> u32,
-    /// The first element after `node` in tree order that is a descendant of `root` and, unless `local_name` is zero,
-    /// has that local name, and unless `class_name` is zero, has that class, skipping the subtrees whose name filter
-    /// lacks one of the bits of `names`. `node` is `root` itself to start. Both may be any node.
-    pub next_element_in_subtree: unsafe extern "C" fn(
-        node: &NodeCell,
-        root: &NodeCell,
-        local_name: usize,
-        class_name: usize,
-        names: u64,
-    ) -> *const NodeCell,
     /// The bit of the DOM's filter of the attribute names and classes in a subtree for a name.
     pub name_filter_bit: unsafe extern "C" fn(local_name: usize) -> u64,
-    /// The name filter of the whole tree `node` is in, with every bit set where no one element holds that tree.
-    pub tree_name_filter: unsafe extern "C" fn(node: &NodeCell) -> u64,
     /// The shadow root the element hosts, or null.
     pub shadow_root: unsafe extern "C" fn(element: &NodeCell) -> *const NodeCell,
-    /// Whether the element's id (or one of its classes, when `is_class` is set) is `name`, compared ASCII
-    /// case-insensitively.
-    pub id_or_class_equals_ignoring_ascii_case:
-        unsafe extern "C" fn(element: &NodeCell, is_class: bool, name: usize) -> bool,
     /// Whether the element is in a state, by the state's `StateFact` value.
     pub matches_state: unsafe extern "C" fn(element: &NodeCell, state: u8) -> bool,
     /// The element's resolved language tag, or an empty view when it has none. Only valid until the next callback, which
@@ -260,8 +213,6 @@ pub struct DomSelectorProgram {
     /// The raw identity of each name the selectors compare, by its atom, in an open-addressed table at most half full,
     /// whose size is a power of two: a name lies in the slot its atom's low bits name, or in the first free one after.
     raws: Box<[(StyleAtomID, usize)]>,
-    /// Every attribute name the program's selectors compare, in either case: an element's row is read with them.
-    attribute_names: Box<[usize]>,
     /// The roots of the entries that can name an element. A query names elements, and a pseudo-element is not one.
     /// The local name every subject requires its element to have, or zero.
     subject_local_name: usize,
@@ -307,7 +258,6 @@ fn raw_of(atom: StyleAtomID) -> usize {
 struct QueryNames {
     /// The raw identity of every name the query compares, which it looks up once here.
     raws: Vec<(StyleAtomID, usize)>,
-    attribute_names: Vec<usize>,
     /// A walk up or back tests each element it passes once, and so does a count of the siblings `of S` matches, unless
     /// what it tests reaches beyond the element it tests.
     lone_match_repeats_questions: bool,
@@ -319,7 +269,6 @@ fn collect_query_names(selectors: &[crate::css::selector::SelectorRef]) -> Query
     let mut found = QueryNames::default();
     let QueryNames {
         raws,
-        attribute_names,
         lone_match_repeats_questions,
         descendant_lists,
     } = &mut found;
@@ -357,14 +306,6 @@ fn collect_query_names(selectors: &[crate::css::selector::SelectorRef]) -> Query
                     })
                 {
                     descendant_lists.push((list, names_required_under_anchor(pseudo_class.argument_selector_list)));
-                }
-                if let SimpleSelector::Attribute(attribute) = simple {
-                    let name = attribute.qualified_name.name;
-                    for name in [raw_of(name), raw_of(atoms.ascii_lowercase(name))] {
-                        if !attribute_names.contains(&name) {
-                            attribute_names.push(name);
-                        }
-                    }
                 }
             },
             lone_match_repeats_questions,
@@ -515,7 +456,6 @@ pub unsafe extern "C" fn rust_dom_selector_program_create(
         .collect();
     let QueryNames {
         mut raws,
-        attribute_names,
         lone_match_repeats_questions,
         descendant_lists,
     } = collect_query_names(&selectors);
@@ -542,7 +482,6 @@ pub unsafe extern "C" fn rust_dom_selector_program_create(
         }
     }
     Box::into_raw(Box::new(DomSelectorProgram {
-        attribute_names: attribute_names.into_boxed_slice(),
         raws: raw_table(raws),
         subject_local_name: subject.local_name,
         subject_classes: subject.classes.into_boxed_slice(),
@@ -731,13 +670,6 @@ struct DomSubject<'q> {
     main_thread: &'q MainThread<'static>,
     query: &'q DomSelectorProgram,
     ids_and_classes_ignore_case: bool,
-    /// The element read last, whose facts are in `element`. The attributes the program names of the element whose
-    /// attributes were asked for last, `attributes_of`, are in `attributes`: an element's attributes are read the first
-    /// time a test asks for them, as most elements fail a selector before it tests an attribute.
-    current: Option<DomNode<'q>>,
-    element: FfiDomElement,
-    attributes_of: Option<DomNode<'q>>,
-    attributes: SmallVec<[FfiDomAttribute<'q>; 4]>,
     /// Whether the query remembers answers, which a query matching one element does only if it can ask a question
     /// twice.
     remembers_answers: bool,
@@ -809,9 +741,9 @@ impl<'q> DomSubject<'q> {
         raw
     }
 
-    /// The filter of the local names, ids and classes of the elements under `anchor`, read through a copy of `facts`.
+    /// The filter of the local names, ids and classes of the elements under `anchor`.
     #[inline(never)]
-    fn subtree_name_filter(tree: DomTree<'q>, facts: FfiDomElement, anchor: DomNode<'q>) -> SubtreeNameFilter {
+    fn subtree_name_filter(tree: DomTree<'q>, anchor: DomNode<'q>) -> SubtreeNameFilter {
         let mut filter = [0u64; SUBTREE_NAME_FILTER_WORDS];
         let mut add = |raw: usize| {
             if raw != 0 {
@@ -820,138 +752,101 @@ impl<'q> DomSubject<'q> {
                 }
             }
         };
-        let mut facts = facts;
-        let mut element = tree.next_in_subtree(anchor, anchor);
-        while let Some(current) = element {
-            // SAFETY: The host writes the element's facts, and no attribute where it is asked for none.
-            unsafe {
-                (tree.dom.element)(current.cell(), std::ptr::null(), 0, std::ptr::null_mut(), 0, &mut facts);
+        let mut node = tree.next_in_subtree(anchor, anchor);
+        while let Some(current) = node {
+            let element = current.as_element().expect("the walk visits elements");
+            add(element.local_name().raw_identity());
+            add(element.id().map_or(0, FlyStringField::raw_identity));
+            for class in element.classes() {
+                add(class.raw_identity());
             }
-            add(facts.local_name);
-            add(facts.id);
-            // SAFETY: The classes stay as they are until the DOM next changes, which it does not during a query.
-            for &class in unsafe { ak::slice_from_raw_parts(facts.classes, facts.class_count) } {
-                add(class);
-            }
-            element = tree.next_in_subtree(current, anchor);
+            node = tree.next_in_subtree(current, anchor);
         }
         std::rc::Rc::new(filter)
     }
-
-    /// Reads the attributes the program names of `node` into `attributes`.
-    #[inline(never)]
-    fn fill_attributes(&mut self, node: DomNode<'q>) {
-        let dom = self.dom;
-        let names = &self.query.attribute_names;
-        let mut facts = self.element;
-        self.attributes.clear();
-        let capacity = self.attributes.capacity();
-        // SAFETY: The host writes at most the capacity it is told of, and says how many there are, all of which it
-        //         wrote once they fit.
-        unsafe {
-            (dom.element)(
-                node.cell(),
-                names.as_ptr(),
-                names.len(),
-                self.attributes.as_mut_ptr(),
-                capacity,
-                &mut facts,
-            );
-            let count = facts.attribute_count;
-            if count > capacity {
-                self.attributes.reserve_exact(count);
-                (dom.element)(
-                    node.cell(),
-                    names.as_ptr(),
-                    names.len(),
-                    self.attributes.as_mut_ptr(),
-                    count,
-                    &mut facts,
-                );
-            }
-            self.attributes.set_len(count);
-        }
-        self.attributes_of = Some(node);
-    }
 }
 
-/// An element, with the subject whose names its atoms are and which holds its facts.
+/// An element, with the subject whose names its atoms are.
 struct DomFeatures<'s, 'q> {
     subject: &'s DomSubject<'q>,
-    node: DomNode<'q>,
+    element: Element<'q>,
 }
 
-impl DomFeatures<'_, '_> {
-    /// The subject holds the facts of the element read last, which is this one: an element's features are asked of as
-    /// soon as it is read.
-    #[inline]
-    fn element(&self) -> &FfiDomElement {
-        debug_assert!(self.subject.current == Some(self.node));
-        &self.subject.element
-    }
+/// Whether an interned string is the one with the raw identity `raw`, compared ASCII case-insensitively.
+fn equals_raw_ignoring_ascii_case(string: &FlyStringField, raw: usize) -> bool {
+    // SAFETY: A raw identity the query compares names a string that the process atoms keep alive.
+    let other = unsafe { ak::utf16_string_units(&raw) };
+    crate::dom::strings::equals_ignoring_ascii_case(string.units(), other)
 }
 
 impl<'q> ElementFeatures for DomFeatures<'_, 'q> {
-    type Attribute = FfiDomAttribute<'q>;
+    type Attribute = &'q Attribute;
 
     #[inline]
     fn local_name_is(&self, name: StyleAtomID) -> bool {
-        self.element().local_name == self.subject.raw(name)
+        self.element.local_name().raw_identity() == self.subject.raw(name)
     }
 
     #[inline]
     fn namespace_is(&self, namespace: StyleAtomID) -> bool {
-        self.element().namespace_uri == self.subject.raw(namespace)
+        // NB: The atom of the null namespace is NONE, whose raw identity is zero, as is that of an empty namespace.
+        let namespace_uri = self
+            .element
+            .namespace()
+            .filter(|namespace| !namespace.is_empty())
+            .map_or(0, FlyStringField::raw_identity);
+        namespace_uri == self.subject.raw(namespace)
     }
 
     #[inline]
     fn has_id(&self, id: StyleAtomID) -> bool {
         let id = self.subject.raw(id);
-        if self.element().id == 0 || id == 0 {
+        let Some(element_id) = self.element.id() else {
+            return false;
+        };
+        if id == 0 {
             return false;
         }
         match self.subject.ids_and_classes_ignore_case {
-            true => unsafe { (self.subject.dom.id_or_class_equals_ignoring_ascii_case)(self.node.cell(), false, id) },
-            false => self.element().id == id,
+            true => equals_raw_ignoring_ascii_case(element_id, id),
+            false => element_id.raw_identity() == id,
         }
     }
 
     #[inline]
     fn has_class(&self, class: StyleAtomID) -> bool {
         let class = self.subject.raw(class);
-        let element = self.element();
-        if element.class_count == 0 || class == 0 {
+        let classes = self.element.classes();
+        if classes.is_empty() || class == 0 {
             return false;
         }
         match self.subject.ids_and_classes_ignore_case {
-            true => unsafe { (self.subject.dom.id_or_class_equals_ignoring_ascii_case)(self.node.cell(), true, class) },
-            false => unsafe { ak::slice_from_raw_parts(element.classes, element.class_count) }.contains(&class),
+            true => classes
+                .iter()
+                .any(|element_class| equals_raw_ignoring_ascii_case(element_class, class)),
+            false => classes
+                .iter()
+                .any(|element_class| element_class.raw_identity() == class),
         }
     }
 
     #[inline]
-    fn attributes_named(
-        &self,
-        name: StyleAtomID,
-        any_namespace: bool,
-    ) -> impl Iterator<Item = FfiDomAttribute<'q>> + '_ {
+    fn attributes_named(&self, name: StyleAtomID, any_namespace: bool) -> impl Iterator<Item = &'q Attribute> + '_ {
         let name = self.subject.raw(name);
-        debug_assert!(self.subject.current == Some(self.node));
-        debug_assert!(self.subject.query.attribute_names.is_empty() || self.subject.attributes_of == Some(self.node));
-        self.subject
-            .attributes
-            .iter()
-            .copied()
-            .filter(move |attribute| attribute.local_name == name && (any_namespace || attribute.namespace_uri == 0))
+        // NB: An attribute in an empty namespace is in no namespace to a selector.
+        self.element.attributes().iter().filter(move |attribute| {
+            attribute.name().local_name().raw_identity() == name
+                && (any_namespace || attribute.name().namespace().is_none_or(FlyStringField::is_empty))
+        })
     }
 }
 
 impl<'q> SelectorSubject for DomSubject<'q> {
     type Node = DomNode<'q>;
     type Tree = DomTree<'q>;
-    /// An element's facts are read into the subject, where they stay until another element is read.
-    type Row = DomNode<'q>;
-    type Attribute = FfiDomAttribute<'q>;
+    /// An element's facts are read from its core in place.
+    type Row = Element<'q>;
+    type Attribute = &'q Attribute;
     type Features<'s>
         = DomFeatures<'s, 'q>
     where
@@ -967,77 +862,69 @@ impl<'q> SelectorSubject for DomSubject<'q> {
     }
 
     #[inline]
-    fn row(&mut self, node: DomNode<'q>) -> Result<DomNode<'q>, Infallible> {
-        if self.current != Some(node) {
-            // SAFETY: The host writes the element's facts, and no attribute where it is asked for none.
-            unsafe {
-                (self.dom.element)(
-                    node.cell(),
-                    std::ptr::null(),
-                    0,
-                    std::ptr::null_mut(),
-                    0,
-                    &mut self.element,
-                );
-            }
-            self.current = Some(node);
-        }
-        Ok(node)
+    fn row(&mut self, node: DomNode<'q>) -> Result<Element<'q>, Infallible> {
+        // NB: The evaluator asks no shadow root for a fact.
+        Ok(node.as_element().expect("a selector reads the facts of an element"))
     }
 
     #[inline]
-    fn read_attributes(&mut self, node: DomNode<'q>) {
-        if self.attributes_of != Some(node) && !self.query.attribute_names.is_empty() {
-            self.fill_attributes(node);
+    fn read_attributes(&mut self, element: Element<'q>) {
+        if element.core().style_attribute_is_dirty() {
+            // SAFETY: The element is live, and nothing borrows its attributes until a test reads them, after this.
+            unsafe { (self.dom.synchronize_style_attribute)(element.node().cell()) };
         }
     }
 
     #[inline]
-    fn features(&self, node: DomNode<'q>) -> DomFeatures<'_, 'q> {
-        DomFeatures { subject: self, node }
+    fn features(&self, element: Element<'q>) -> DomFeatures<'_, 'q> {
+        DomFeatures { subject: self, element }
     }
 
     #[inline]
-    fn same_type(&self, node: DomNode<'q>, other: DomNode<'q>) -> bool {
-        unsafe { (self.dom.same_type)(node.cell(), other.cell()) }
+    fn same_type(&self, element: Element<'q>, other: Element<'q>) -> bool {
+        element.local_name().raw_identity() == other.local_name().raw_identity()
+            && element.namespace().map(FlyStringField::raw_identity)
+                == other.namespace().map(FlyStringField::raw_identity)
     }
 
     #[inline]
-    fn attribute_value_atom(&self, _attribute: FfiDomAttribute<'q>) -> StyleAtomID {
+    fn attribute_value_atom(&self, _attribute: &'q Attribute) -> StyleAtomID {
         StyleAtomID::NONE
     }
 
     #[inline]
-    fn attribute_value_text(&self, attribute: FfiDomAttribute<'q>) -> Option<TokenizerInput<'_>> {
-        // An empty value crosses as an empty view.
-        Some(attribute.value.units().unwrap_or(TokenizerInput::Utf16(&[])))
+    fn attribute_value_text(&self, attribute: &'q Attribute) -> Option<TokenizerInput<'_>> {
+        Some(match attribute.value().units() {
+            ak::Utf16StringUnits::Ascii(units) | ak::Utf16StringUnits::Latin1(units) => TokenizerInput::Latin1(units),
+            ak::Utf16StringUnits::Utf16(units) => TokenizerInput::Utf16(units),
+        })
     }
 
     #[inline]
-    fn has_state(&self, node: DomNode<'q>, fact: StateFact) -> bool {
-        unsafe { (self.dom.matches_state)(node.cell(), fact as u8) }
+    fn has_state(&self, element: Element<'q>, fact: StateFact) -> bool {
+        unsafe { (self.dom.matches_state)(element.node().cell(), fact as u8) }
     }
 
     #[inline]
-    fn language_tag(&self, node: DomNode<'q>) -> TokenizerInput<'_> {
-        unsafe { (self.dom.language)(node.cell()).units() }.unwrap_or_default()
+    fn language_tag(&self, element: Element<'q>) -> TokenizerInput<'_> {
+        unsafe { (self.dom.language)(element.node().cell()).units() }.unwrap_or_default()
     }
 
     #[inline]
-    fn directionality_is(&self, node: DomNode<'q>, direction: StyleAtomID) -> bool {
-        let actual = unsafe { (self.dom.directionality)(node.cell()) };
+    fn directionality_is(&self, element: Element<'q>, direction: StyleAtomID) -> bool {
+        let actual = unsafe { (self.dom.directionality)(element.node().cell()) };
         actual == self.raw(direction)
     }
 
     #[inline]
-    fn has_custom_state(&self, node: DomNode<'q>, state: StyleAtomID) -> bool {
+    fn has_custom_state(&self, element: Element<'q>, state: StyleAtomID) -> bool {
         let state = self.raw(state);
-        state != 0 && unsafe { (self.dom.has_custom_state)(node.cell(), state) }
+        state != 0 && unsafe { (self.dom.has_custom_state)(element.node().cell(), state) }
     }
 
     #[inline]
-    fn heading_level(&self, node: DomNode<'q>) -> u8 {
-        u8::try_from(unsafe { (self.dom.heading_level)(node.cell()) }).unwrap_or(0)
+    fn heading_level(&self, element: Element<'q>) -> u8 {
+        u8::try_from(unsafe { (self.dom.heading_level)(element.node().cell()) }).unwrap_or(0)
     }
 
     #[inline]
@@ -1191,7 +1078,7 @@ impl<'q> SelectorSubject for DomSubject<'q> {
                     }
                     ancestor = tree.parent(current);
                 }
-                Self::subtree_name_filter(tree, self.element, anchor)
+                Self::subtree_name_filter(tree, anchor)
             });
             let lacks = |raw: usize| {
                 subtree_name_filter_bits(raw)
@@ -1266,17 +1153,6 @@ impl<'q> DomQuery<'q> {
                     main_thread,
                     query: program,
                     ids_and_classes_ignore_case: query.ids_and_classes_ignore_case,
-                    current: None,
-                    element: FfiDomElement {
-                        local_name: 0,
-                        namespace_uri: 0,
-                        id: 0,
-                        classes: std::ptr::null(),
-                        class_count: 0,
-                        attribute_count: 0,
-                    },
-                    attributes_of: None,
-                    attributes: SmallVec::new(),
                     remembers_answers: !matches_one_element || program.lone_match_repeats_questions,
                     answers: None,
                     raws: Default::default(),
@@ -1364,10 +1240,12 @@ pub unsafe extern "C" fn rust_dom_selector_query_subtree(
         return;
     }
     let dom = query_run.evaluator.subject.dom;
+    // SAFETY: Guaranteed by the caller.
+    let root = unsafe { Node::from_cell(root, &main_thread) };
     // A tree lacking a name of every selector holds no match. A class compared ignoring case can be written in another
     // case than the element's.
     let ignore_case = query_run.evaluator.subject.ids_and_classes_ignore_case;
-    let tree_names = unsafe { (dom.tree_name_filter)(root) };
+    let tree_names = tree_name_filter(root);
     if query_run.query.names_in_the_tree.iter().all(|names| {
         names.iter().any(|&(is_class, name)| {
             !(is_class && ignore_case) && tree_names & unsafe { (dom.name_filter_bit)(name) } == 0
@@ -1384,18 +1262,142 @@ pub unsafe extern "C" fn rust_dom_selector_query_subtree(
         false => query_run.query.subject_classes.first().copied().unwrap_or(0),
     };
     let names = query_run.query.required_name_bits(dom, ignore_case);
-    // SAFETY: The host returns null or a live element, and the DOM does not change during the call.
-    let next = |node: &NodeCell| unsafe {
-        optional_node(
-            (dom.next_element_in_subtree)(node, root, local_name, class_name, names),
-            &main_thread,
-        )
-    };
+    let next = |node| next_element_in_subtree(node, root, local_name, class_name, names);
     let mut candidate = next(root);
     while let Some(element) = candidate {
-        if query_run.matches(element) && unsafe { found(context, element.cell()) } {
+        if query_run.matches(element.node()) && unsafe { found(context, element.node().cell()) } {
             return;
         }
-        candidate = next(element.cell());
+        candidate = next(element.node());
+    }
+}
+
+/// The filter of the attribute names and classes in the whole tree `node` is in, with every bit set where no one
+/// element holds that tree. The filter of a document's one element child holds every name of the document's tree.
+fn tree_name_filter(node: Node<'_>) -> u64 {
+    let root = node.root();
+    match root.node_type() {
+        NodeType::DOCUMENT_NODE => root
+            .children()
+            .find_map(Node::as_element)
+            .map_or(0, Element::subtree_name_filter),
+        NodeType::ELEMENT_NODE => root.as_element().map_or(0, Element::subtree_name_filter),
+        _ => u64::MAX,
+    }
+}
+
+/// The first element after `node` in tree order that is a descendant of `root` and, unless `local_name` is zero, has
+/// that local name, and unless `class_name` is zero, has that class, skipping the subtrees whose name filter lacks one
+/// of the bits of `names`. `node` is `root` itself to start.
+fn next_element_in_subtree<'q>(
+    node: Node<'q>,
+    root: Node<'q>,
+    local_name: usize,
+    class_name: usize,
+    names: u64,
+) -> Option<Element<'q>> {
+    let mut next = node.next_in_subtree(root);
+    while let Some(current) = next {
+        if let Some(element) = current.as_element() {
+            // No element of this subtree has every name, so skip past it.
+            if element.subtree_name_filter() & names != names {
+                next = current.next_after_subtree(root);
+                continue;
+            }
+            if (local_name == 0 || element.local_name().raw_identity() == local_name)
+                && (class_name == 0 || element.classes().iter().any(|class| class.raw_identity() == class_name))
+            {
+                return Some(element);
+            }
+        }
+        next = current.next_in_subtree(root);
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dom::element_core::ElementCore;
+    use crate::dom::qualified_name::QualifiedNameField;
+    use crate::dom::test_tree;
+
+    fn element<'a>(main_thread: &'a MainThread<'_>, local_name: &str, classes: &[&str], filter: u64) -> Element<'a> {
+        test_tree::element(
+            main_thread,
+            ElementCore::for_test(QualifiedNameField::for_test(local_name, None))
+                .with_classes_for_test(classes)
+                .with_subtree_name_filter_for_test(filter),
+        )
+    }
+
+    fn raw(string: &str) -> usize {
+        FlyStringField::for_test(string).raw_identity()
+    }
+
+    #[test]
+    fn the_walk_finds_elements_with_the_name_and_class_and_skips_subtrees_lacking_names() {
+        let main_thread = MainThread::for_test();
+        // root
+        //   div.a (filter 0b11)
+        //     span.a (filter 0b11)
+        //   div.a (filter 0b01)
+        //     span.a (filter 0b11)
+        //   text
+        //   p.b (filter 0b11)
+        let root = test_tree::node(&main_thread, NodeType::DOCUMENT_FRAGMENT_NODE);
+        let first_div = element(&main_thread, "div", &["a"], 0b11);
+        let first_span = element(&main_thread, "span", &["a"], 0b11);
+        let second_div = element(&main_thread, "div", &["a"], 0b01);
+        let second_span = element(&main_thread, "span", &["a"], 0b11);
+        let text = test_tree::node(&main_thread, NodeType::TEXT_NODE);
+        let p = element(&main_thread, "p", &["b"], 0b11);
+        test_tree::append_child(first_div.node(), first_span.node());
+        test_tree::append_child(second_div.node(), second_span.node());
+        for child in [first_div.node(), second_div.node(), text, p.node()] {
+            test_tree::append_child(root, child);
+        }
+
+        let walk = |local_name, class_name, names| {
+            core::iter::successors(
+                next_element_in_subtree(root, root, local_name, class_name, names),
+                |element| next_element_in_subtree(element.node(), root, local_name, class_name, names),
+            )
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(walk(0, 0, 0), [first_div, first_span, second_div, second_span, p]);
+        assert_eq!(walk(raw("span"), 0, 0), [first_span, second_span]);
+        assert_eq!(walk(0, raw("b"), 0), [p]);
+        assert_eq!(walk(0, 0, 0b10), [first_div, first_span, p]);
+        assert_eq!(walk(raw("span"), raw("a"), 0b10), [first_span]);
+        // NB: The walk stays under the node it starts from.
+        assert_eq!(
+            next_element_in_subtree(first_div.node(), first_div.node(), 0, 0, 0),
+            Some(first_span)
+        );
+        assert_eq!(
+            next_element_in_subtree(first_span.node(), first_div.node(), 0, 0, 0),
+            None
+        );
+    }
+
+    #[test]
+    fn the_filter_of_a_tree_is_that_of_its_root_element() {
+        let main_thread = MainThread::for_test();
+        let document = test_tree::node(&main_thread, NodeType::DOCUMENT_NODE);
+        assert_eq!(tree_name_filter(document), 0);
+        let doctype = test_tree::node(&main_thread, NodeType::DOCUMENT_TYPE_NODE);
+        let html = element(&main_thread, "html", &[], 0b101);
+        let body = element(&main_thread, "body", &[], 0b100);
+        test_tree::append_child(document, doctype);
+        test_tree::append_child(document, html.node());
+        test_tree::append_child(html.node(), body.node());
+        assert_eq!(tree_name_filter(body.node()), 0b101);
+        assert_eq!(tree_name_filter(document), 0b101);
+
+        let detached = element(&main_thread, "div", &[], 0b10);
+        assert_eq!(tree_name_filter(detached.node()), 0b10);
+        let fragment = test_tree::node(&main_thread, NodeType::DOCUMENT_FRAGMENT_NODE);
+        assert_eq!(tree_name_filter(fragment), u64::MAX);
     }
 }
