@@ -214,6 +214,7 @@ set(SOURCES
     DOM/MutationType.cpp
     DOM/NamedNodeMap.cpp
     DOM/Node.cpp
+    DOM/NodeClassSteps.cpp
     DOM/NodeFilter.cpp
     DOM/NodeIdentity.cpp
     DOM/NodeIterator.cpp
@@ -1026,6 +1027,7 @@ sync_rust_crate_ffi_headers(
         Compositor/RenderClockRustFFI.h
         Animations/RustFFI.h
         DOM/RustFFI.h
+        DOM/NodeClassHeadersGenerated.h
         DOM/NodeClassesGenerated.h
 )
 add_dependencies(LibWeb libweb_rust-ffi-headers)
